@@ -124,7 +124,7 @@ export function ChatView({sessionId}: {sessionId: number}) {
   const send = useAppStore((s) => s.sendMessage)
   const running = orchestratorRunning(agents)
   const anyRunning = agents.some((a) => a.status === 'running') // sub-agents can outlive the orchestrator
-  const lead = agents.find((a) => a.role === 'orchestrator')
+  const lead = agents.findLast((a) => a.role === 'orchestrator') // latest: earlier ones failed to launch
   const ctx = agentContext(lead)
   const st = session && STATUS_TEXT[session.status === 'done' && !session.agent_count ? 'new' : session.status]
 
