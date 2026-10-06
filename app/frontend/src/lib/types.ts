@@ -3,7 +3,7 @@
 
 export type SessionStatus = 'working' | 'done' | 'needs_you'
 export type AgentRole = 'orchestrator' | 'subagent'
-export type AgentStatus = 'running' | 'exited' | 'crashed'
+export type AgentStatus = 'running' | 'exited' | 'stopped' | 'crashed'
 export type TaskStatus = 'planned' | 'working' | 'blocked' | 'review' | 'done'
 export type NoteType = 'decision' | 'blocker' | 'heads_up' | 'done' | 'question'
 export type NoteStatus = 'open' | 'resolved'

@@ -71,7 +71,10 @@ export function subscribeEvents() {
     on('session_status_changed', (e) => st().sessionStatus(e.session_id, e.payload.status)),
     on('rate_limit_changed', (e) => st().setLimit(e.payload)),
     on('session_deleted', (e) => st().sessionDeleted(e.session_id)),
-    on('agent_updated', patch((d, a: Agent) => ({...d, agents: upsert(d.agents, a)}))),
+    on('agent_updated', (e) => {
+      st().agentSeen(e.session_id)
+      patch((d, a: Agent) => ({...d, agents: upsert(d.agents, a)}))(e)
+    }),
     on('task_updated', patch((d, t: Task) => ({...d, tasks: upsert(d.tasks, t)}))),
     on('chat_item', patch((d, c: ChatItem) => ({...d, chat: upsert(d.chat, c)}))),
     on('note_posted', patch((d, n: Note) => ({...d, notes: upsert(d.notes, n)}))),

@@ -42,6 +42,7 @@ type AppState = {
   // Event sinks (lib/events.ts).
   sessionCreated: (s: Session) => void
   sessionStatus: (sessionId: number, status: SessionStatus) => void
+  agentSeen: (sessionId: number) => void
   sessionDeleted: (sessionId: number) => void
   patchSession: (sessionId: number, f: (d: SessionData) => SessionData) => void
   agentEvent: (ev: AgentEvent) => void
@@ -169,13 +170,22 @@ export const useAppStore = create<AppState>((set, get) => {
     sessionCreated: (se) => set((s) => (s.sessions.some((x) => x.id === se.id) ? s : {sessions: [se, ...s.sessions]})),
     // A status other than done means the orchestrator exists, so the session is no longer new.
     sessionStatus: (sid, status) => set((s) => ({sessions: s.sessions.map((x) => (x.id === sid ? {...x, status, agent_count: x.agent_count || (status === 'done' ? 0 : 1)} : x))})),
+    // Any agent row (even a crashed orchestrator) means the session is no longer new.
+    agentSeen: (sid) => set((s) => ({sessions: s.sessions.map((x) => (x.id === sid && !x.agent_count ? {...x, agent_count: 1} : x))})),
     sessionDeleted: (sid) => {
       const {sessions, selectedSessionId} = get()
       const i = sessions.findIndex((x) => x.id === sid)
       if (i < 0) return
       const rest = sessions.filter((x) => x.id !== sid)
-      const {[sid]: _, ...data} = get().data
-      set({sessions: rest, data})
+      // SQLite reuses ids: drop every per-agent cache of the session so a new agent can't inherit its output.
+      const {[sid]: gone, ...data} = get().data
+      const ids = new Set(gone?.agents.map((a) => a.id))
+      const drop = <T,>(m: Record<number, T>) => Object.fromEntries(Object.entries(m).filter(([k]) => !ids.has(+k))) as Record<number, T>
+      set((s) => ({
+        sessions: rest, data,
+        agentEvents: drop(s.agentEvents), agentLoaded: drop(s.agentLoaded), lastLine: drop(s.lastLine),
+        selectedAgentId: s.selectedAgentId != null && ids.has(s.selectedAgentId) ? null : s.selectedAgentId,
+      }))
       if (selectedSessionId === sid) select(rest[Math.min(i, rest.length - 1)]?.id ?? null) // the next one, else the last
     },
     patchSession: (sid, f) => {

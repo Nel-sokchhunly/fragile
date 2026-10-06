@@ -13,7 +13,7 @@ type Props = {
   onSelect: () => void
 }
 
-const STATE_CLS = {running: 'text-status-working', exited: 'text-status-exited', crashed: 'text-status-crashed'} as const
+const STATE_CLS = {running: 'text-status-working', exited: 'text-status-exited', stopped: 'text-status-exited', crashed: 'text-status-crashed'} as const
 
 // Two lines: "#id name" + live state, then the latest activity (the task description when there is none yet;
 // the full description and process details are in the hover title). Tool lines are "name {json}".

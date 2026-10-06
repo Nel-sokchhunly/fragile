@@ -123,9 +123,10 @@ export function ChatView({sessionId}: {sessionId: number}) {
   const agents = useAppStore((s) => s.data[sessionId]?.agents ?? NO_AGENTS)
   const send = useAppStore((s) => s.sendMessage)
   const running = orchestratorRunning(agents)
+  const anyRunning = agents.some((a) => a.status === 'running') // sub-agents can outlive the orchestrator
   const lead = agents.find((a) => a.role === 'orchestrator')
   const ctx = agentContext(lead)
-  const st = session && STATUS_TEXT[session.status === 'done' && !agents.length ? 'new' : session.status]
+  const st = session && STATUS_TEXT[session.status === 'done' && !session.agent_count ? 'new' : session.status]
 
   return (
     <div className="flex h-full min-h-0 min-w-0 flex-col">
@@ -141,7 +142,7 @@ export function ChatView({sessionId}: {sessionId: number}) {
             </span>
           </div>
         </div>
-        {running && <StopButton sessionId={sessionId}/>}
+        {anyRunning && <StopButton sessionId={sessionId}/>}
       </header>
       {/* Absolutely positioned list: its height never depends on percentage resolution inside flex. */}
       <div className="relative min-h-0 flex-1">

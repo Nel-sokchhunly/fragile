@@ -49,7 +49,7 @@ const EventRow = memo(function EventRow({ev, start}: {ev: AgentEvent; start: num
   )
 })
 
-const STATE_CLS = {running: 'text-status-working', exited: 'text-status-exited', crashed: 'text-status-crashed'} as const
+const STATE_CLS = {running: 'text-status-working', exited: 'text-status-exited', stopped: 'text-status-exited', crashed: 'text-status-crashed'} as const
 
 // Own component so the 1s clock tick re-renders only this label, not the virtualized list.
 function Meta({agent, count}: {agent: Agent; count: number}) {

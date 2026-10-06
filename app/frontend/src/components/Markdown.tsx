@@ -1,5 +1,6 @@
 import {memo, useEffect, useState} from 'react'
 import ReactMarkdown, {type Components} from 'react-markdown'
+import {BrowserOpenURL} from '../../wailsjs/runtime/runtime'
 import {highlight} from '@/lib/shiki'
 
 function CodeBlock({code, lang}: {code: string; lang: string}) {
@@ -27,7 +28,10 @@ const components: Components = {
       ? <CodeBlock code={text.replace(/\n$/, '')} lang={lang ?? ''}/>
       : <code className="rounded-sm bg-surface-sunken px-1 py-px font-mono text-[0.85em]">{children}</code>
   },
-  a: ({children, href}) => <a href={href} target="_blank" rel="noreferrer">{children}</a>,
+  // Agent output is untrusted and target=_blank does nothing in the webview: only http(s) opens, in the system browser.
+  a: ({children, href}) => /^https?:\/\//i.test(href ?? '')
+    ? <a href={href} onClick={(e) => { e.preventDefault(); BrowserOpenURL(href!) }}>{children}</a>
+    : <span>{children}</span>,
 }
 
 export const Markdown = memo(function Markdown({children}: {children: string}) {

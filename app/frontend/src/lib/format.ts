@@ -33,18 +33,20 @@ export function agentLabel(a: Agent | undefined, t: Task | undefined) {
   return `#${a.id} ${a.role === 'orchestrator' ? 'orchestrator' : (t?.title ?? 'agent')}`
 }
 
-// Exact process state: running, exited, exited(1), crashed(-1).
+// Exact process state: running, exited, exited(1), stopped, crashed(-1).
 export function agentState(a: Agent) {
   if (a.status === 'running') return 'running'
   if (a.status === 'exited') return a.exit_code ? `exited(${a.exit_code})` : 'exited'
+  if (a.status === 'stopped') return 'stopped'
   return `crashed(${a.exit_code ?? '?'})`
 }
 
-// "2 running · 1 done" over the sub-agents (crashed ones counted separately), "no agents" when none.
+// "2 running · 1 done" over the sub-agents (stopped and crashed ones counted separately), "no agents" when none.
 export function agentSummary(agents: Agent[]) {
   const subs = agents.filter((a) => a.role === 'subagent')
   const n = (s: Agent['status']) => subs.filter((a) => a.status === s).length
   const parts = [`${n('running')} running`, `${n('exited')} done`]
+  if (n('stopped')) parts.push(`${n('stopped')} stopped`)
   if (n('crashed')) parts.push(`${n('crashed')} crashed`)
   return subs.length ? parts.join(' · ') : 'no agents'
 }
