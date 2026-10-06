@@ -6,8 +6,13 @@
 package notes
 
 import (
+	"context"
+	"errors"
 	"io"
 	"net/http"
+	"strconv"
+
+	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
 // Config holds the paths and settings the server needs.
@@ -24,11 +29,43 @@ type Server struct {
 	Config Config
 	Store  *Store
 	Log    *EventLog
+	Runner *Runner // launches sub-agents for spawn_subagent
 }
 
 // Handler returns the HTTP handler serving the MCP endpoint.
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) { io.WriteString(w, "ok\n") })
+	mux.Handle("/mcp/{agent_id}", s.mcpHandler())
 	return mux
+}
+
+type mcpServerKey struct{}
+
+// mcpHandler serves one MCP endpoint per agent at /mcp/{agent_id}. The agent is
+// resolved on every request (stateless transport), so identity always comes
+// from the URL, and the tool set is built for that agent's role.
+func (s *Server) mcpHandler() http.Handler {
+	h := mcp.NewStreamableHTTPHandler(func(r *http.Request) *mcp.Server {
+		srv, _ := r.Context().Value(mcpServerKey{}).(*mcp.Server)
+		return srv
+	}, &mcp.StreamableHTTPOptions{Stateless: true})
+	cache := mcp.NewSchemaCache()
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		id, err := strconv.ParseInt(r.PathValue("agent_id"), 10, 64)
+		if err != nil {
+			http.Error(w, "invalid agent id", http.StatusNotFound)
+			return
+		}
+		agent, err := s.Store.GetAgent(id)
+		if errors.Is(err, ErrNotFound) {
+			http.Error(w, "unknown agent", http.StatusNotFound)
+			return
+		} else if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		srv := s.newMCPServer(agent, cache)
+		h.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), mcpServerKey{}, srv)))
+	})
 }
