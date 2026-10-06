@@ -1,6 +1,7 @@
 import {useDeferredValue, useEffect, useState} from 'react'
 import {AgentsPanel} from '@/components/AgentsPanel'
 import {NotesPanel} from '@/components/NotesPanel'
+import {DeleteSessionDialog} from '@/components/DeleteSessionDialog'
 import {NewSessionDialog} from '@/components/NewSessionDialog'
 import {SessionsSidebar} from '@/components/SessionsSidebar'
 import {Button} from '@/components/ui/button'
@@ -88,7 +89,7 @@ export default function App() {
     window.addEventListener('resize', fit)
     return () => { clearInterval(t); window.removeEventListener('resize', fit) }
   }, [sidebar])
-  // Keyboard: Cmd/Ctrl+B sidebar, +K or "/" composer, +N new session, +1..9 session, Esc agent view -> chat.
+  // Keyboard: Cmd/Ctrl+B sidebar, +Backspace delete session, +K or "/" composer, +N new session, +1..9 session, Esc agent view -> chat.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const mod = (e.metaKey || e.ctrlKey) && !e.shiftKey && !e.altKey
@@ -100,6 +101,7 @@ export default function App() {
       else if (mod && key === 'k') document.querySelector<HTMLElement>('[data-composer]')?.focus()
       else if (key === '/' && !e.metaKey && !e.ctrlKey && !typing && !dialogOpen) document.querySelector<HTMLElement>('[data-composer]')?.focus()
       else if (mod && key === 'n' && !dialogOpen) document.querySelector<HTMLElement>('[data-new-session]')?.click()
+      else if (mod && key === 'backspace' && !typing && !dialogOpen && st.selectedSessionId != null) st.setConfirmDelete(st.selectedSessionId)
       else if (mod && /^[1-9]$/.test(key)) { const s = st.sessions[Number(key) - 1]; if (s) st.selectSession(s.id) }
       else if (key === 'escape' && st.selectedAgentId != null && !dialogOpen) st.selectAgent(null)
       else return
@@ -133,6 +135,7 @@ export default function App() {
           </ResizablePanelGroup>
         </ResizablePanel>
       </ResizablePanelGroup>
+      <DeleteSessionDialog/>
       <Toasts/>
     </TooltipProvider>
   )

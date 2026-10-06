@@ -1,5 +1,5 @@
 import {
-  AddNote, AnswerEscalation, CreateSession, GetAgentEvents, GetSession, ListSessions,
+  AddNote, AnswerEscalation, CreateSession, DeleteSession, GetAgentEvents, GetSession, ListSessions,
   PickDirectory, SendMessage, StopSession, UpdateNote,
 } from '../../wailsjs/go/main/App'
 import type {Agent, AgentEvent, ChatItem, Escalation, Note, NoteType, Session, Task} from './types'
@@ -23,8 +23,8 @@ const as = <T>(p: Promise<unknown>) => p as Promise<T>
 export const api = {
   /** Native directory chooser; '' if cancelled. */
   pickDirectory: (): Promise<string> => PickDirectory(),
-  /** Creates the session and starts its orchestrator on `task` in `workDir` (must exist). */
-  createSession: (task: string, workDir: string) => as<Session>(CreateSession(task, workDir)),
+  /** Creates an empty session in `workDir` (must exist); `name` '' = the directory's name. The orchestrator starts with the first sendMessage. */
+  createSession: (name: string, workDir: string) => as<Session>(CreateSession(name, workDir)),
   /** All sessions, newest first. */
   listSessions: () => as<Session[]>(ListSessions()),
   /** Full state of a session from the database (live or past). */
@@ -42,4 +42,6 @@ export const api = {
     as<Note>(UpdateNote(sessionId, noteId, content, status)),
   /** Stops the session's orchestrator and sub-agents for good. */
   stopSession: (sessionId: number): Promise<void> => StopSession(sessionId),
+  /** Stops the session, then removes it and its chat, agents and notes from Fragile (never its files). */
+  deleteSession: (sessionId: number): Promise<void> => DeleteSession(sessionId),
 }

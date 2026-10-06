@@ -19,8 +19,11 @@ func TestE2E(t *testing.T) {
 	}
 	a, ev := newTestApp(t, t.TempDir(), "")
 	work := t.TempDir()
-	se, err := a.CreateSession("Spawn one sub-agent that writes hello.txt containing hi, then finish", work)
+	se, err := a.CreateSession("", work)
 	if err != nil {
+		t.Fatal(err)
+	}
+	if err := a.SendMessage(se.ID, "Spawn one sub-agent that writes hello.txt containing hi, then finish"); err != nil {
 		t.Fatal(err)
 	}
 	status := func() string { return snapshot(t, a, se.ID).Session.Status }

@@ -20,6 +20,7 @@ export type EventMap = {
   // Session lifecycle. session_created carries the full row; status changes carry only the new status.
   session_created: Envelope<Session>
   session_status_changed: Envelope<{status: SessionStatus}>
+  session_deleted: Envelope<null> // the session and everything of it is gone
 
   // Agents and tasks. agent_spawned / agent_status_changed are the raw observations; agent_updated and
   // task_updated follow each of them with the full row, so the store can simply upsert by id.
@@ -66,6 +67,7 @@ export function subscribeEvents() {
   const offs = [
     on('session_created', (e) => st().sessionCreated(e.payload)),
     on('session_status_changed', (e) => st().sessionStatus(e.session_id, e.payload.status)),
+    on('session_deleted', (e) => st().sessionDeleted(e.session_id)),
     on('agent_updated', patch((d, a: Agent) => ({...d, agents: upsert(d.agents, a)}))),
     on('task_updated', patch((d, t: Task) => ({...d, tasks: upsert(d.tasks, t)}))),
     on('chat_item', patch((d, c: ChatItem) => ({...d, chat: upsert(d.chat, c)}))),

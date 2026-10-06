@@ -12,7 +12,9 @@ import type {ChatItem, SessionStatus} from '@/lib/types'
 import {cn} from '@/lib/utils'
 import {NO_AGENTS, NO_CHAT, orchestratorRunning, useAppStore} from '@/store/app'
 
-const STATUS_TEXT: Record<SessionStatus, {label: string; cls: string}> = {
+// 'new' is not a backend status: a session with no agents yet (its orchestrator starts with the first message).
+const STATUS_TEXT: Record<SessionStatus | 'new', {label: string; cls: string}> = {
+  new: {label: 'new', cls: 'text-status-done'},
   working: {label: 'working', cls: 'text-status-working'},
   done: {label: 'done', cls: 'text-status-done'},
   needs_you: {label: 'needs you', cls: 'text-status-needs-you'},
@@ -122,7 +124,7 @@ export function ChatView({sessionId}: {sessionId: number}) {
   const send = useAppStore((s) => s.sendMessage)
   const running = orchestratorRunning(agents)
   const lead = agents.find((a) => a.role === 'orchestrator')
-  const st = session && STATUS_TEXT[session.status]
+  const st = session && STATUS_TEXT[session.status === 'done' && !agents.length ? 'new' : session.status]
 
   return (
     <div className="flex h-full min-h-0 min-w-0 flex-col">
@@ -131,7 +133,7 @@ export function ChatView({sessionId}: {sessionId: number}) {
         {st && <span className={cn('shrink-0 font-mono text-xs', st.cls)}>{st.label}</span>}
         <div className="flex-1"/>
         <span className="hidden shrink-0 truncate font-mono text-xs whitespace-nowrap text-muted-foreground @xl:inline" title={lead ? `pid ${lead.pid ?? '-'} · started ${formatExact(lead.created_at)}` : undefined}>
-          orchestrator{lead ? ` ${lead.status === 'running' ? `pid ${lead.pid ?? '-'}` : agentState(lead)}` : ''} · {agentSummary(agents)}
+          orchestrator{lead ? ` ${lead.status === 'running' ? `pid ${lead.pid ?? '-'}` : agentState(lead)}` : ' not started'} · {agentSummary(agents)}
         </span>
         {running && <StopButton sessionId={sessionId}/>}
       </header>
@@ -140,7 +142,7 @@ export function ChatView({sessionId}: {sessionId: number}) {
         {!loaded ? (
           <p className="p-6 text-[13px] text-muted-foreground">Loading...</p>
         ) : chat.length === 0 ? (
-          <p className="p-6 text-[13px] text-muted-foreground">No messages.</p>
+          <p className="p-6 text-[13px] text-muted-foreground">{lead ? 'No messages.' : 'Describe the task to start the orchestrator.'}</p>
         ) : (
           <Virtuoso
             key={sessionId}
@@ -156,7 +158,7 @@ export function ChatView({sessionId}: {sessionId: number}) {
       </div>
       <Composer
         onSend={(t) => send(sessionId, t)} label="Message the orchestrator" placeholder="Message the orchestrator"
-        disabledReason={loaded && !running ? "Orchestrator not running (stopped, finished, or the app restarted): can't take messages. History stays viewable." : undefined}
+        disabledReason={loaded && lead && !running ? "Orchestrator not running (stopped, finished, or the app restarted): can't take messages. History stays viewable." : undefined}
       />
     </div>
   )

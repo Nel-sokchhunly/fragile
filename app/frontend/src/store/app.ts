@@ -18,17 +18,20 @@ type AppState = {
   selectedAgentId: number | null // null = show the orchestrator chat
   sidebarCollapsed: boolean // mirror of the sidebar panel's collapsed state
   toasts: Toast[]
+  confirmDelete: number | null // session awaiting delete confirmation
 
   init: () => Promise<void>
   selectSession: (id: number | null) => void
+  setConfirmDelete: (id: number | null) => void
   selectAgent: (id: number | null) => void
   setSidebarCollapsed: (c: boolean) => void
   notify: (e: unknown) => void
   // Throw the backend's error string; the caller shows it inline.
-  createSession: (task: string, workDir: string) => Promise<void>
+  createSession: (name: string, workDir: string) => Promise<void>
   sendMessage: (sessionId: number, text: string) => Promise<void>
   // Report failures as toasts.
   stopSession: (sessionId: number) => Promise<void>
+  deleteSession: (sessionId: number) => Promise<void> // the session_deleted event removes it
   answerEscalation: (escalationId: number, answer: string) => Promise<void>
   addNote: (sessionId: number, type: NoteType, content: string) => Promise<boolean>
   setNoteStatus: (sessionId: number, noteId: number, status: 'open' | 'resolved') => Promise<void>
@@ -37,6 +40,7 @@ type AppState = {
   // Event sinks (lib/events.ts).
   sessionCreated: (s: Session) => void
   sessionStatus: (sessionId: number, status: SessionStatus) => void
+  sessionDeleted: (sessionId: number) => void
   patchSession: (sessionId: number, f: (d: SessionData) => SessionData) => void
   agentEvent: (ev: AgentEvent) => void
 }
@@ -91,6 +95,7 @@ export const useAppStore = create<AppState>((set, get) => {
     selectedAgentId: null,
     sidebarCollapsed: false,
     toasts: [],
+    confirmDelete: null,
 
     init: async () => {
       try {
@@ -103,6 +108,7 @@ export const useAppStore = create<AppState>((set, get) => {
       }
     },
     selectSession: select,
+    setConfirmDelete: (confirmDelete) => set({confirmDelete}),
     selectAgent: (selectedAgentId) => set({selectedAgentId}),
     setSidebarCollapsed: (sidebarCollapsed) => set({sidebarCollapsed}),
 
@@ -112,13 +118,14 @@ export const useAppStore = create<AppState>((set, get) => {
       setTimeout(() => set((s) => ({toasts: s.toasts.filter((t) => t.id !== id)})), 6000)
     },
 
-    createSession: async (task, workDir) => {
-      const se = await api.createSession(task, workDir)
+    createSession: async (name, workDir) => {
+      const se = await api.createSession(name, workDir)
       get().sessionCreated(se)
       select(se.id)
     },
     sendMessage: (sid, text) => api.sendMessage(sid, text), // the backend's chat_item event shows the message
     stopSession: async (sid) => { await toasting(api.stopSession(sid)) },
+    deleteSession: async (sid) => { await toasting(api.deleteSession(sid)) },
     answerEscalation: async (id, answer) => { await toasting(api.answerEscalation(id, answer)) }, // chat_item flips it to answered
     addNote: async (sid, type, content) => {
       const n = await toasting(api.addNote(sid, type, content))
@@ -156,6 +163,15 @@ export const useAppStore = create<AppState>((set, get) => {
 
     sessionCreated: (se) => set((s) => (s.sessions.some((x) => x.id === se.id) ? s : {sessions: [se, ...s.sessions]})),
     sessionStatus: (sid, status) => set((s) => ({sessions: s.sessions.map((x) => (x.id === sid ? {...x, status} : x))})),
+    sessionDeleted: (sid) => {
+      const {sessions, selectedSessionId} = get()
+      const i = sessions.findIndex((x) => x.id === sid)
+      if (i < 0) return
+      const rest = sessions.filter((x) => x.id !== sid)
+      const {[sid]: _, ...data} = get().data
+      set({sessions: rest, data})
+      if (selectedSessionId === sid) select(rest[Math.min(i, rest.length - 1)]?.id ?? null) // the next one, else the last
+    },
     patchSession: (sid, f) => {
       if (get().data[sid]) set((s) => ({data: {...s.data, [sid]: f(s.data[sid])}}))
       else loading.get(sid)?.push(f)

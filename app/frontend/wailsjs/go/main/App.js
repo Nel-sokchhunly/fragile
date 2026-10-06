@@ -14,6 +14,10 @@ export function CreateSession(arg1, arg2) {
   return window['go']['main']['App']['CreateSession'](arg1, arg2);
 }
 
+export function DeleteSession(arg1) {
+  return window['go']['main']['App']['DeleteSession'](arg1);
+}
+
 export function GetAgentEvents(arg1, arg2, arg3) {
   return window['go']['main']['App']['GetAgentEvents'](arg1, arg2, arg3);
 }

@@ -36,12 +36,13 @@ type App struct {
 	ctx  context.Context
 	emit func(name string, data any) // runtime.EventsEmit once started; tests substitute their own
 
-	store   *notes.Store
-	log     *notes.EventLog
-	runner  *notes.Runner
-	httpSrv *http.Server
-	addr    string // the notes server's loopback address
-	closed  bool
+	store    *notes.Store
+	log      *notes.EventLog
+	runner   *notes.Runner
+	httpSrv  *http.Server
+	addr     string // the notes server's loopback address
+	agentDir string // per-agent MCP configs and output logs
+	closed   bool
 
 	// Events flow OnEvent/push -> queue -> loop -> emit. The queue is unbounded
 	// on purpose: OnEvent runs under the log's lock and the loop itself writes to
@@ -57,6 +58,8 @@ type App struct {
 
 	sendMu sync.Mutex // orders "persist user message, then write it to stdin"
 	ansMu  sync.Mutex // one escalation answer at a time
+
+	startMu sync.Mutex // one first-message orchestrator start per session
 }
 
 func NewApp() *App { return &App{} }
@@ -95,6 +98,7 @@ func dataDir() (string, error) {
 func (a *App) open(dir string, emit func(string, any)) (err error) {
 	a.emit = emit
 	agentDir := filepath.Join(dir, "agents")
+	a.agentDir = agentDir
 	// The agent dir holds the MCP configs, which contain the agents' secret URLs.
 	if err := os.MkdirAll(agentDir, 0o700); err != nil {
 		return err

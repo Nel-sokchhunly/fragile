@@ -9,6 +9,8 @@ export function AnswerEscalation(arg1:number,arg2:string):Promise<void>;
 
 export function CreateSession(arg1:string,arg2:string):Promise<notes.Session>;
 
+export function DeleteSession(arg1:number):Promise<void>;
+
 export function GetAgentEvents(arg1:number,arg2:number,arg3:number):Promise<Array<notes.AgentEvent>>;
 
 export function GetSession(arg1:number):Promise<main.SessionSnapshot>;

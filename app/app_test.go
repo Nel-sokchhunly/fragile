@@ -3,7 +3,9 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -120,14 +122,34 @@ func hasChat(a *App, id int64, want string) bool {
 	return false
 }
 
-func TestSessionChatAndStatus(t *testing.T) {
-	a, ev := newTestApp(t, t.TempDir(), echoOrchestrator)
-	se, err := a.CreateSession("Write the thing\nwith details", t.TempDir())
+// startSession creates a session and sends its first message, which starts the orchestrator.
+func startSession(t *testing.T, a *App, task string) notes.Session {
+	t.Helper()
+	se, err := a.CreateSession("", t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
-	if se.Title != "Write the thing" || se.Status != "working" || se.WorkDir == "" {
+	if err := a.SendMessage(se.ID, task); err != nil {
+		t.Fatal(err)
+	}
+	return se
+}
+
+func TestSessionChatAndStatus(t *testing.T) {
+	a, ev := newTestApp(t, t.TempDir(), echoOrchestrator)
+	work := t.TempDir()
+	se, err := a.CreateSession("", work)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if se.Title != filepath.Base(work) || se.Status != "done" || se.WorkDir == "" {
 		t.Fatalf("session = %+v", se)
+	}
+	if named, _ := a.CreateSession("my name\nmore", work); named.Title != "my name" {
+		t.Fatalf("named session = %+v", named)
+	}
+	if err := a.SendMessage(se.ID, "Write the thing\nwith details"); err != nil {
+		t.Fatal(err)
 	}
 	waitFor(t, "first reply and done", func() bool {
 		return hasChat(a, se.ID, "assistant: echo: ") && snapshot(t, a, se.ID).Session.Status == "done"
@@ -165,7 +187,7 @@ func TestSessionChatAndStatus(t *testing.T) {
 		// created as working, so the first change announced is to done; later turns toggle
 		t.Fatalf("status events = %s", got)
 	}
-	if len(ev.named(notes.EventSessionCreated)) != 1 || len(ev.named(eventAgentEvent)) < 4 || len(ev.named(eventChatItem)) < 4 {
+	if len(ev.named(notes.EventSessionCreated)) != 2 || len(ev.named(eventAgentEvent)) < 4 || len(ev.named(eventChatItem)) < 4 {
 		t.Fatalf("missing events: created=%d agent_event=%d chat_item=%d",
 			len(ev.named(notes.EventSessionCreated)), len(ev.named(eventAgentEvent)), len(ev.named(eventChatItem)))
 	}
@@ -177,12 +199,36 @@ func TestSessionChatAndStatus(t *testing.T) {
 	}
 }
 
-func TestStopSession(t *testing.T) {
+// A new session has no orchestrator (and no agents) until the first message starts it, once.
+func TestFirstMessageStartsOrchestrator(t *testing.T) {
 	a, _ := newTestApp(t, t.TempDir(), echoOrchestrator)
-	se, err := a.CreateSession("task", t.TempDir())
+	se, err := a.CreateSession("fresh", t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
+	if s := snapshot(t, a, se.ID); len(s.Agents) != 0 || len(s.Chat) != 0 {
+		t.Fatalf("fresh session = %+v", s)
+	}
+	var wg sync.WaitGroup
+	for _, m := range []string{"one", "two"} { // racing first messages must start one orchestrator
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			if err := a.SendMessage(se.ID, m); err != nil {
+				t.Error(err)
+			}
+		}()
+	}
+	wg.Wait()
+	waitFor(t, "both replies", func() bool { return hasChat(a, se.ID, "echo: ") && snapshot(t, a, se.ID).Session.Status == "done" })
+	if s := snapshot(t, a, se.ID); len(s.Agents) != 1 || s.Agents[0].Role != "orchestrator" || s.Agents[0].Status != "running" {
+		t.Fatalf("agents = %+v", s.Agents)
+	}
+}
+
+func TestStopSession(t *testing.T) {
+	a, _ := newTestApp(t, t.TempDir(), echoOrchestrator)
+	se := startSession(t, a, "task")
 	if err := a.StopSession(se.ID); err != nil {
 		t.Fatal(err)
 	}
@@ -195,12 +241,69 @@ func TestStopSession(t *testing.T) {
 	}
 }
 
-func TestEscalationAnswerFlow(t *testing.T) {
+func TestDeleteSession(t *testing.T) {
 	a, ev := newTestApp(t, t.TempDir(), echoOrchestrator)
-	se, err := a.CreateSession("build it", t.TempDir())
+	keep := startSession(t, a, "keep me")
+	work := t.TempDir()
+	gone, err := a.CreateSession("gone", work)
 	if err != nil {
 		t.Fatal(err)
 	}
+	if err := a.SendMessage(gone.ID, "delete me"); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, "replies", func() bool { return hasChat(a, keep.ID, "echo: ") && hasChat(a, gone.ID, "echo: ") })
+	orch := snapshot(t, a, gone.ID).Agents[0]
+	task, _ := a.store.CreateTask(gone.ID, "t", "d")
+	sub, _ := a.store.CreateAgent(gone.ID, "subagent", orch.ID, task.ID)
+	a.store.SetTaskAgent(gone.ID, task.ID, sub.ID)
+	if _, err := a.AddNote(gone.ID, "decision", "use tabs"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := a.AddNote(keep.ID, "decision", "use spaces"); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(work+"/mine.txt", []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	files := filepath.Join(a.agentDir, fmt.Sprintf("agent-%d.*", orch.ID))
+	if m, _ := filepath.Glob(files); len(m) != 2 {
+		t.Fatalf("agent files before delete = %v", m)
+	}
+
+	if err := a.DeleteSession(gone.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := a.GetSession(gone.ID); err == nil {
+		t.Error("deleted session still readable")
+	}
+	if list, _ := a.ListSessions(); len(list) != 1 || list[0].ID != keep.ID {
+		t.Fatalf("sessions = %+v", list)
+	}
+	if m, _ := filepath.Glob(files); len(m) != 0 {
+		t.Errorf("agent files left = %v", m)
+	}
+	if _, err := os.Stat(work + "/mine.txt"); err != nil {
+		t.Errorf("work dir touched: %v", err)
+	}
+	if ags, _ := a.store.ListAgents(gone.ID, ""); len(ags) != 0 {
+		t.Errorf("agents left behind: %+v", ags)
+	}
+	if ts, _ := a.store.ListTasks(gone.ID); len(ts) != 0 {
+		t.Errorf("tasks left behind: %+v", ts)
+	}
+	if s := snapshot(t, a, keep.ID); len(s.Agents) != 1 || len(s.Notes) != 1 || len(s.Chat) < 2 {
+		t.Fatalf("other session damaged: %+v", s)
+	}
+	waitFor(t, "session_deleted", func() bool { return len(ev.named(notes.EventSessionDeleted)) == 1 })
+	if err := a.DeleteSession(gone.ID); err == nil {
+		t.Error("deleted twice")
+	}
+}
+
+func TestEscalationAnswerFlow(t *testing.T) {
+	a, ev := newTestApp(t, t.TempDir(), echoOrchestrator)
+	se := startSession(t, a, "build it")
 	waitFor(t, "first turn done", func() bool {
 		return snapshot(t, a, se.ID).Session.Status == "done" && hasChat(a, se.ID, "assistant: echo: ")
 	})
@@ -266,10 +369,7 @@ func TestEscalationAnswerFlow(t *testing.T) {
 
 func TestUserNotesWakeAgents(t *testing.T) {
 	a, ev := newTestApp(t, t.TempDir(), echoOrchestrator)
-	se, err := a.CreateSession("task", t.TempDir())
-	if err != nil {
-		t.Fatal(err)
-	}
+	se := startSession(t, a, "task")
 	changed := a.log.Changed(se.ID)
 	n, err := a.AddNote(se.ID, "decision", "use tabs")
 	if err != nil || n.AuthorID != 0 || n.Status != "open" {
@@ -307,10 +407,7 @@ func TestUserNotesWakeAgents(t *testing.T) {
 func TestStartupRecovery(t *testing.T) {
 	dir := t.TempDir()
 	a, _ := newTestApp(t, dir, echoOrchestrator)
-	se, err := a.CreateSession("old session", t.TempDir())
-	if err != nil {
-		t.Fatal(err)
-	}
+	se := startSession(t, a, "old session")
 	waitFor(t, "reply", func() bool {
 		return hasChat(a, se.ID, "assistant: echo: ") && snapshot(t, a, se.ID).Session.Status == "done"
 	})

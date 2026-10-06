@@ -38,13 +38,9 @@ type SessionSnapshot struct {
 	Escalations []notes.Escalation `json:"escalations"` // the open ones
 }
 
-// CreateSession starts a session working on task in workDir: a session row, its
-// board, and a long-lived orchestrator whose first message is the task.
-func (a *App) CreateSession(task, workDir string) (notes.Session, error) {
-	task = strings.TrimSpace(task)
-	if task == "" {
-		return notes.Session{}, errors.New("task must not be empty")
-	}
+// CreateSession creates an empty session in workDir (name defaults to the
+// directory's base name). Its orchestrator starts with the first SendMessage.
+func (a *App) CreateSession(name, workDir string) (notes.Session, error) {
 	dir, err := filepath.Abs(workDir)
 	if err != nil {
 		return notes.Session{}, err
@@ -52,28 +48,40 @@ func (a *App) CreateSession(task, workDir string) (notes.Session, error) {
 	if fi, err := os.Stat(dir); err != nil || !fi.IsDir() {
 		return notes.Session{}, fmt.Errorf("%q is not a directory", workDir)
 	}
-	se, err := a.store.CreateSessionIn(notes.FirstLine(task), dir)
+	name = notes.FirstLine(strings.TrimSpace(name))
+	if name == "" {
+		name = filepath.Base(dir)
+	}
+	se, err := a.store.CreateSessionIn(name, dir)
 	if err != nil {
 		return notes.Session{}, err
 	}
-	a.setBusy(se.ID, true) // before the process exists, so the session never flickers to done
 	a.log.Write(notes.EventSessionCreated, se.ID, 0, se)
-	orch, err := a.runner.StartOrchestrator(se.ID, "")
-	if err != nil {
-		return se, err // the runner recorded the crash; the session derives to done
-	}
-	if err := a.deliver(orch, task, true); err != nil {
-		return se, err
+	a.recompute(se.ID) // no orchestrator yet: derives to done rather than the stored default "working"
+	if cur, err := a.store.GetSession(se.ID); err == nil {
+		se = cur
 	}
 	return se, nil
 }
 
-// SendMessage sends a chat message to the session's orchestrator.
+// SendMessage sends a chat message to the session's orchestrator, starting it
+// first if the session has never had one.
 func (a *App) SendMessage(sessionID int64, text string) error {
 	if strings.TrimSpace(text) == "" {
 		return errors.New("message must not be empty")
 	}
-	orch, err := a.liveOrchestrator(sessionID)
+	a.startMu.Lock()
+	orchs, err := a.store.ListAgents(sessionID, "orchestrator")
+	var orch notes.Agent
+	switch {
+	case err != nil:
+	case len(orchs) == 0:
+		a.setBusy(sessionID, true)                            // before the process exists, so the session never flickers to done
+		orch, err = a.runner.StartOrchestrator(sessionID, "") // on failure the runner recorded the crash; the session derives to done
+	default:
+		orch, err = a.liveOrchestrator(sessionID)
+	}
+	a.startMu.Unlock()
 	if err != nil {
 		return err
 	}
@@ -89,6 +97,33 @@ func (a *App) StopSession(sessionID int64) error {
 	a.runner.StopSession(sessionID)
 	a.setBusy(sessionID, false)
 	a.recompute(sessionID)
+	return nil
+}
+
+// DeleteSession stops the session's agents, then removes it and everything tied
+// to it from the database, plus the agents' MCP configs and output logs. The
+// session's working directory and events.jsonl are left alone.
+func (a *App) DeleteSession(sessionID int64) error {
+	if _, err := a.store.GetSession(sessionID); err != nil {
+		return err
+	}
+	a.runner.StopSession(sessionID)
+	agents, err := a.store.ListAgents(sessionID, "")
+	if err != nil {
+		return err
+	}
+	if err := a.store.DeleteSession(sessionID); err != nil {
+		return err
+	}
+	a.mu.Lock()
+	delete(a.busy, sessionID)
+	a.mu.Unlock()
+	for _, ag := range agents {
+		for _, ext := range []string{".mcp.json", ".jsonl"} {
+			os.Remove(filepath.Join(a.agentDir, fmt.Sprintf("agent-%d%s", ag.ID, ext)))
+		}
+	}
+	a.log.Write(notes.EventSessionDeleted, sessionID, 0, nil)
 	return nil
 }
 

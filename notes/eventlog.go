@@ -18,6 +18,7 @@ const (
 	// For the session manager; emitted by whoever changes the session, via Write.
 	EventSessionCreated       = "session_created"
 	EventSessionStatusChanged = "session_status_changed"
+	EventSessionDeleted       = "session_deleted" // no payload; the session and its rows are gone
 )
 
 // Event is one observation: a line of the log, and what OnEvent receives.

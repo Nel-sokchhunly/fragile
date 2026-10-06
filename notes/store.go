@@ -189,6 +189,39 @@ func (s *Store) CreateSessionIn(title, workDir string) (Session, error) {
 	return se, tx.Commit()
 }
 
+// DeleteSession removes the session and everything keyed by it, in one
+// transaction. agent_instances and tasks reference each other, so foreign key
+// checks wait for the commit.
+func (s *Store) DeleteSession(id int64) error {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if _, err := tx.Exec(`PRAGMA defer_foreign_keys = ON`); err != nil {
+		return err
+	}
+	const mine = `(SELECT id FROM agent_instances WHERE session_id = ?)`
+	const myBoards = `(SELECT id FROM boards WHERE session_id = ?)`
+	for _, q := range []string{
+		`DELETE FROM agent_events WHERE agent_id IN ` + mine,
+		`DELETE FROM notes WHERE board_id IN ` + myBoards,
+		`DELETE FROM board_members WHERE board_id IN ` + myBoards,
+		`DELETE FROM escalations WHERE session_id = ?`,
+		`DELETE FROM tasks WHERE session_id = ?`,
+		`DELETE FROM agent_instances WHERE session_id = ?`,
+		`DELETE FROM boards WHERE session_id = ?`,
+	} {
+		if _, err := tx.Exec(q, id); err != nil {
+			return err
+		}
+	}
+	if err := affected(tx.Exec(`DELETE FROM sessions WHERE id = ?`, id)); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
 func (s *Store) GetSession(id int64) (Session, error) {
 	return scanSession(s.db.QueryRow(`SELECT `+sessionCols+` FROM sessions WHERE id = ?`, id))
 }
