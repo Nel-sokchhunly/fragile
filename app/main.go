@@ -19,7 +19,7 @@ var assets embed.FS
 
 func main() {
 	app := NewApp()
-	if err := app.Start(); err != nil {
+	if err := app.openBackend(); err != nil {
 		log.Fatalf("fragile: starting backend: %v", err)
 	}
 

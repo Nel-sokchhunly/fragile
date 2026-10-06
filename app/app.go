@@ -67,10 +67,10 @@ type App struct {
 
 func NewApp() *App { return &App{ready: make(chan struct{})} }
 
-// Start opens the backend before the window exists, so no bound method can
+// openBackend opens the backend before the window exists, so no bound method can
 // run against a half-open App. Events wait until startup hands over the Wails
 // context (the event queue is unbounded, so nothing is lost meanwhile).
-func (a *App) Start() error {
+func (a *App) openBackend() error {
 	widenPath() // before the runner looks for claude
 	dir, err := dataDir()
 	if err != nil {

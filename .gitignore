@@ -7,3 +7,4 @@ app/frontend/node_modules
 app/frontend/dist/*
 !app/frontend/dist/gitkeep
 app/frontend/package.json.md5
+app/frontend/.vite/
