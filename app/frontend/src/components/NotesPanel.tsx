@@ -28,11 +28,12 @@ function AddNoteDialog({sessionId}: {sessionId: number}) {
   const [type, setType] = useState<NoteType>('heads_up')
   const [content, setContent] = useState('')
 
-  const submit = () => {
+  const submit = async () => {
     if (!content.trim()) return
-    addNote(sessionId, type, content.trim())
-    setContent('')
-    setOpen(false)
+    if (await addNote(sessionId, type, content.trim())) { // on failure a toast shows; keep the text
+      setContent('')
+      setOpen(false)
+    }
   }
   return (
     <Dialog open={open} onOpenChange={setOpen}>
@@ -45,7 +46,7 @@ function AddNoteDialog({sessionId}: {sessionId: number}) {
         <TooltipContent>Add note</TooltipContent>
       </Tooltip>
       <DialogContent className="sm:max-w-md">
-        <form onSubmit={(e) => { e.preventDefault(); submit() }} className="flex flex-col gap-3">
+        <form onSubmit={(e) => { e.preventDefault(); void submit() }} className="flex flex-col gap-3">
           <DialogHeader>
             <DialogTitle>Add note</DialogTitle>
             <DialogDescription>Posted to the session board as you; agents can read it.</DialogDescription>
@@ -58,7 +59,7 @@ function AddNoteDialog({sessionId}: {sessionId: number}) {
           </Select>
           <Textarea
             autoFocus rows={4} value={content} onChange={(e) => setContent(e.target.value)} aria-label="Note content" placeholder="What should the team know?"
-            onKeyDown={(e) => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) { e.preventDefault(); submit() } }}
+            onKeyDown={(e) => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) { e.preventDefault(); void submit() } }}
           />
           <DialogFooter><Button type="submit" disabled={!content.trim()}>Add note</Button></DialogFooter>
         </form>
@@ -74,7 +75,7 @@ function NoteRow({sessionId, note}: {sessionId: number; note: Note}) {
     const a = d?.agents.find((x) => x.id === note.author_agent_id)
     return agentName(a, d?.tasks.find((t) => t.id === a?.task_id))
   })
-  const toggle = useAppStore((s) => s.toggleNoteResolved)
+  const setStatus = useAppStore((s) => s.setNoteStatus)
   const resolved = note.status === 'resolved'
   return (
     <li className={cn('group flex flex-col gap-1 rounded-lg border bg-card p-2 text-sm', resolved && 'opacity-55')}>
@@ -85,7 +86,7 @@ function NoteRow({sessionId, note}: {sessionId: number; note: Note}) {
         <time className="text-muted-foreground" dateTime={note.created_at}>{formatTime(note.created_at)}</time>
         <Button
           variant="ghost" size="icon-xs" className="opacity-0 group-hover:opacity-100 focus-visible:opacity-100"
-          aria-label={resolved ? 'Reopen note' : 'Resolve note'} onClick={() => toggle(sessionId, note.id)}
+          aria-label={resolved ? 'Reopen note' : 'Resolve note'} onClick={() => setStatus(sessionId, note.id, resolved ? 'open' : 'resolved')}
         >
           {resolved ? <Undo2/> : <Check/>}
         </Button>

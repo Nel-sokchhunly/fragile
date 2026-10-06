@@ -1,4 +1,5 @@
 import {EventsOn} from '../../wailsjs/runtime/runtime'
+import {upsert, useAppStore, type SessionData} from '@/store/app'
 import type {Agent, AgentEvent, AgentStatus, AgentRole, ChatItem, Escalation, Note, Session, SessionStatus, Task, TaskStatus} from './types'
 
 // Go -> Wails events -> Zustand store -> components. Components never poll.
@@ -57,8 +58,22 @@ export function on<K extends keyof EventMap>(name: K, handler: (e: EventMap[K]) 
   return EventsOn(name, handler)
 }
 
-// Call once at startup. Add one `on(...)` per event, each writing into a store.
+// Call once at startup: registers each event once and routes it by envelope.session_id into the store.
+// agent_spawned / agent_status_changed are not handled; agent_updated / task_updated follow them with the full row.
 export function subscribeEvents() {
-  const offs: (() => void)[] = [] // e.g. offs.push(on('session_status_changed', (e) => useAppStore.getState()...))
+  const st = useAppStore.getState
+  const patch = <P,>(f: (d: SessionData, p: P) => SessionData) => (e: Envelope<P>) => st().patchSession(e.session_id, (d) => f(d, e.payload))
+  const offs = [
+    on('session_created', (e) => st().sessionCreated(e.payload)),
+    on('session_status_changed', (e) => st().sessionStatus(e.session_id, e.payload.status)),
+    on('agent_updated', patch((d, a: Agent) => ({...d, agents: upsert(d.agents, a)}))),
+    on('task_updated', patch((d, t: Task) => ({...d, tasks: upsert(d.tasks, t)}))),
+    on('chat_item', patch((d, c: ChatItem) => ({...d, chat: upsert(d.chat, c)}))),
+    on('note_posted', patch((d, n: Note) => ({...d, notes: upsert(d.notes, n)}))),
+    on('note_updated', patch((d, n: Note) => ({...d, notes: upsert(d.notes, n)}))),
+    // The chat shows escalations through chat_item; this only keeps a displayed one in step.
+    on('escalation', patch((d, x: Escalation) => ({...d, chat: d.chat.map((c) => (c.kind === 'escalation' && c.escalation.id === x.id ? {...c, escalation: x} : c))}))),
+    on('agent_event', (e) => st().agentEvent(e.payload)),
+  ]
   return () => offs.forEach((off) => off())
 }

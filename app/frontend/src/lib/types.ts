@@ -72,8 +72,8 @@ export type AgentEvent = {
   created_at: string
 }
 
-// One row of the orchestrator chat. UI-level: the backend will have to supply an equivalent
-// (parsed orchestrator stream + user messages + escalations); not a Go struct yet.
+// One row of the orchestrator chat (Go: ChatItem in app/sessions.go). id is the underlying agent_events id,
+// so it is unique and ordered within a session.
 export type ChatItem =
   | {id: number; kind: 'user'; text: string; at: string}
   | {id: number; kind: 'assistant'; text: string; at: string}

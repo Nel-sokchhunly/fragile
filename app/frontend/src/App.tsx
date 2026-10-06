@@ -31,6 +31,16 @@ function narrowLayout(): Record<string, number> | undefined {
   return {sidebar: pct(sidebar), center: pct(w - sidebar - right), right: pct(right)}
 }
 
+// Non-blocking error messages from failed calls (the store removes them after a few seconds).
+function Toasts() {
+  const toasts = useAppStore((s) => s.toasts)
+  return (
+    <div className="pointer-events-none fixed right-4 bottom-4 z-[100] flex max-w-sm flex-col gap-2" aria-live="polite">
+      {toasts.map((t) => <div key={t.id} role="alert" className="rounded-md border border-destructive bg-background px-3 py-2 text-sm text-destructive shadow-md">{t.text}</div>)}
+    </div>
+  )
+}
+
 function EmptyCenter() {
   return (
     <div className="flex h-full flex-col items-center justify-center gap-3 p-8 text-center">
@@ -106,6 +116,7 @@ export default function App() {
           </ResizablePanelGroup>
         </ResizablePanel>
       </ResizablePanelGroup>
+      <Toasts/>
     </TooltipProvider>
   )
 }

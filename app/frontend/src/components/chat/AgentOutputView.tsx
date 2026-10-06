@@ -1,4 +1,4 @@
-import {memo, useState} from 'react'
+import {memo, useEffect, useState} from 'react'
 import {Virtuoso} from 'react-virtuoso'
 import {ArrowLeft, ChevronRight, Wrench} from 'lucide-react'
 import {Button} from '@/components/ui/button'
@@ -54,7 +54,10 @@ export function AgentOutputView({sessionId, agentId}: {sessionId: number; agentI
   const agent = useAppStore((s) => s.data[sessionId]?.agents.find((a) => a.id === agentId))
   const task = useAppStore((s) => s.data[sessionId]?.tasks.find((t) => t.id === agent?.task_id))
   const events = useAppStore((s) => s.agentEvents[agentId] ?? NO_EVENTS)
+  const loaded = useAppStore((s) => !!s.agentLoaded[agentId])
+  const load = useAppStore((s) => s.loadAgentEvents)
   const back = useAppStore((s) => s.selectAgent)
+  useEffect(() => { void load(agentId) }, [load, agentId]) // no-op once cached; live events keep appending
 
   return (
     <div className="flex h-full min-h-0 min-w-0 flex-col">
@@ -65,7 +68,9 @@ export function AgentOutputView({sessionId, agentId}: {sessionId: number; agentI
       </header>
       {/* Absolutely positioned list: its height never depends on percentage resolution inside flex. */}
       <div className="relative min-h-0 flex-1">
-        {events.length === 0 ? (
+        {!loaded ? (
+          <p className="p-6 text-sm text-muted-foreground">Loading...</p>
+        ) : events.length === 0 ? (
           <p className="p-6 text-sm text-muted-foreground">No output from this agent yet.</p>
         ) : (
           <Virtuoso
