@@ -3,6 +3,7 @@ package main
 
 import (
 	"embed"
+	"log"
 
 	"github.com/wailsapp/wails/v2"
 	"github.com/wailsapp/wails/v2/pkg/options"
@@ -18,6 +19,9 @@ var assets embed.FS
 
 func main() {
 	app := NewApp()
+	if err := app.Start(); err != nil {
+		log.Fatalf("fragile: starting backend: %v", err)
+	}
 
 	err := wails.Run(&options.App{
 		Title:            "Fragile",
