@@ -315,3 +315,11 @@ Sub-agents must not have access to orchestrator-only tools.
 | UI layout details (worked out screen by screen with the user) | Phase 1 |
 | How scopes are assigned at spawn time (orchestrator decides vs. defaults) | Phase 2 |
 | Review stage and drag-as-command rules | Kanban experiment |
+
+## 7. Known limitations
+
+Found while building a phase and accepted for now. **Not scope** for the current phase unless the user promotes one; a phase's design must not make them worse. Each is tracked as a GitHub issue labelled `known-limitation`.
+
+| Limitation | Found in | Impact | Fix direction | Tracking |
+|---|---|---|---|---|
+| Agents are not isolated from each other. All run as the same OS user with `Bash`, so a sub-agent can read another agent's token file (`.fragile/agents/agent-<id>.mcp.json`) and impersonate it, including calling orchestrator-only tools. Agents can also touch files outside their working directory. | Phase 0 review | Role gating and the one-level-deep rule (section 5.4) hold only for cooperative agents. | Run agents in a sandbox so each sees only its own config and working directory. | #37 |
