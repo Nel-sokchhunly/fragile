@@ -64,7 +64,11 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: fragile-${{ runner.os }}
-          path: fragile-*
+          # Exact names: a fragile-* glob also matched fragile-spec.md in the checkout.
+          path: |
+            fragile-macos-universal.zip
+            fragile-linux-amd64.tar.gz
+          if-no-files-found: ignore
 
   release:
     needs: app
@@ -78,7 +82,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           # run_attempt keeps the tag unique when a run is re-run.
-          gh release create "build-${{ github.run_number }}.${{ github.run_attempt }}" fragile-* \
+          gh release create "build-${{ github.run_number }}.${{ github.run_attempt }}" fragile-macos-universal.zip fragile-linux-amd64.tar.gz \
             --repo "${{ github.repository }}" --target "${{ github.sha }}" \
             --title "Fragile build ${{ github.run_number }}" \
             --notes "Built from ${{ github.sha }}. macOS build is unsigned: run \`xattr -dr com.apple.quarantine Fragile.app\` after unzipping. Linux needs libgtk-3 and libwebkit2gtk-4.1 (agents also need bubblewrap and socat)."

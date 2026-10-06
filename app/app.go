@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"log"
 	"net"
 	"net/http"
 	"os"
@@ -34,8 +33,9 @@ const (
 // the UI only as events (Go -> Wails events -> Zustand store -> components);
 // nothing polls.
 type App struct {
-	ctx  context.Context
-	emit func(name string, data any) // runtime.EventsEmit once started; tests substitute their own
+	ctx   context.Context
+	ready chan struct{}               // closed once ctx is set
+	emit  func(name string, data any) // runtime.EventsEmit once started; tests substitute their own
 
 	store    *notes.Store
 	log      *notes.EventLog
@@ -65,19 +65,27 @@ type App struct {
 	startMu sync.Mutex // one first-message orchestrator start per session
 }
 
-func NewApp() *App { return &App{} }
+func NewApp() *App { return &App{ready: make(chan struct{})} }
+
+// openBackend opens the backend before the window exists, so no bound method can
+// run against a half-open App. Events wait until startup hands over the Wails
+// context (the event queue is unbounded, so nothing is lost meanwhile).
+func (a *App) openBackend() error {
+	widenPath() // before the runner looks for claude
+	dir, err := dataDir()
+	if err != nil {
+		return err
+	}
+	return a.open(dir, func(name string, data any) {
+		<-a.ready
+		runtime.EventsEmit(a.ctx, name, data)
+	})
+}
 
 // startup runs once when the window is created; ctx lives until the app quits.
 func (a *App) startup(ctx context.Context) {
 	a.ctx = ctx
-	widenPath() // before the runner looks for claude
-	dir, err := dataDir()
-	if err == nil {
-		err = a.open(dir, func(name string, data any) { runtime.EventsEmit(ctx, name, data) })
-	}
-	if err != nil {
-		log.Fatalf("fragile: starting backend: %v", err)
-	}
+	close(a.ready)
 }
 
 // shutdown runs when the app quits: stop every agent, then close everything.
