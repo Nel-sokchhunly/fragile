@@ -22,6 +22,10 @@ export function GetAgentEvents(arg1, arg2, arg3) {
   return window['go']['main']['App']['GetAgentEvents'](arg1, arg2, arg3);
 }
 
+export function GetRateLimit() {
+  return window['go']['main']['App']['GetRateLimit']();
+}
+
 export function GetSession(arg1) {
   return window['go']['main']['App']['GetSession'](arg1);
 }

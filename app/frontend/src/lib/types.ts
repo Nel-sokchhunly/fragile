@@ -15,6 +15,7 @@ export type Session = {
   status: SessionStatus
   work_dir?: string // directory its agents run in; absent/'' for sessions without one
   created_at: string
+  agent_count: number // 0 = new: the orchestrator starts with the first message
 }
 
 export type Agent = {
@@ -29,7 +30,13 @@ export type Agent = {
   exit_code?: number
   created_at: string
   exited_at?: string
+  context_used?: number // tokens in the agent's latest message; absent = unknown
+  context_window?: number
 }
+
+// Account-wide subscription limits; utilization 0..1, resets_at unix seconds. null window = not reported yet.
+export type LimitWindow = {utilization: number; resets_at: number}
+export type RateLimit = {five_hour: LimitWindow | null; seven_day: LimitWindow | null}
 
 export type Task = {
   id: number

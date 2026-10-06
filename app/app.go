@@ -53,8 +53,10 @@ type App struct {
 	stop    chan struct{}
 	stopped chan struct{}
 
-	mu   sync.Mutex     // guards busy and serializes session status updates
-	busy map[int64]bool // session -> its orchestrator is mid-turn
+	mu     sync.Mutex       // guards busy and serializes session status updates
+	busy   map[int64]bool   // session -> its orchestrator is mid-turn
+	limit  *RateLimit       // latest subscription limits (guarded by mu)
+	models map[int64]string // agent -> its init model (guarded by mu)
 
 	sendMu sync.Mutex // orders "persist user message, then write it to stdin"
 	ansMu  sync.Mutex // one escalation answer at a time
@@ -124,7 +126,9 @@ func (a *App) open(dir string, emit func(string, any)) (err error) {
 
 	a.addr = ln.Addr().String()
 	a.busy = map[int64]bool{}
+	a.models = map[int64]string{}
 	a.wake, a.stop, a.stopped = make(chan struct{}, 1), make(chan struct{}), make(chan struct{})
+	a.loadRateLimit()
 	a.log.OnEvent = a.push
 	go a.loop()
 

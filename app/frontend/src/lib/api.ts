@@ -1,8 +1,8 @@
 import {
-  AddNote, AnswerEscalation, CreateSession, DeleteSession, GetAgentEvents, GetSession, ListSessions,
+  AddNote, AnswerEscalation, CreateSession, DeleteSession, GetAgentEvents, GetRateLimit, GetSession, ListSessions,
   PickDirectory, SendMessage, StopSession, UpdateNote,
 } from '../../wailsjs/go/main/App'
-import type {Agent, AgentEvent, ChatItem, Escalation, Note, NoteType, Session, Task} from './types'
+import type {Agent, AgentEvent, ChatItem, Escalation, Note, NoteType, RateLimit, Session, Task} from './types'
 
 // Typed wrappers around the generated Wails bindings (wailsjs/go, regenerate with `wails generate module`
 // from app/). The generated typings use classes and plain `string` for enums; the values are plain JSON
@@ -25,6 +25,8 @@ export const api = {
   pickDirectory: (): Promise<string> => PickDirectory(),
   /** Creates an empty session in `workDir` (must exist); `name` '' = the directory's name. The orchestrator starts with the first sendMessage. */
   createSession: (name: string, workDir: string) => as<Session>(CreateSession(name, workDir)),
+  /** Latest subscription limits seen, null until any agent reported them. */
+  getRateLimit: () => as<RateLimit | null>(GetRateLimit()),
   /** All sessions, newest first. */
   listSessions: () => as<Session[]>(ListSessions()),
   /** Full state of a session from the database (live or past). */

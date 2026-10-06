@@ -159,12 +159,13 @@ type Session struct {
 	Status    string `json:"status"`
 	WorkDir   string `json:"work_dir"` // "" = none recorded; the runner's configured WorkDir applies
 	CreatedAt string `json:"created_at"`
+	Agents    int    `json:"agent_count"` // 0 = new: the orchestrator starts with the first message
 }
 
-const sessionCols = `id, title, status, work_dir, created_at`
+const sessionCols = `id, title, status, work_dir, created_at, (SELECT COUNT(*) FROM agent_instances WHERE session_id = sessions.id)`
 
 func scanSession(r scanner) (se Session, err error) {
-	err = r.Scan(&se.ID, &se.Title, &se.Status, &se.WorkDir, &se.CreatedAt)
+	err = r.Scan(&se.ID, &se.Title, &se.Status, &se.WorkDir, &se.CreatedAt, &se.Agents)
 	return se, one(err)
 }
 
@@ -179,7 +180,7 @@ func (s *Store) CreateSessionIn(title, workDir string) (Session, error) {
 		return Session{}, err
 	}
 	defer tx.Rollback()
-	se, err := scanSession(tx.QueryRow(`INSERT INTO sessions (title, work_dir) VALUES (?, ?) RETURNING `+sessionCols, title, workDir))
+	se, err := scanSession(tx.QueryRow(`INSERT INTO sessions (title, work_dir) VALUES (?, ?) RETURNING id, title, status, work_dir, created_at, 0`, title, workDir))
 	if err != nil {
 		return Session{}, err
 	}
@@ -270,14 +271,17 @@ type Agent struct {
 	ExitCode  *int   `json:"exit_code,omitempty"`
 	CreatedAt string `json:"created_at"`
 	ExitedAt  string `json:"exited_at,omitempty"`
+
+	ContextUsed   int `json:"context_used,omitempty"`   // tokens in the latest assistant message; 0 = unknown
+	ContextWindow int `json:"context_window,omitempty"` // the model's window; 0 = unknown
 }
 
 const agentCols = `id, session_id, COALESCE(parent_id,0), role, token, COALESCE(task_id,0), status,
-	COALESCE(pid,0), COALESCE(log_path,''), exit_code, created_at, COALESCE(exited_at,'')`
+	COALESCE(pid,0), COALESCE(log_path,''), exit_code, created_at, COALESCE(exited_at,''), context_used, context_window`
 
 func scanAgent(r scanner) (a Agent, err error) {
 	err = r.Scan(&a.ID, &a.SessionID, &a.ParentID, &a.Role, &a.Token, &a.TaskID, &a.Status,
-		&a.PID, &a.LogPath, &a.ExitCode, &a.CreatedAt, &a.ExitedAt)
+		&a.PID, &a.LogPath, &a.ExitCode, &a.CreatedAt, &a.ExitedAt, &a.ContextUsed, &a.ContextWindow)
 	return a, one(err)
 }
 
@@ -375,6 +379,12 @@ func (s *Store) ListAgents(sessionID int64, role string) ([]Agent, error) {
 func (s *Store) SetAgentProcess(sessionID, id int64, pid int, logPath string) error {
 	return affected(s.db.Exec(`UPDATE agent_instances SET pid = ?, log_path = ? WHERE id = ? AND session_id = ?`,
 		pid, logPath, id, sessionID))
+}
+
+// SetAgentContext records the agent's context usage.
+func (s *Store) SetAgentContext(sessionID, id int64, used, window int) error {
+	return affected(s.db.Exec(`UPDATE agent_instances SET context_used = ?, context_window = ? WHERE id = ? AND session_id = ?`,
+		used, window, id, sessionID))
 }
 
 // SetAgentStatus updates status; exited_at is stamped for any status but running.
@@ -618,6 +628,11 @@ func (s *Store) ListAgentEvents(sessionID, agentID, sinceID int64, limit int) ([
 		out = append(out, e)
 	}
 	return out, rows.Err()
+}
+
+// LastAgentEventOfType returns the newest event of the type across all agents (ErrNotFound if none).
+func (s *Store) LastAgentEventOfType(eventType string) (AgentEvent, error) {
+	return scanAgentEvent(s.db.QueryRow(`SELECT `+agentEventCols+` FROM agent_events WHERE event_type = ? ORDER BY id DESC LIMIT 1`, eventType))
 }
 
 // ListAgentEventsOfType is ListAgentEvents restricted to the given event types, with no paging.

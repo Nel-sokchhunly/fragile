@@ -7,7 +7,7 @@ import {Textarea} from '@/components/ui/textarea'
 import {Tooltip, TooltipContent, TooltipTrigger} from '@/components/ui/tooltip'
 import {Composer} from '@/components/chat/Composer'
 import {Markdown} from '@/components/Markdown'
-import {agentLabel, agentState, agentSummary, formatExact, formatTime} from '@/lib/format'
+import {agentContext, agentLabel, agentState, agentSummary, formatExact, formatTime} from '@/lib/format'
 import type {ChatItem, SessionStatus} from '@/lib/types'
 import {cn} from '@/lib/utils'
 import {NO_AGENTS, NO_CHAT, orchestratorRunning, useAppStore} from '@/store/app'
@@ -124,17 +124,24 @@ export function ChatView({sessionId}: {sessionId: number}) {
   const send = useAppStore((s) => s.sendMessage)
   const running = orchestratorRunning(agents)
   const lead = agents.find((a) => a.role === 'orchestrator')
+  const ctx = agentContext(lead)
   const st = session && STATUS_TEXT[session.status === 'done' && !agents.length ? 'new' : session.status]
 
   return (
     <div className="flex h-full min-h-0 min-w-0 flex-col">
-      <header className="@container flex h-10 shrink-0 items-center gap-2.5 border-b pr-1.5 pl-6">
-        <h1 className="min-w-0 truncate text-title font-semibold" title={session?.work_dir}>{session?.title}</h1>
-        {st && <span className={cn('shrink-0 font-mono text-xs', st.cls)}>{st.label}</span>}
-        <div className="flex-1"/>
-        <span className="hidden shrink-0 truncate font-mono text-xs whitespace-nowrap text-muted-foreground @xl:inline" title={lead ? `pid ${lead.pid ?? '-'} · started ${formatExact(lead.created_at)}` : undefined}>
-          orchestrator{lead ? ` ${lead.status === 'running' ? `pid ${lead.pid ?? '-'}` : agentState(lead)}` : ' not started'} · {agentSummary(agents)}
-        </span>
+      <header className="flex h-[52px] shrink-0 items-center gap-2 border-b pr-1.5 pl-6">
+        <div className="grid min-w-0 flex-1">
+          <div className="flex min-w-0 items-baseline gap-2.5">
+            <h1 className="min-w-0 truncate text-title font-semibold">{session?.title}</h1>
+            {st && <span className={cn('shrink-0 font-mono text-xs', st.cls)}>{st.label}</span>}
+          </div>
+          <div className="flex min-w-0 items-baseline gap-2 font-mono text-xs leading-4 text-muted-foreground">
+            <span className="shrink-0 whitespace-nowrap" title={lead ? `pid ${lead.pid ?? '-'} · started ${formatExact(lead.created_at)}` : undefined}>
+              orchestrator{lead ? ` ${lead.status === 'running' ? `pid ${lead.pid ?? '-'}` : agentState(lead)}` : ' not started'} · {ctx && <><span className={ctx.cls}>ctx {ctx.text}</span> · </>}{agentSummary(agents)}
+            </span>
+            {session?.work_dir && <span className="min-w-0 flex-1 truncate text-left [direction:rtl]" title={session.work_dir}><bdi>{session.work_dir}</bdi></span>}
+          </div>
+        </div>
         {running && <StopButton sessionId={sessionId}/>}
       </header>
       {/* Absolutely positioned list: its height never depends on percentage resolution inside flex. */}

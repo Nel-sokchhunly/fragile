@@ -13,6 +13,8 @@ export function DeleteSession(arg1:number):Promise<void>;
 
 export function GetAgentEvents(arg1:number,arg2:number,arg3:number):Promise<Array<notes.AgentEvent>>;
 
+export function GetRateLimit():Promise<main.RateLimit>;
+
 export function GetSession(arg1:number):Promise<main.SessionSnapshot>;
 
 export function ListSessions():Promise<Array<notes.Session>>;

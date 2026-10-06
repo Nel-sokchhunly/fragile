@@ -271,6 +271,7 @@ func (a *App) deliver(orch notes.Agent, text string, persist bool) error {
 // into stored and emitted agent events, and tracks whether the orchestrator is mid-turn.
 func (a *App) onLine(ag notes.Agent, line []byte) {
 	changed := false
+	a.trackUsage(ag, line)
 	for _, pe := range parseLine(line) {
 		if _, err := a.record(ag, pe.Type, pe.Payload); err != nil {
 			log.Printf("agent %d: storing %s event: %v", ag.ID, pe.Type, err)

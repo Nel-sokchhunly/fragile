@@ -1,6 +1,6 @@
 import {create} from 'zustand'
 import {api} from '@/lib/api'
-import type {Agent, AgentEvent, ChatItem, Note, NoteType, Session, SessionStatus, Task} from '@/lib/types'
+import type {Agent, AgentEvent, ChatItem, Note, NoteType, RateLimit, Session, SessionStatus, Task} from '@/lib/types'
 
 // Zustand store fed by the backend: snapshots (lib/api.ts) on first view of a session, then Wails events
 // (lib/events.ts) routed here by session_id. Components only read it via selectors.
@@ -18,11 +18,13 @@ type AppState = {
   selectedAgentId: number | null // null = show the orchestrator chat
   sidebarCollapsed: boolean // mirror of the sidebar panel's collapsed state
   toasts: Toast[]
+  limit: RateLimit | null // subscription limits (account-wide)
   confirmDelete: number | null // session awaiting delete confirmation
 
   init: () => Promise<void>
   selectSession: (id: number | null) => void
   setConfirmDelete: (id: number | null) => void
+  setLimit: (l: RateLimit) => void
   selectAgent: (id: number | null) => void
   setSidebarCollapsed: (c: boolean) => void
   notify: (e: unknown) => void
@@ -95,9 +97,11 @@ export const useAppStore = create<AppState>((set, get) => {
     selectedAgentId: null,
     sidebarCollapsed: false,
     toasts: [],
+    limit: null,
     confirmDelete: null,
 
     init: async () => {
+      void api.getRateLimit().then((l) => l && get().setLimit(l), (e) => get().notify(e))
       try {
         const list = await api.listSessions()
         const ids = new Set(list.map((x) => x.id))
@@ -109,6 +113,7 @@ export const useAppStore = create<AppState>((set, get) => {
     },
     selectSession: select,
     setConfirmDelete: (confirmDelete) => set({confirmDelete}),
+    setLimit: (limit) => set({limit}),
     selectAgent: (selectedAgentId) => set({selectedAgentId}),
     setSidebarCollapsed: (sidebarCollapsed) => set({sidebarCollapsed}),
 
@@ -162,7 +167,8 @@ export const useAppStore = create<AppState>((set, get) => {
     },
 
     sessionCreated: (se) => set((s) => (s.sessions.some((x) => x.id === se.id) ? s : {sessions: [se, ...s.sessions]})),
-    sessionStatus: (sid, status) => set((s) => ({sessions: s.sessions.map((x) => (x.id === sid ? {...x, status} : x))})),
+    // A status other than done means the orchestrator exists, so the session is no longer new.
+    sessionStatus: (sid, status) => set((s) => ({sessions: s.sessions.map((x) => (x.id === sid ? {...x, status, agent_count: x.agent_count || (status === 'done' ? 0 : 1)} : x))})),
     sessionDeleted: (sid) => {
       const {sessions, selectedSessionId} = get()
       const i = sessions.findIndex((x) => x.id === sid)

@@ -6,7 +6,7 @@ import {Collapsible, CollapsibleContent, CollapsibleTrigger} from '@/components/
 import {Tooltip, TooltipContent, TooltipTrigger} from '@/components/ui/tooltip'
 import {Markdown} from '@/components/Markdown'
 import {useNow} from '@/hooks/use-now'
-import {agentElapsed, agentLabel, agentState, formatElapsed, formatExact} from '@/lib/format'
+import {agentContext, agentElapsed, agentLabel, agentState, formatElapsed, formatExact} from '@/lib/format'
 import type {Agent, AgentEvent} from '@/lib/types'
 import {cn} from '@/lib/utils'
 import {NO_EVENTS, useAppStore} from '@/store/app'
@@ -54,10 +54,11 @@ const STATE_CLS = {running: 'text-status-working', exited: 'text-status-exited',
 // Own component so the 1s clock tick re-renders only this label, not the virtualized list.
 function Meta({agent, count}: {agent: Agent; count: number}) {
   const now = useNow()
+  const ctx = agentContext(agent)
   return (
-    <span className="shrink-0 font-mono text-xs text-muted-foreground" title={`pid ${agent.pid ?? '-'} · started ${formatExact(agent.created_at)}`}>
-      <span className={STATE_CLS[agent.status]}>{agentState(agent)}</span> {agentElapsed(agent, now)} · {count.toLocaleString()} ev
-    </span>
+    <div className="truncate font-mono text-xs leading-4 whitespace-nowrap text-muted-foreground" title={`pid ${agent.pid ?? '-'} · started ${formatExact(agent.created_at)}`}>
+      {ctx && <><span className={ctx.cls} title="context used / window">ctx {ctx.text}</span> · </>}{agentElapsed(agent, now)} · {count.toLocaleString()} ev
+    </div>
   )
 }
 
@@ -81,15 +82,19 @@ export function AgentOutputView({sessionId, agentId}: {sessionId: number; agentI
 
   return (
     <div className="flex h-full min-h-0 min-w-0 flex-col">
-      <header className="flex h-10 shrink-0 items-center gap-2 border-b pr-6 pl-2">
+      <header className="flex h-[52px] shrink-0 items-center gap-2 border-b pr-6 pl-2">
         <Tooltip>
           <TooltipTrigger asChild>
             <Button variant="ghost" size="icon-sm" onClick={() => back(null)} aria-label="Back to orchestrator chat"><ArrowLeft/></Button>
           </TooltipTrigger>
           <TooltipContent side="bottom">Back to chat (Esc)</TooltipContent>
         </Tooltip>
-        <h1 className="min-w-0 flex-1 truncate text-title font-semibold">{agentLabel(agent, task)}</h1>
-        {agent && <Meta agent={agent} count={events.length}/>}
+        <div className="grid min-w-0 flex-1">
+          <h1 className="truncate text-title font-semibold">
+            {agentLabel(agent, task)}{agent && <> · <span className={cn('font-mono text-xs font-normal', STATE_CLS[agent.status])}>{agentState(agent)}</span></>}
+          </h1>
+          {agent && <Meta agent={agent} count={events.length}/>}
+        </div>
       </header>
       {task?.description && <p className="truncate border-b px-6 py-1 text-[13px] text-text-secondary" title={task.description}>{task.description}</p>}
       {/* Absolutely positioned list: its height never depends on percentage resolution inside flex. */}

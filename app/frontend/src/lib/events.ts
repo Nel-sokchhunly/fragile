@@ -1,6 +1,6 @@
 import {EventsOn} from '../../wailsjs/runtime/runtime'
 import {upsert, useAppStore, type SessionData} from '@/store/app'
-import type {Agent, AgentEvent, AgentStatus, AgentRole, ChatItem, Escalation, Note, Session, SessionStatus, Task, TaskStatus} from './types'
+import type {Agent, AgentEvent, AgentStatus, AgentRole, ChatItem, Escalation, Note, RateLimit, Session, SessionStatus, Task, TaskStatus} from './types'
 
 // Go -> Wails events -> Zustand store -> components. Components never poll.
 // Event names and payloads live here; keep in sync with the emitters in app/*.go
@@ -20,6 +20,8 @@ export type EventMap = {
   // Session lifecycle. session_created carries the full row; status changes carry only the new status.
   session_created: Envelope<Session>
   session_status_changed: Envelope<{status: SessionStatus}>
+  // Account-wide subscription limits changed (session_id / agent_id are the agent that saw it).
+  rate_limit_changed: Envelope<RateLimit>
   session_deleted: Envelope<null> // the session and everything of it is gone
 
   // Agents and tasks. agent_spawned / agent_status_changed are the raw observations; agent_updated and
@@ -67,6 +69,7 @@ export function subscribeEvents() {
   const offs = [
     on('session_created', (e) => st().sessionCreated(e.payload)),
     on('session_status_changed', (e) => st().sessionStatus(e.session_id, e.payload.status)),
+    on('rate_limit_changed', (e) => st().setLimit(e.payload)),
     on('session_deleted', (e) => st().sessionDeleted(e.session_id)),
     on('agent_updated', patch((d, a: Agent) => ({...d, agents: upsert(d.agents, a)}))),
     on('task_updated', patch((d, t: Task) => ({...d, tasks: upsert(d.tasks, t)}))),

@@ -1,4 +1,5 @@
 import {PanelLeftClose, PanelLeftOpen, Plus, Trash2} from 'lucide-react'
+import {LimitLine} from '@/components/LimitLine'
 import {NewSessionDialog} from '@/components/NewSessionDialog'
 import {Button} from '@/components/ui/button'
 import {ScrollArea} from '@/components/ui/scroll-area'
@@ -9,18 +10,22 @@ import {cn} from '@/lib/utils'
 import {useAppStore} from '@/store/app'
 
 // Status is plain coloured text (the rail keeps a dot so "needs you" stays visible when collapsed).
-const STATUS: Record<SessionStatus, {label: string; text: string; dot: string}> = {
+// 'new' is not a backend status: a session whose orchestrator has not started (no agents yet).
+const STATUS: Record<SessionStatus | 'new', {label: string; text: string; dot: string}> = {
+  new: {label: 'new', text: 'text-status-done', dot: 'bg-status-done/50'},
   working: {label: 'working', text: 'text-status-working', dot: 'bg-status-working'},
   done: {label: 'done', text: 'text-status-done', dot: 'bg-status-done/50'},
   needs_you: {label: 'needs you', text: 'text-status-needs-you', dot: 'bg-status-needs-you'},
 }
+
+const statusOf = (s: Session) => STATUS[s.status === 'done' && !s.agent_count ? 'new' : s.status]
 
 const hint = (i: number) => (i < 9 ? ` (${MOD}${i + 1})` : '')
 
 function SessionRow({session, index, selected}: {session: Session; index: number; selected: boolean}) {
   const select = useAppStore((s) => s.selectSession)
   const confirmDelete = useAppStore((s) => s.setConfirmDelete)
-  const st = STATUS[session.status]
+  const st = statusOf(session)
   // The trash icon takes the status's place while the row is hovered or focused.
   return (
     <div className="group relative">
@@ -47,7 +52,7 @@ function SessionRow({session, index, selected}: {session: Session; index: number
 
 function RailItem({session, index, selected}: {session: Session; index: number; selected: boolean}) {
   const select = useAppStore((s) => s.selectSession)
-  const st = STATUS[session.status]
+  const st = statusOf(session)
   return (
     <Tooltip>
       <TooltipTrigger asChild>
@@ -98,6 +103,7 @@ export function SessionsSidebar({onToggle}: {onToggle: () => void}) {
             {sessions.map((s, i) => <RailItem key={s.id} session={s} index={i} selected={s.id === selectedId}/>)}
           </div>
         </ScrollArea>
+        <LimitLine compact/>
       </nav>
     )
   }
@@ -114,6 +120,7 @@ export function SessionsSidebar({onToggle}: {onToggle: () => void}) {
           {sessions.map((s, i) => <SessionRow key={s.id} session={s} index={i} selected={s.id === selectedId}/>)}
         </div>
       </ScrollArea>
+      <LimitLine/>
     </nav>
   )
 }
