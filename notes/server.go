@@ -32,7 +32,7 @@ type Server struct {
 	// OnEscalation, if set (the desktop app), makes escalate_to_user answer
 	// asynchronously: the tool returns at once and the answer is delivered to the
 	// orchestrator later. It runs after the escalation is stored and logged. Nil
-	// keeps the Phase 0 behaviour (banner on stdout, no answer comes back).
+	// keeps the CLI behaviour (banner on stdout, no answer comes back).
 	OnEscalation func(a Agent, e Escalation)
 }
 
@@ -68,6 +68,9 @@ func (s *Server) mcpHandler() http.Handler {
 			return
 		} else if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		} else if agent.Status != "running" { // a finished agent's URL must not keep working
+			http.Error(w, "agent is not running", http.StatusForbidden)
 			return
 		}
 		srv := s.newMCPServer(agent, cache)

@@ -89,7 +89,7 @@ func run(cfg notes.Config, task string) error {
 	}
 	defer evlog.Close()
 
-	title := task
+	title := notes.FirstLine(task)
 	if title == "" {
 		title = "phase0"
 	}

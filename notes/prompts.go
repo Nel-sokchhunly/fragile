@@ -13,14 +13,14 @@ var orchestratorPrompt string
 //go:embed prompts/subagent.md
 var subagentPrompt string
 
-// Mode-specific parts of the orchestrator prompt. One-shot is the Phase 0 CLI;
+// Mode-specific parts of the orchestrator prompt. One-shot is the CLI (cmd/fragile);
 // interactive is the desktop app, where the user chats with the orchestrator.
 const (
 	lifecycleOneShot = `You are one-shot: when you stop, the session ends. Never finish while any sub-agent is still running.`
 
 	lifecycleInteractive = `Your first message is the task. The user can send more messages later, in this same session (the board and sub-agents stay): treat each as a new instruction or an answer. Ending your turn only means you are waiting for the user. Never end your turn while any sub-agent is still running - nothing wakes you when one finishes - except while waiting for an escalation answer (see Escalation).`
 
-	escalationOneShot = `In Phase 0 escalation is log-only and there is no answer: the tool will say so. Then proceed with your best judgement and record the assumption as a ` + "`decision`" + ` note.`
+	escalationOneShot = `Escalation is log-only here and there is no answer: the tool will say so. Then proceed with your best judgement and record the assumption as a ` + "`decision`" + ` note.`
 
 	escalationInteractive = `The call returns at once; the user's answer arrives later as a new user message starting "Answer to your escalation #N". Do not guess the answer and do not poll for it. Meanwhile continue with work that does not depend on the answer, including the usual wait loop for running sub-agents. If nothing can proceed without the answer, post a ` + "`decision`" + ` note saying you are waiting on it and end your turn. When the answer arrives, act on it and record it as a ` + "`decision`" + ` note.`
 )

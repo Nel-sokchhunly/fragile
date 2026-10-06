@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -69,6 +70,7 @@ func NewApp() *App { return &App{} }
 // startup runs once when the window is created; ctx lives until the app quits.
 func (a *App) startup(ctx context.Context) {
 	a.ctx = ctx
+	widenPath() // before the runner looks for claude
 	dir, err := dataDir()
 	if err == nil {
 		err = a.open(dir, func(name string, data any) { runtime.EventsEmit(ctx, name, data) })
@@ -200,7 +202,7 @@ func (a *App) AddNote(sessionID int64, noteType, content string) (notes.Note, er
 	if err := notes.CheckNoteType(noteType); err != nil {
 		return notes.Note{}, err
 	}
-	if content == "" {
+	if strings.TrimSpace(content) == "" {
 		return notes.Note{}, errors.New("content must not be empty")
 	}
 	board, err := a.store.SessionBoard(sessionID)

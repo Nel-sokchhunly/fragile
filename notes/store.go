@@ -606,6 +606,12 @@ func (s *Store) AppendAgentEvent(sessionID, agentID int64, eventType, payload st
 		eventType, payload, agentID, sessionID))
 }
 
+// DeleteAgentEvent removes one event of the agent (undoes an append whose delivery failed).
+func (s *Store) DeleteAgentEvent(sessionID, agentID, id int64) error {
+	return affected(s.db.Exec(`DELETE FROM agent_events WHERE id = ? AND agent_id IN
+		(SELECT id FROM agent_instances WHERE id = ? AND session_id = ?)`, id, agentID, sessionID))
+}
+
 // ListAgentEvents returns the agent's events with id > sinceID, oldest first,
 // at most limit of them (limit <= 0: no limit). Page by passing the last id seen.
 func (s *Store) ListAgentEvents(sessionID, agentID, sinceID int64, limit int) ([]AgentEvent, error) {

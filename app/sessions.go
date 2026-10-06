@@ -6,8 +6,11 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/Nel-sokchhunly/fragile/notes"
@@ -75,9 +78,11 @@ func (a *App) SendMessage(sessionID int64, text string) error {
 	var orch notes.Agent
 	switch {
 	case err != nil:
-	case len(orchs) == 0:
-		a.setBusy(sessionID, true)                            // before the process exists, so the session never flickers to done
-		orch, err = a.runner.StartOrchestrator(sessionID, "") // on failure the runner recorded the crash; the session derives to done
+	case a.neverStarted(sessionID, orchs):
+		a.setBusy(sessionID, true) // before the process exists, so the session never flickers to done
+		if orch, err = a.runner.StartOrchestrator(sessionID, ""); err != nil {
+			a.setBusy(sessionID, false) // the runner recorded the crash; the session derives to done
+		}
 	default:
 		orch, err = a.liveOrchestrator(sessionID)
 	}
@@ -86,6 +91,19 @@ func (a *App) SendMessage(sessionID int64, text string) error {
 		return err
 	}
 	return a.deliver(orch, text, true)
+}
+
+// neverStarted reports whether the session has no orchestrator that ever did
+// anything: none at all, or only ones that crashed (e.g. a failed launch)
+// without a single event. Such a session may start a fresh orchestrator.
+func (a *App) neverStarted(sessionID int64, orchs []notes.Agent) bool {
+	for _, o := range orchs {
+		evs, err := a.store.ListAgentEvents(sessionID, o.ID, 0, 1)
+		if o.Status != "crashed" || err != nil || len(evs) > 0 {
+			return false
+		}
+	}
+	return true
 }
 
 // StopSession stops the session's orchestrator and sub-agents (for good: past
@@ -107,7 +125,7 @@ func (a *App) DeleteSession(sessionID int64) error {
 	if _, err := a.store.GetSession(sessionID); err != nil {
 		return err
 	}
-	a.runner.StopSession(sessionID)
+	a.runner.StopSession(sessionID) // returns once every process is gone and recorded
 	agents, err := a.store.ListAgents(sessionID, "")
 	if err != nil {
 		return err
@@ -115,8 +133,13 @@ func (a *App) DeleteSession(sessionID int64) error {
 	if err := a.store.DeleteSession(sessionID); err != nil {
 		return err
 	}
+	// SQLite reuses the highest rowid, so a new session can get this id: it must start clean.
+	a.runner.Forget(sessionID)
 	a.mu.Lock()
 	delete(a.busy, sessionID)
+	for _, ag := range agents {
+		delete(a.models, ag.ID)
+	}
 	a.mu.Unlock()
 	for _, ag := range agents {
 		for _, ext := range []string{".mcp.json", ".jsonl"} {
@@ -245,21 +268,33 @@ func (a *App) liveOrchestrator(sessionID int64) (notes.Agent, error) {
 }
 
 // deliver writes a message to the orchestrator's stdin; with persist it is also
-// stored (and shown) as a user message. The orchestrator is mid-turn from then on.
+// stored (and shown) as a user message, but only once the write succeeded, so a
+// failed send leaves no phantom chat message. The row is reserved first (its id
+// then orders it before the orchestrator's reply, which can arrive at once) and
+// removed again if the write fails; it is published after the write. The
+// orchestrator is mid-turn from then on.
 func (a *App) deliver(orch notes.Agent, text string, persist bool) error {
 	a.sendMu.Lock()
 	defer a.sendMu.Unlock()
+	var ev notes.AgentEvent
 	if persist {
 		b, _ := json.Marshal(map[string]string{"text": text})
-		if _, err := a.record(orch, evUserMessage, string(b)); err != nil {
+		var err error
+		if ev, err = a.store.AppendAgentEvent(orch.SessionID, orch.ID, evUserMessage, string(b)); err != nil {
 			return err
 		}
 	}
 	a.setBusy(orch.SessionID, true)
 	if err := a.runner.SendUser(orch.ID, text); err != nil {
+		if persist {
+			a.store.DeleteAgentEvent(orch.SessionID, orch.ID, ev.ID)
+		}
 		a.setBusy(orch.SessionID, false)
 		a.recompute(orch.SessionID)
 		return err
+	}
+	if persist {
+		a.publish(orch, ev)
 	}
 	a.recompute(orch.SessionID)
 	return nil
@@ -299,13 +334,18 @@ func (a *App) record(ag notes.Agent, typ, payload string) (notes.AgentEvent, err
 	if err != nil {
 		return ev, err
 	}
+	a.publish(ag, ev)
+	return ev, nil
+}
+
+// publish emits a stored agent event, plus the chat item it makes for the orchestrator.
+func (a *App) publish(ag notes.Agent, ev notes.AgentEvent) {
 	a.pushEvent(eventAgentEvent, ag.SessionID, ag.ID, ev)
 	if ag.Role == "orchestrator" {
 		if item, ok := a.chatItem(ag.SessionID, ev); ok {
 			a.pushEvent(eventChatItem, ag.SessionID, ag.ID, item)
 		}
 	}
-	return ev, nil
 }
 
 // chatItem maps an orchestrator agent event to its chat row; ok is false for
@@ -490,6 +530,11 @@ func (a *App) loop() {
 func (a *App) react(ev notes.Event) {
 	switch ev.Event {
 	case notes.EventAgentSpawned, notes.EventAgentStatusChanged:
+		if ev.Event == notes.EventAgentStatusChanged {
+			a.mu.Lock()
+			delete(a.models, ev.AgentID) // the agent is done with its model
+			a.mu.Unlock()
+		}
 		if ag, err := a.store.GetAgent(ev.SessionID, ev.AgentID); err == nil {
 			a.pushEvent(eventAgentUpdated, ev.SessionID, ag.ID, ag)
 			if t, err := a.store.GetTask(ev.SessionID, ag.TaskID); err == nil {
@@ -504,14 +549,30 @@ func (a *App) react(ev notes.Event) {
 
 // Startup recovery
 
-// recoverStale records agents a previous run left "running" as crashed (their
-// processes died with it; nothing is resumed) and recomputes every session's status.
+// killOrphan kills the process group of an agent a hard-killed previous run
+// left behind, but only if the process at its pid still runs with this agent's
+// MCP config on its command line (the pid may have been reused). Best effort.
+func (a *App) killOrphan(ag notes.Agent) {
+	if ag.PID <= 1 {
+		return
+	}
+	out, err := exec.Command("ps", "-p", strconv.Itoa(ag.PID), "-o", "command=").Output()
+	if err != nil || !strings.Contains(string(out), filepath.Join(a.agentDir, fmt.Sprintf("agent-%d.mcp.json", ag.ID))) {
+		return
+	}
+	syscall.Kill(-ag.PID, syscall.SIGKILL) // agents run as their own process group leader
+}
+
+// recoverStale records agents a previous run left "running" as crashed
+// (nothing is resumed; processes that outlived a hard kill are killed) and
+// recomputes every session's status.
 func (a *App) recoverStale() error {
 	stale, err := a.store.MarkRunningAgentsCrashed()
 	if err != nil {
 		return err
 	}
 	for _, ag := range stale {
+		a.killOrphan(ag)
 		a.log.Write(notes.EventAgentStatusChanged, ag.SessionID, ag.ID,
 			map[string]any{"role": ag.Role, "status": "crashed", "reason": "app restarted"})
 	}

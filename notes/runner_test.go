@@ -28,7 +28,7 @@ func newTestRunner(t *testing.T, script string) (*Runner, *Store, Session, strin
 	}
 	t.Cleanup(func() { ev.Close() })
 	r := NewRunner(Config{Addr: "127.0.0.1:1", AgentDir: dir, WorkDir: dir}, store, ev)
-	r.preflight = nil // tests must not depend on the host's sandbox tools
+	r.Preflight = nil // tests must not depend on the host's sandbox tools
 	r.Command = writeFake(t, dir, script)
 	sess, err := store.CreateSession("test")
 	if err != nil {
@@ -50,7 +50,7 @@ func writeFake(t *testing.T, dir, script string) string {
 func TestRunnerSubagentExitsCleanly(t *testing.T) {
 	r, store, sess, evPath := newTestRunner(t, `echo '{"type":"result"}'`)
 	orch, _ := store.CreateAgent(sess.ID, "orchestrator", 0, 0)
-	a, err := r.SpawnSubagent(sess.ID, orch.ID, "first line\nsecond line")
+	a, err := r.SpawnSubagent(sess.ID, orch.ID, "", "first line\nsecond line")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -86,7 +86,7 @@ func TestRunnerSubagentExitsCleanly(t *testing.T) {
 func TestRunnerDoneNoteSuppressesFlag(t *testing.T) {
 	r, store, sess, evPath := newTestRunner(t, `sleep 1`)
 	orch, _ := store.CreateAgent(sess.ID, "orchestrator", 0, 0)
-	a, err := r.SpawnSubagent(sess.ID, orch.ID, "do it")
+	a, err := r.SpawnSubagent(sess.ID, orch.ID, "", "do it")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -101,7 +101,7 @@ func TestRunnerDoneNoteSuppressesFlag(t *testing.T) {
 func TestRunnerSubagentCrashes(t *testing.T) {
 	r, store, sess, evPath := newTestRunner(t, `echo boom >&2; exit 1`)
 	orch, _ := store.CreateAgent(sess.ID, "orchestrator", 0, 0)
-	a, err := r.SpawnSubagent(sess.ID, orch.ID, "do it")
+	a, err := r.SpawnSubagent(sess.ID, orch.ID, "", "do it")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -130,31 +130,31 @@ func TestRunnerStopAllRecordsEverything(t *testing.T) {
 	if orch.Role != "orchestrator" || orch.PID <= 0 || orch.TaskID != 0 {
 		t.Fatalf("agent: %+v", orch)
 	}
-	sub, err := r.SpawnSubagent(sess.ID, orch.ID, "do it")
+	sub, err := r.SpawnSubagent(sess.ID, orch.ID, "", "do it")
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	r.StopAll() // no Wait: StopAll itself must leave state and log final
 	for _, id := range []int64{orch.ID, sub.ID} {
-		if got, _ := store.GetAgent(sess.ID, id); got.Status != "crashed" { // SIGTERM: exit code -1
+		if got, _ := store.GetAgent(sess.ID, id); got.Status != "stopped" { // killed on purpose, not a crash
 			t.Fatalf("agent %d status after StopAll = %q", id, got.Status)
 		}
 	}
-	if task, _ := store.GetTask(sess.ID, sub.TaskID); task.Status != "blocked" {
+	if task, _ := store.GetTask(sess.ID, sub.TaskID); task.Status != "working" { // a deliberate stop does not block the task
 		t.Fatalf("task status = %q", task.Status)
 	}
 	if ev, _ := os.ReadFile(evPath); strings.Count(string(ev), `"event":"agent_status_changed"`) != 2 {
 		t.Fatalf("want 2 agent_status_changed events:\n%s", ev)
 	}
-	if _, err := r.SpawnSubagent(sess.ID, orch.ID, "too late"); err == nil {
+	if _, err := r.SpawnSubagent(sess.ID, orch.ID, "", "too late"); err == nil {
 		t.Fatal("SpawnSubagent after StopAll succeeded")
 	}
 }
 
 func TestRunnerArgs(t *testing.T) {
 	r := NewRunner(Config{AgentDir: "/d/agents", DBPath: "/d/f.db", LogPath: "/d/events.jsonl"}, nil, nil)
-	args := r.args(Agent{Role: "subagent"}, "/x/agent-3.mcp.json", "do -it", "SYS")
+	args := r.args(Agent{Role: "subagent"}, "/w/dir", "/x/agent-3.mcp.json", "do -it", "SYS")
 	for _, want := range [][]string{
 		{"--mcp-config", "/x/agent-3.mcp.json"}, {"--append-system-prompt", "SYS"},
 		{"--output-format", "stream-json"}, {"--disallowedTools", "Task,Agent,Workflow"}, {"--", "do -it"},
@@ -171,7 +171,7 @@ func TestRunnerArgs(t *testing.T) {
 			Credentials                                          struct{ Files []struct{ Path, Mode string } }
 			Network                                              struct{ AllowedDomains []string }
 		}
-		Permissions struct{ Deny []string }
+		Permissions struct{ Allow, Deny []string }
 	}
 	if i := slices.Index(args, "--settings"); i < 0 {
 		t.Fatalf("args missing --settings: %v", args)
@@ -195,6 +195,21 @@ func TestRunnerArgs(t *testing.T) {
 			t.Errorf("missing deny rule %s: %v", rule, settings.Permissions.Deny)
 		}
 	}
+	// Edit/Write are allowed only inside the working directory; secrets are denied to the file tools and to Bash writes.
+	if i := slices.Index(args, "--allowedTools"); i < 0 || strings.Contains(args[i+1], "Edit") || strings.Contains(args[i+1], "Write") {
+		t.Errorf("--allowedTools must not allow Edit/Write everywhere: %v", args)
+	}
+	if !slices.Equal(settings.Permissions.Allow, []string{"Edit(//w/dir/**)"}) {
+		t.Errorf("allow rules = %v", settings.Permissions.Allow)
+	}
+	for _, rule := range []string{"Read(~/.ssh)", "Edit(~/.ssh)", "Edit(~/.claude/.credentials.json)"} {
+		if !slices.Contains(settings.Permissions.Deny, rule) {
+			t.Errorf("missing deny rule %s: %v", rule, settings.Permissions.Deny)
+		}
+	}
+	if !slices.Contains(sb.Filesystem.DenyWrite, "~/.ssh") || !slices.Contains(sb.Filesystem.DenyWrite, "~/.aws") {
+		t.Errorf("sandbox does not deny writes to credentials: %v", sb.Filesystem.DenyWrite)
+	}
 	if slices.Contains(args, "--bare") {
 		t.Errorf("--bare would break subscription login: %v", args)
 	}
@@ -202,11 +217,11 @@ func TestRunnerArgs(t *testing.T) {
 		t.Errorf("one-shot args take input from stdin: %v", args)
 	}
 	r.Interactive = true
-	iargs := r.args(Agent{Role: "orchestrator"}, "/x/agent-3.mcp.json", "", "SYS")
+	iargs := r.args(Agent{Role: "orchestrator"}, "/w/dir", "/x/agent-3.mcp.json", "", "SYS")
 	if i := slices.Index(iargs, "--input-format"); i < 0 || iargs[i+1] != "stream-json" || slices.Contains(iargs, "--") || !slices.Contains(iargs, "--setting-sources") {
 		t.Errorf("interactive orchestrator args: %v", iargs)
 	}
-	if sub := r.args(Agent{Role: "subagent"}, "/x", "p", "SYS"); slices.Contains(sub, "--input-format") {
+	if sub := r.args(Agent{Role: "subagent"}, "/w/dir", "/x", "p", "SYS"); slices.Contains(sub, "--input-format") {
 		t.Errorf("sub-agents stay one-shot: %v", sub)
 	}
 	if !slices.Contains(args, "--strict-mcp-config") || !slices.Contains(args, "--disable-slash-commands") || !slices.Contains(args, "--verbose") || slices.Contains(args, "--dangerously-skip-permissions") {
@@ -217,9 +232,9 @@ func TestRunnerArgs(t *testing.T) {
 // A missing sandbox prerequisite fails the launch with a readable error and starts nothing.
 func TestRunnerLaunchNeedsSandbox(t *testing.T) {
 	r, store, sess, _ := newTestRunner(t, `echo hi`)
-	r.preflight = func() error { return errors.New(`agent sandbox needs "bwrap"`) }
+	r.Preflight = func() error { return errors.New(`agent sandbox needs "bwrap"`) }
 	orch, _ := store.CreateAgent(sess.ID, "orchestrator", 0, 0)
-	if _, err := r.SpawnSubagent(sess.ID, orch.ID, "t"); err == nil || !strings.Contains(err.Error(), "bwrap") {
+	if _, err := r.SpawnSubagent(sess.ID, orch.ID, "", "t"); err == nil || !strings.Contains(err.Error(), "bwrap") {
 		t.Fatalf("err = %v, want the sandbox error", err)
 	}
 }
@@ -236,31 +251,31 @@ func TestRunnerStopSessionLeavesOthers(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	sa, err := r.SpawnSubagent(a.ID, oa.ID, "sub a")
+	sa, err := r.SpawnSubagent(a.ID, oa.ID, "", "sub a")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := r.SpawnSubagent(b.ID, oa.ID, "wrong session"); err == nil {
+	if _, err := r.SpawnSubagent(b.ID, oa.ID, "", "wrong session"); err == nil {
 		t.Fatal("spawn with another session's orchestrator succeeded")
 	}
 
 	r.StopSession(a.ID)
 	for _, id := range []int64{oa.ID, sa.ID} {
-		if got, _ := store.GetAgent(a.ID, id); got.Status != "crashed" {
+		if got, _ := store.GetAgent(a.ID, id); got.Status != "stopped" {
 			t.Fatalf("session A agent %d status = %q", id, got.Status)
 		}
 	}
 	if got, _ := store.GetAgent(b.ID, ob.ID); got.Status != "running" {
 		t.Fatalf("session B orchestrator status = %q, want running", got.Status)
 	}
-	if _, err := r.SpawnSubagent(a.ID, oa.ID, "late"); err == nil {
+	if _, err := r.SpawnSubagent(a.ID, oa.ID, "", "late"); err == nil {
 		t.Fatal("spawn in a stopped session succeeded")
 	}
-	if _, err := r.SpawnSubagent(b.ID, ob.ID, "still fine"); err != nil {
+	if _, err := r.SpawnSubagent(b.ID, ob.ID, "", "still fine"); err != nil {
 		t.Fatalf("spawn in the other session: %v", err)
 	}
 	r.StopAll()
-	if got, _ := store.GetAgent(b.ID, ob.ID); got.Status != "crashed" {
+	if got, _ := store.GetAgent(b.ID, ob.ID); got.Status != "stopped" {
 		t.Fatalf("session B orchestrator after StopAll = %q", got.Status)
 	}
 	if _, err := r.StartOrchestrator(b.ID, "x"); err == nil {
@@ -273,7 +288,7 @@ func TestEventLogOnEvent(t *testing.T) {
 	var got []Event
 	r.log.OnEvent = func(e Event) { got = append(got, e) }
 	orch, _ := store.CreateAgent(sess.ID, "orchestrator", 0, 0)
-	if _, err := r.SpawnSubagent(sess.ID, orch.ID, "do it"); err != nil {
+	if _, err := r.SpawnSubagent(sess.ID, orch.ID, "", "do it"); err != nil {
 		t.Fatal(err)
 	}
 	r.Wait(sess.ID)
@@ -293,7 +308,7 @@ func TestEventLogOnEvent(t *testing.T) {
 func TestRunnerIsolationEnvAndWorkDir(t *testing.T) {
 	r, store, sess, _ := newTestRunner(t, `echo "$CLAUDE_CODE_DISABLE_AUTO_MEMORY" "$PWD"; for a in "$@"; do echo "$a"; done`)
 	orch, _ := store.CreateAgent(sess.ID, "orchestrator", 0, 0)
-	a, err := r.SpawnSubagent(sess.ID, orch.ID, "do it")
+	a, err := r.SpawnSubagent(sess.ID, orch.ID, "", "do it")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -358,7 +373,7 @@ func TestRunnerInteractiveStdinAndOnLine(t *testing.T) {
 		t.Error("stopped orchestrator still takes messages")
 	}
 	got, _ := store.GetAgent(sess.ID, a.ID)
-	if got.Status != "crashed" {
+	if got.Status != "stopped" {
 		t.Errorf("status = %s", got.Status)
 	}
 	if b, _ := os.ReadFile(a.LogPath); !strings.Contains(string(b), "got: ") {
@@ -391,4 +406,106 @@ func TestOrchestratorPromptModes(t *testing.T) {
 	if strings.Contains(chat, "one-shot") || strings.Contains(chat, "log-only") || !strings.Contains(chat, "Answer to your escalation #N") {
 		t.Error("interactive prompt wrong")
 	}
+}
+
+// Billing-related variables never reach an agent; subscription auth does.
+func TestAgentEnv(t *testing.T) {
+	in := []string{"PATH=/bin", "ANTHROPIC_API_KEY=k", "ANTHROPIC_AUTH_TOKEN=t", "ANTHROPIC_BASE_URL=u",
+		"CLAUDE_CODE_USE_BEDROCK=1", "CLAUDE_CODE_USE_VERTEX=1", "CLAUDE_CODE_OAUTH_TOKEN=o", "ANTHROPIC_MODEL=haiku"}
+	got := agentEnv(in)
+	want := []string{"PATH=/bin", "CLAUDE_CODE_OAUTH_TOKEN=o", "ANTHROPIC_MODEL=haiku", isolationEnv}
+	if !slices.Equal(got, want) {
+		t.Fatalf("agentEnv = %v, want %v", got, want)
+	}
+	// End to end: the child process sees none of them.
+	t.Setenv("ANTHROPIC_API_KEY", "sk-leak")
+	r, store, sess, _ := newTestRunner(t, `echo "key=[$ANTHROPIC_API_KEY]"`)
+	orch, _ := store.CreateAgent(sess.ID, "orchestrator", 0, 0)
+	a, err := r.SpawnSubagent(sess.ID, orch.ID, "", "t")
+	if err != nil {
+		t.Fatal(err)
+	}
+	r.Wait(sess.ID)
+	if out, _ := os.ReadFile(a.LogPath); strings.TrimSpace(string(out)) != "key=[]" {
+		t.Fatalf("child env leaked the API key: %q", out)
+	}
+}
+
+// Symlinked paths (/tmp on macOS) are resolved in the settings; missing files resolve through their directory.
+func TestSandboxSettingsResolveSymlinks(t *testing.T) {
+	base, _ := filepath.EvalSymlinks(t.TempDir())
+	if err := os.Mkdir(filepath.Join(base, "real"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(base, "link")
+	if err := os.Symlink(filepath.Join(base, "real"), link); err != nil {
+		t.Fatal(err)
+	}
+	st := sandboxSettings(Config{AgentDir: link + "/agents", DBPath: link + "/f.db"}, link)
+	for _, want := range []string{`"Edit(/` + base + `/real/**)"`, `"Read(/` + base + `/real/f.db-wal)"`, `"` + base + `/real/agents"`} {
+		if !strings.Contains(st, want) {
+			t.Errorf("settings lack %s:\n%s", want, st)
+		}
+	}
+	if strings.Contains(st, "/link") {
+		t.Errorf("settings still use the symlink:\n%s", st)
+	}
+}
+
+// At most maxRunningSubagents run per session, and a task has a size limit.
+func TestRunnerSpawnCaps(t *testing.T) {
+	r, store, sess, _ := newTestRunner(t, `sleep 300`)
+	orch, _ := store.CreateAgent(sess.ID, "orchestrator", 0, 0)
+	defer r.StopAll()
+	if _, err := r.SpawnSubagent(sess.ID, orch.ID, "", strings.Repeat("x", maxTaskBytes+1)); err == nil || !strings.Contains(err.Error(), "limit") {
+		t.Fatalf("oversized task: err = %v", err)
+	}
+	for i := 0; i < maxRunningSubagents; i++ {
+		if _, err := r.SpawnSubagent(sess.ID, orch.ID, "", "t"); err != nil {
+			t.Fatalf("spawn %d: %v", i, err)
+		}
+	}
+	if _, err := r.SpawnSubagent(sess.ID, orch.ID, "", "one too many"); err == nil || !strings.Contains(err.Error(), "already running") {
+		t.Fatalf("spawn over the cap: err = %v", err)
+	}
+	if ts, _ := store.ListTasks(sess.ID); len(ts) != maxRunningSubagents {
+		t.Fatalf("a refused spawn left a task behind: %d tasks", len(ts))
+	}
+}
+
+// A refused launch writes no files; Forget lets a session that reuses the id launch again.
+func TestRunnerRefusedLaunchAndForget(t *testing.T) {
+	r, store, sess, _ := newTestRunner(t, `exit 0`)
+	r.StopSession(sess.ID)
+	if _, err := r.StartOrchestrator(sess.ID, "x"); err == nil {
+		t.Fatal("launch in a stopped session succeeded")
+	}
+	if m, _ := filepath.Glob(filepath.Join(r.cfg.AgentDir, "agent-*")); len(m) != 0 {
+		t.Fatalf("refused launch left files: %v", m)
+	}
+	r.Forget(sess.ID)
+	a, err := r.StartOrchestrator(sess.ID, "x")
+	if err != nil {
+		t.Fatalf("launch after Forget: %v", err)
+	}
+	r.Wait(sess.ID)
+	if got, _ := store.GetAgent(sess.ID, a.ID); got.Status != "exited" {
+		t.Fatalf("status = %s", got.Status)
+	}
+}
+
+// An explicit title wins over the task's first line.
+func TestRunnerSpawnTitle(t *testing.T) {
+	r, store, sess, _ := newTestRunner(t, `exit 0`)
+	orch, _ := store.CreateAgent(sess.ID, "orchestrator", 0, 0)
+	for title, want := range map[string]string{"Auth API": "Auth API", "": "Working directory: /tmp/x"} {
+		a, err := r.SpawnSubagent(sess.ID, orch.ID, title, "Working directory: /tmp/x\nbuild it")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if task, _ := store.GetTask(sess.ID, a.TaskID); task.Title != want || !strings.Contains(task.Description, "build it") {
+			t.Errorf("title %q: task = %+v, want title %q", title, task, want)
+		}
+	}
+	r.Wait(sess.ID)
 }

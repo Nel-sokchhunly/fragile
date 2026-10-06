@@ -10,6 +10,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -19,8 +20,10 @@ import (
 
 // Tools every agent may use without a permission prompt. "mcp__fragile" allows
 // all tools of the fragile MCP server; the server itself decides per agent
-// which of them it may call.
-const allowedTools = "Read,Edit,Write,Glob,Grep,Bash,mcp__fragile"
+// which of them it may call. Edit and Write are not here: they are allowed only
+// inside the working directory (see sandboxSettings). In -p mode a tool that is
+// not allowed is denied, never prompted for.
+const allowedTools = "Read,Glob,Grep,Bash,mcp__fragile"
 
 // Claude Code tools that launch sub-agents inside the agent process (built-in
 // sub-agent tool is "Task" or "Agent" depending on version; "Workflow" spawns
@@ -36,6 +39,29 @@ const disallowedTools = "Task,Agent,Workflow"
 var isolationArgs = []string{"--setting-sources", "project", "--disable-slash-commands"}
 
 const isolationEnv = "CLAUDE_CODE_DISABLE_AUTO_MEMORY=1"
+
+// Variables that make claude bill an API account (or another provider) instead
+// of the user's subscription. Agents never get them; CLAUDE_CODE_OAUTH_TOKEN
+// (subscription auth) is kept.
+var billingEnv = []string{
+	"ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_BASE_URL", "ANTHROPIC_CUSTOM_HEADERS",
+	"CLAUDE_CODE_USE_BEDROCK", "CLAUDE_CODE_USE_VERTEX", "CLAUDE_CODE_USE_FOUNDRY",
+	"CLAUDE_CODE_SKIP_BEDROCK_AUTH", "CLAUDE_CODE_SKIP_VERTEX_AUTH", "CLAUDE_CODE_SKIP_FOUNDRY_AUTH",
+	"ANTHROPIC_BEDROCK_BASE_URL", "ANTHROPIC_VERTEX_BASE_URL", "ANTHROPIC_VERTEX_PROJECT_ID",
+	"ANTHROPIC_FOUNDRY_API_KEY", "ANTHROPIC_FOUNDRY_BASE_URL", "ANTHROPIC_FOUNDRY_RESOURCE",
+	"AWS_BEARER_TOKEN_BEDROCK",
+}
+
+// agentEnv is the environment an agent runs with: environ minus billingEnv, plus isolationEnv.
+func agentEnv(environ []string) []string {
+	out := make([]string, 0, len(environ)+1)
+	for _, kv := range environ {
+		if name, _, _ := strings.Cut(kv, "="); !slices.Contains(billingEnv, name) {
+			out = append(out, kv)
+		}
+	}
+	return append(out, isolationEnv)
+}
 
 // Hosts sandboxed Bash may reach (package registries and GitHub); everything
 // else is refused. Only affects Bash: WebFetch and WebSearch follow permission rules.
@@ -62,16 +88,21 @@ var sandboxSecretEnv = []string{"GITHUB_TOKEN", "GH_TOKEN", "NPM_TOKEN", "ANTHRO
 // working directory, the network limited to sandboxDomains, and the files that
 // hold agent tokens (the agent dir) or the whole store (DB, event log) hidden
 // from Bash (sandbox rules) and from Read/Edit/Write (permission rules), even
-// when they sit under the working directory. Paths must be absolute.
+// when they sit under the working directory. The sandbox covers Bash only, so
+// the file tools get permission rules: Edit (which also governs Write) is
+// allowed only inside workDir, and credentials (sandboxSecretFiles) cannot be
+// read or edited. Paths are made absolute with symlinks resolved (/tmp is a
+// symlink on macOS), as both the sandbox and the permission check compare real paths.
 // Subscription login is untouched: no --bare, no API key.
-func sandboxSettings(cfg Config) string {
+func sandboxSettings(cfg Config, workDir string) string {
 	var hidden, rules []string
 	for _, p := range []string{cfg.AgentDir, cfg.DBPath, cfg.LogPath} {
 		if p == "" {
 			continue
 		}
+		p = realPath(p)
 		hidden = append(hidden, p)
-		if p == cfg.DBPath { // SQLite sidecar files hold the same data
+		if p == realPath(cfg.DBPath) { // SQLite sidecar files hold the same data
 			hidden = append(hidden, p+"-wal", p+"-shm")
 		}
 	}
@@ -80,6 +111,11 @@ func sandboxSettings(cfg Config) string {
 			rules = append(rules, tool+"(/"+p+")") // "//abs" = absolute path; a dir covers what is under it
 		}
 	}
+	for _, f := range sandboxSecretFiles {
+		rules = append(rules, "Read("+f+")", "Edit("+f+")")
+	}
+	// ponytail: a workDir containing gitignore pattern characters ([ ] *) would need escaping.
+	allow := []string{"Edit(/" + realPath(workDir) + "/**)"}
 	writable := sandboxCaches
 	if d, err := os.UserCacheDir(); err == nil {
 		writable = append([]string{d}, sandboxCaches...)
@@ -97,13 +133,33 @@ func sandboxSettings(cfg Config) string {
 			"failIfUnavailable":        true,  // never silently run Bash unsandboxed
 			"allowUnsandboxedCommands": false, // no dangerouslyDisableSandbox escape hatch
 			"autoAllowBashIfSandboxed": true,
-			"filesystem":               map[string]any{"allowWrite": writable, "denyRead": hidden, "denyWrite": hidden},
-			"credentials":              map[string]any{"files": files, "envVars": env},
-			"network":                  map[string]any{"allowedDomains": sandboxDomains, "strictAllowlist": true},
+			"filesystem": map[string]any{
+				"allowWrite": writable,
+				"denyRead":   hidden,
+				"denyWrite":  append(slices.Clone(hidden), sandboxSecretFiles...),
+			},
+			"credentials": map[string]any{"files": files, "envVars": env},
+			"network":     map[string]any{"allowedDomains": sandboxDomains, "strictAllowlist": true},
 		},
-		"permissions": map[string]any{"deny": rules},
+		"permissions": map[string]any{"allow": allow, "deny": rules},
 	})
 	return string(b)
+}
+
+// realPath returns p absolute with symlinks resolved. A path that does not
+// exist yet (e.g. SQLite's -wal file) is resolved through its directory.
+func realPath(p string) string {
+	abs, err := filepath.Abs(p)
+	if err != nil {
+		return p
+	}
+	if r, err := filepath.EvalSymlinks(abs); err == nil {
+		return r
+	}
+	if d, err := filepath.EvalSymlinks(filepath.Dir(abs)); err == nil {
+		return filepath.Join(d, filepath.Base(abs))
+	}
+	return abs
 }
 
 // checkSandbox reports a missing prerequisite of the Bash sandbox. macOS ships
@@ -126,7 +182,19 @@ func checkSandbox() error {
 	return nil
 }
 
+// checkPrereqs is the launch preflight: the claude CLI must be on PATH (the app
+// widens PATH to the login shell's at startup) and the sandbox must be usable.
+func checkPrereqs(command string) error {
+	if _, err := exec.LookPath(command); err != nil {
+		return errors.New("claude CLI not found on PATH; install Claude Code and log in")
+	}
+	return checkSandbox()
+}
+
 const (
+	maxRunningSubagents = 8        // per session
+	maxTaskBytes        = 32 << 10 // one sub-agent task
+
 	titleMax  = 80
 	killAfter = 5 * time.Second
 )
@@ -150,10 +218,14 @@ type Runner struct {
 	store *Store
 	log   *EventLog
 
-	preflight func() error // sandbox prerequisites, checked before every launch; tests clear it
+	// Preflight, if set, checks prerequisites (claude on PATH, sandbox tools)
+	// before every launch; a launch it rejects fails with its error. Tests clear it.
+	Preflight func() error
+
+	spawnMu sync.Mutex // makes "count running sub-agents, create one" atomic
 
 	mu       sync.Mutex // guards everything below
-	running  map[int]proc
+	running  map[int]*proc
 	sessions map[int64]*sessionRun
 	stopping bool // set by StopAll; start refuses new processes
 }
@@ -164,6 +236,13 @@ type proc struct {
 	agentID   int64
 	exited    chan struct{}
 	stdin     *stdinPipe // nil unless the agent takes messages on stdin
+	killed    bool       // the runner signalled it on purpose (stop); guarded by Runner.mu
+}
+
+// exit is how a process ended.
+type exit struct {
+	code    int  // -1 if killed by a signal
+	stopped bool // the runner killed it on purpose
 }
 
 // stdinPipe serializes writes to an agent's stdin.
@@ -200,8 +279,10 @@ func (r *Runner) workDir(sessionID int64) string {
 }
 
 func NewRunner(cfg Config, store *Store, log *EventLog) *Runner {
-	return &Runner{Command: "claude", cfg: cfg, store: store, log: log, preflight: checkSandbox,
-		running: map[int]proc{}, sessions: map[int64]*sessionRun{}}
+	r := &Runner{Command: "claude", cfg: cfg, store: store, log: log,
+		running: map[int]*proc{}, sessions: map[int64]*sessionRun{}}
+	r.Preflight = func() error { return checkPrereqs(r.Command) }
+	return r
 }
 
 // session returns the session's run state; the caller holds r.mu.
@@ -214,6 +295,15 @@ func (r *Runner) session(id int64) *sessionRun {
 	return sr
 }
 
+// Forget drops the session's run state, including the "stopped" mark, so a
+// session that reuses the id (SQLite reuses the highest rowid after a delete)
+// can launch. Call it only after StopSession has returned and the session is deleted.
+func (r *Runner) Forget(sessionID int64) {
+	r.mu.Lock()
+	delete(r.sessions, sessionID)
+	r.mu.Unlock()
+}
+
 // StartOrchestrator registers the session's orchestrator and launches it; task is its prompt.
 func (r *Runner) StartOrchestrator(sessionID int64, task string) (Agent, error) {
 	a, err := r.store.CreateAgent(sessionID, "orchestrator", 0, 0)
@@ -224,14 +314,44 @@ func (r *Runner) StartOrchestrator(sessionID int64, task string) (Agent, error) 
 }
 
 // SpawnSubagent creates the task and sub-agent rows in the session and launches
-// the process. parentID must be the session's orchestrator (one level deep only).
-func (r *Runner) SpawnSubagent(sessionID, parentID int64, task string) (Agent, error) {
+// the process. title is the task title shown on the agent card (the task's first line if empty). parentID must be the session's orchestrator (one level deep only).
+func (r *Runner) SpawnSubagent(sessionID, parentID int64, title, task string) (Agent, error) {
 	if p, err := r.store.GetAgent(sessionID, parentID); err != nil {
 		return Agent{}, err
 	} else if p.Role != "orchestrator" {
 		return Agent{}, errors.New("only an orchestrator can spawn sub-agents")
 	}
-	title := FirstLine(task)
+	if len(task) > maxTaskBytes {
+		return Agent{}, fmt.Errorf("task is %d bytes; the limit is %d", len(task), maxTaskBytes)
+	}
+	if title = FirstLine(title); title == "" {
+		title = FirstLine(task)
+	}
+	r.spawnMu.Lock() // the agent row counts as running from CreateAgent on
+	a, err := r.createSubagent(sessionID, parentID, title, task)
+	r.spawnMu.Unlock()
+	if err != nil {
+		return Agent{}, err
+	}
+	return r.launch(a, title, task, SubagentPrompt(a.ID, task, r.workDir(sessionID)))
+}
+
+// createSubagent adds the task and sub-agent rows unless the session already
+// has maxRunningSubagents running; the caller holds r.spawnMu.
+func (r *Runner) createSubagent(sessionID, parentID int64, title, task string) (Agent, error) {
+	subs, err := r.store.ListAgents(sessionID, "subagent")
+	if err != nil {
+		return Agent{}, err
+	}
+	n := 0
+	for _, s := range subs {
+		if s.Status == "running" {
+			n++
+		}
+	}
+	if n >= maxRunningSubagents {
+		return Agent{}, fmt.Errorf("%d sub-agents are already running (the limit); wait for some to finish before spawning more", n)
+	}
 	t, err := r.store.CreateTask(sessionID, title, task)
 	if err != nil {
 		return Agent{}, err
@@ -240,15 +360,12 @@ func (r *Runner) SpawnSubagent(sessionID, parentID int64, task string) (Agent, e
 	if err != nil {
 		return Agent{}, err
 	}
-	if err := r.store.SetTaskAgent(sessionID, t.ID, a.ID); err != nil {
-		return Agent{}, err
-	}
-	return r.launch(a, title, task, SubagentPrompt(a.ID, task, r.workDir(sessionID)))
+	return a, r.store.SetTaskAgent(sessionID, t.ID, a.ID)
 }
 
 // args builds the claude command line. The prompt goes after "--" so a task
 // starting with "-" is not parsed as a flag and the variadic flags stop there.
-func (r *Runner) args(a Agent, mcpConfig, prompt, systemPrompt string) []string {
+func (r *Runner) args(a Agent, workDir, mcpConfig, prompt, systemPrompt string) []string {
 	args := []string{"-p"}
 	if r.stdinAgent(a) { // messages arrive on stdin; the first one is the task
 		args = append(args, "--input-format", "stream-json")
@@ -259,7 +376,7 @@ func (r *Runner) args(a Agent, mcpConfig, prompt, systemPrompt string) []string 
 		"--allowedTools", allowedTools,
 		"--disallowedTools", disallowedTools)
 	args = append(args, isolationArgs...)
-	args = append(args, "--settings", sandboxSettings(r.cfg))
+	args = append(args, "--settings", sandboxSettings(r.cfg, workDir))
 	if r.stdinAgent(a) {
 		return args
 	}
@@ -274,15 +391,15 @@ func (r *Runner) launch(a Agent, taskTitle, prompt, systemPrompt string) (Agent,
 	mcpConfig := filepath.Join(r.cfg.AgentDir, "agent-"+id+".mcp.json")
 	logPath := filepath.Join(r.cfg.AgentDir, "agent-"+id+".jsonl")
 
-	if r.preflight != nil {
-		if err := r.preflight(); err != nil {
-			r.finish(a, taskTitle, -1, err.Error())
+	if r.Preflight != nil {
+		if err := r.Preflight(); err != nil {
+			r.finish(a, taskTitle, -1, err.Error(), false)
 			return Agent{}, fmt.Errorf("launch agent %d: %w", a.ID, err)
 		}
 	}
 	pid, done, err := r.start(a, mcpConfig, logPath, prompt, systemPrompt)
 	if err != nil {
-		r.finish(a, taskTitle, -1, err.Error())
+		r.finish(a, taskTitle, -1, err.Error(), false)
 		return Agent{}, fmt.Errorf("launch agent %d: %w", a.ID, err)
 	}
 	setErr := r.store.SetAgentProcess(a.SessionID, a.ID, pid, logPath)
@@ -292,7 +409,8 @@ func (r *Runner) launch(a Agent, taskTitle, prompt, systemPrompt string) (Agent,
 	})
 	go func() {
 		defer r.sessionDone(a.SessionID)
-		r.finish(a, taskTitle, <-done, "")
+		x := <-done
+		r.finish(a, taskTitle, x.code, "", x.stopped)
 	}()
 	if setErr != nil {
 		return Agent{}, setErr
@@ -301,8 +419,15 @@ func (r *Runner) launch(a Agent, taskTitle, prompt, systemPrompt string) (Agent,
 }
 
 // start writes the MCP config and starts the process in its own process
-// group. The returned channel yields the exit code once the process is gone.
-func (r *Runner) start(a Agent, mcpConfig, logPath, prompt, systemPrompt string) (int, <-chan int, error) {
+// group. The returned channel yields how it ended once the process is gone.
+func (r *Runner) start(a Agent, mcpConfig, logPath, prompt, systemPrompt string) (int, <-chan exit, error) {
+	// Refuse before any file is written; checked again under the lock below.
+	r.mu.Lock()
+	refused := r.refusing(a.SessionID)
+	r.mu.Unlock()
+	if refused {
+		return 0, nil, errors.New("runner is stopping")
+	}
 	cfg := fmt.Sprintf(`{"mcpServers":{"fragile":{"type":"http","url":"http://%s/mcp/%s"}}}`, r.cfg.Addr, a.Token)
 	if err := os.WriteFile(mcpConfig, []byte(cfg), 0o600); err != nil {
 		return 0, nil, err
@@ -314,9 +439,10 @@ func (r *Runner) start(a Agent, mcpConfig, logPath, prompt, systemPrompt string)
 
 	// Deliberately not exec.CommandContext: spawn runs inside an MCP request
 	// and the process must outlive it.
-	cmd := exec.Command(r.Command, r.args(a, mcpConfig, prompt, systemPrompt)...)
-	cmd.Dir = r.workDir(a.SessionID)
-	cmd.Env = append(os.Environ(), isolationEnv)
+	workDir := r.workDir(a.SessionID)
+	cmd := exec.Command(r.Command, r.args(a, workDir, mcpConfig, prompt, systemPrompt)...)
+	cmd.Dir = workDir
+	cmd.Env = agentEnv(os.Environ())
 	cmd.Stdout, cmd.Stderr = out, out // the child writes straight to the file ...
 	if r.OnLine != nil {              // ... unless lines are wanted: then through the tee
 		lw := &lineWriter{w: out, onLine: func(l []byte) { r.OnLine(a, l) }}
@@ -336,7 +462,7 @@ func (r *Runner) start(a Agent, mcpConfig, logPath, prompt, systemPrompt string)
 	// Check, start and register under one lock so StopAll cannot miss a process.
 	r.mu.Lock()
 	sr := r.session(a.SessionID)
-	if r.stopping || sr.stopped {
+	if r.refusing(a.SessionID) {
 		r.mu.Unlock()
 		out.Close()
 		return 0, nil, errors.New("runner is stopping")
@@ -348,8 +474,9 @@ func (r *Runner) start(a Agent, mcpConfig, logPath, prompt, systemPrompt string)
 	}
 	pid := cmd.Process.Pid
 	exited := make(chan struct{})
-	code := make(chan int, 1)
-	r.running[pid] = proc{a.SessionID, a.ID, exited, stdin}
+	code := make(chan exit, 1)
+	p := &proc{sessionID: a.SessionID, agentID: a.ID, exited: exited, stdin: stdin}
+	r.running[pid] = p
 	sr.wg.Add(1)
 	r.mu.Unlock()
 	go func() {
@@ -358,18 +485,29 @@ func (r *Runner) start(a Agent, mcpConfig, logPath, prompt, systemPrompt string)
 		// Forget the pid at once: it may be reused and must not be signalled again.
 		r.mu.Lock()
 		delete(r.running, pid)
+		killed := p.killed
 		r.mu.Unlock()
 		close(exited)
-		code <- cmd.ProcessState.ExitCode() // -1 if killed by a signal
+		code <- exit{cmd.ProcessState.ExitCode(), killed} // -1 if killed by a signal
 	}()
 	return pid, code, nil
 }
 
-// finish records the outcome of an agent process (or of a failed launch, code -1).
-func (r *Runner) finish(a Agent, taskTitle string, code int, launchErr string) {
+// refusing reports whether no new process may start for the session; the caller holds r.mu.
+func (r *Runner) refusing(sessionID int64) bool {
+	return r.stopping || r.session(sessionID).stopped
+}
+
+// finish records the outcome of an agent process (or of a failed launch, code
+// -1). A process the runner killed on purpose (stopped) is recorded as
+// "stopped" and its task is left alone; one that exited 0 anyway is just "exited".
+func (r *Runner) finish(a Agent, taskTitle string, code int, launchErr string, stopped bool) {
 	status, taskStatus := "crashed", "blocked"
-	if code == 0 {
+	switch {
+	case code == 0:
 		status, taskStatus = "exited", "done"
+	case stopped:
+		status, taskStatus = "stopped", ""
 	}
 	payload := map[string]any{"role": a.Role, "status": status, "exit_code": code}
 	if launchErr != "" {
@@ -379,10 +517,13 @@ func (r *Runner) finish(a Agent, taskTitle string, code int, launchErr string) {
 		payload["store_error"] = err.Error()
 	}
 	if a.Role == "subagent" {
-		if err := r.store.SetTaskStatus(a.SessionID, a.TaskID, taskStatus); err != nil {
-			payload["store_error"] = err.Error()
+		payload["task_id"] = a.TaskID
+		if taskStatus != "" {
+			if err := r.store.SetTaskStatus(a.SessionID, a.TaskID, taskStatus); err != nil {
+				payload["store_error"] = err.Error()
+			}
+			payload["task_status"] = taskStatus
 		}
-		payload["task_id"], payload["task_status"] = a.TaskID, taskStatus
 		if code == 0 {
 			if board, err := r.store.SessionBoard(a.SessionID); err == nil {
 				if done, err := r.store.ListNotes(a.SessionID, board, NoteFilter{Type: "done", AuthorID: a.ID}); err == nil && len(done) == 0 {
@@ -440,6 +581,7 @@ func (r *Runner) stop(only *int64) {
 	for pid, p := range r.running {
 		if only == nil || p.sessionID == *only {
 			procs[pid] = p.exited
+			p.killed = true
 		}
 	}
 	r.mu.Unlock()
@@ -448,7 +590,8 @@ func (r *Runner) stop(only *int64) {
 		r.signal(pid, syscall.SIGTERM)
 	}
 	expired := make(chan struct{})
-	time.AfterFunc(killAfter, func() { close(expired) })
+	timer := time.AfterFunc(killAfter, func() { close(expired) })
+	defer timer.Stop()
 	for pid, ch := range procs {
 		select {
 		case <-ch:

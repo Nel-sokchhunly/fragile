@@ -237,8 +237,8 @@ func TestMigratePhase0Database(t *testing.T) {
 
 	var v int
 	s.db.QueryRow(`PRAGMA user_version`).Scan(&v)
-	if v != 4 {
-		t.Fatalf("user_version = %d, want 4", v)
+	if v != 5 {
+		t.Fatalf("user_version = %d, want 5", v)
 	}
 	sess, err := s.GetSession(1)
 	if err != nil || sess.Title != "old" || sess.Status != SessionDone {

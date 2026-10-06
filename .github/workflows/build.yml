@@ -1,5 +1,5 @@
 # Tests on every PR and push to main; on main, also builds the desktop app for
-# macOS and Linux and publishes them as a GitHub release (build-<run number>).
+# macOS and Linux and publishes them as a GitHub release (build-<run number>.<attempt>).
 name: build
 
 on:
@@ -8,7 +8,7 @@ on:
   pull_request:
 
 permissions:
-  contents: write # create releases
+  contents: read
 
 jobs:
   test:
@@ -17,7 +17,15 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
         with: {go-version-file: go.mod}
-      - run: go test ./...
+      - uses: pnpm/action-setup@v4
+        with: {version: 9}
+      - uses: actions/setup-node@v4
+        with: {node-version: 22}
+      - run: go vet ./...
+      - run: go test -race ./...
+      - name: frontend
+        working-directory: app/frontend
+        run: pnpm install --frozen-lockfile && pnpm tsc --noEmit && pnpm build
 
   app:
     if: github.event_name == 'push'
@@ -61,13 +69,16 @@ jobs:
   release:
     needs: app
     runs-on: ubuntu-latest
+    permissions:
+      contents: write # create the release
     steps:
       - uses: actions/download-artifact@v4
         with: {merge-multiple: true}
       - env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release create "build-${{ github.run_number }}" fragile-* \
+          # run_attempt keeps the tag unique when a run is re-run.
+          gh release create "build-${{ github.run_number }}.${{ github.run_attempt }}" fragile-* \
             --repo "${{ github.repository }}" --target "${{ github.sha }}" \
             --title "Fragile build ${{ github.run_number }}" \
             --notes "Built from ${{ github.sha }}. macOS build is unsigned: run \`xattr -dr com.apple.quarantine Fragile.app\` after unzipping. Linux needs libgtk-3 and libwebkit2gtk-4.1 (agents also need bubblewrap and socat)."

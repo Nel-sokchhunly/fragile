@@ -147,6 +147,7 @@ func TestMCPSpawnSubagent(t *testing.T) {
 	sess, _ := s.Store.CreateSession("test")
 	dir := t.TempDir()
 	s.Runner = NewRunner(Config{Addr: strings.TrimPrefix(ts.URL, "http://"), AgentDir: dir, WorkDir: dir}, s.Store, s.Log)
+	s.Runner.Preflight = nil // tests must not depend on the host's sandbox tools
 	s.Runner.Command = writeFake(t, dir, `exit 0`)
 	orch, _ := s.Store.CreateAgent(sess.ID, "orchestrator", 0, 0)
 	co := connect(t, ts, orch.Token)
@@ -156,7 +157,7 @@ func TestMCPSpawnSubagent(t *testing.T) {
 			t.Fatalf("spawn_subagent(%q) should be a tool error", bad)
 		}
 	}
-	out, isErr := call(t, co, "spawn_subagent", map[string]any{"task": "write the thing"})
+	out, isErr := call(t, co, "spawn_subagent", map[string]any{"task": "write the thing", "title": "Writer"})
 	if isErr {
 		t.Fatal(out)
 	}
@@ -166,7 +167,7 @@ func TestMCPSpawnSubagent(t *testing.T) {
 	if len(subs) != 1 || subs[0].ParentID != orch.ID || subs[0].TaskID == 0 {
 		t.Fatalf("subagents = %+v", subs)
 	}
-	if task, err := s.Store.GetTask(sess.ID, subs[0].TaskID); err != nil || task.Title != "write the thing" || task.AgentID != subs[0].ID {
+	if task, err := s.Store.GetTask(sess.ID, subs[0].TaskID); err != nil || task.Title != "Writer" || task.AgentID != subs[0].ID {
 		t.Fatalf("task = %+v, err %v", task, err)
 	}
 	path := filepath.Join(dir, "agent-"+itoa(subs[0].ID)+".mcp.json")
@@ -295,4 +296,26 @@ func noteIDs(t *testing.T, st *Store, sessionID int64) []int64 {
 		ids = append(ids, n.ID)
 	}
 	return ids
+}
+
+// A finished agent's token stops working.
+func TestMCPRefusesFinishedAgent(t *testing.T) {
+	s, ts := newTestServer(t)
+	sess, _ := s.Store.CreateSession("test")
+	orch, _ := s.Store.CreateAgent(sess.ID, "orchestrator", 0, 0)
+	post := func() int {
+		resp, err := http.Post(ts.URL+"/mcp/"+orch.Token, "application/json", strings.NewReader("{}"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		resp.Body.Close()
+		return resp.StatusCode
+	}
+	if code := post(); code == http.StatusNotFound || code == http.StatusForbidden {
+		t.Fatalf("running agent refused: %d", code)
+	}
+	s.Store.SetAgentStatus(sess.ID, orch.ID, "exited", nil)
+	if code := post(); code != http.StatusForbidden {
+		t.Fatalf("finished agent status = %d, want 403", code)
+	}
 }

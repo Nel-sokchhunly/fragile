@@ -3,11 +3,14 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"sync"
+	"syscall"
 	"testing"
 	"time"
 
@@ -67,6 +70,7 @@ func newTestApp(t *testing.T, dir, script string) (*App, *events) {
 		t.Fatal(err)
 	}
 	t.Cleanup(a.close)
+	a.runner.Preflight = nil // tests must not depend on the host's claude or sandbox tools
 	if script != "" {
 		a.runner.Command = writeScript(t, script)
 	}
@@ -233,7 +237,7 @@ func TestStopSession(t *testing.T) {
 		t.Fatal(err)
 	}
 	s := snapshot(t, a, se.ID)
-	if s.Session.Status != "done" || s.Agents[0].Status != "crashed" {
+	if s.Session.Status != "done" || s.Agents[0].Status != "stopped" { // killed on purpose, not "crashed"
 		t.Fatalf("after stop: %+v / %+v", s.Session, s.Agents[0])
 	}
 	if err := a.SendMessage(se.ID, "hello?"); err == nil {
@@ -298,6 +302,117 @@ func TestDeleteSession(t *testing.T) {
 	waitFor(t, "session_deleted", func() bool { return len(ev.named(notes.EventSessionDeleted)) == 1 })
 	if err := a.DeleteSession(gone.ID); err == nil {
 		t.Error("deleted twice")
+	}
+}
+
+// SQLite reuses the highest rowid, so a session created after a delete can get the deleted one's id:
+// its orchestrator must still start.
+func TestCreateAfterDeleteReusesIDAndStarts(t *testing.T) {
+	a, _ := newTestApp(t, t.TempDir(), echoOrchestrator)
+	old := startSession(t, a, "first")
+	waitFor(t, "reply", func() bool { return hasChat(a, old.ID, "echo: ") })
+	if err := a.DeleteSession(old.ID); err != nil {
+		t.Fatal(err)
+	}
+	se, err := a.CreateSession("again", t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if se.ID != old.ID {
+		t.Fatalf("new session id = %d, want the reused %d (the test needs the reuse)", se.ID, old.ID)
+	}
+	if err := a.SendMessage(se.ID, "second"); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, "reply", func() bool { return hasChat(a, se.ID, "assistant: echo: ") })
+	if s := snapshot(t, a, se.ID); len(s.Agents) != 1 || s.Agents[0].Status != "running" {
+		t.Fatalf("agents = %+v", s.Agents)
+	}
+}
+
+// A launch that fails on the first message does not brick the session: once the
+// cause is fixed, the next message starts the orchestrator.
+func TestFailedFirstStartCanBeRetried(t *testing.T) {
+	a, _ := newTestApp(t, t.TempDir(), echoOrchestrator)
+	a.runner.Preflight = func() error { return errors.New("claude CLI not found on PATH") }
+	se, err := a.CreateSession("", t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < 2; i++ { // failing twice must not matter either
+		if err := a.SendMessage(se.ID, "hello"); err == nil || !strings.Contains(err.Error(), "not found") {
+			t.Fatalf("send %d: err = %v, want the launch error", i, err)
+		}
+	}
+	a.mu.Lock()
+	busy := a.busy[se.ID]
+	a.mu.Unlock()
+	if busy {
+		t.Fatal("session stuck busy after a failed start")
+	}
+	waitFor(t, "status done", func() bool { return snapshot(t, a, se.ID).Session.Status == "done" })
+	a.runner.Preflight = nil
+	if err := a.SendMessage(se.ID, "hello again"); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, "reply", func() bool { return hasChat(a, se.ID, "assistant: echo: ") })
+}
+
+// A send that fails leaves no chat message behind.
+func TestFailedSendLeavesNoChatMessage(t *testing.T) {
+	a, _ := newTestApp(t, t.TempDir(), echoOrchestrator)
+	se := startSession(t, a, "task")
+	waitFor(t, "reply", func() bool { return hasChat(a, se.ID, "assistant: echo: ") })
+	orch := snapshot(t, a, se.ID).Agents[0]
+	a.runner.StopAll()
+	if err := a.deliver(orch, "ghost", true); err == nil {
+		t.Fatal("deliver to a dead orchestrator succeeded")
+	}
+	if hasChat(a, se.ID, "ghost") {
+		t.Fatal("phantom user message in the chat")
+	}
+}
+
+// At startup, an agent a hard-killed app left running is killed if (and only if) its
+// command line carries this agent's MCP config.
+func TestStartupKillsOrphans(t *testing.T) {
+	dir := t.TempDir()
+	a, _ := newTestApp(t, dir, "")
+	se, _ := a.CreateSession("", t.TempDir())
+	orphan, _ := a.store.CreateAgent(se.ID, "orchestrator", 0, 0)
+	bystander, _ := a.store.CreateAgent(se.ID, "subagent", orphan.ID, 0)
+	start := func(ag notes.Agent, args ...string) (pid int, died chan struct{}) {
+		cmd := exec.Command("sh", append([]string{"-c", "sleep 300; :", "x"}, args...)...) // "; :" keeps sh from exec'ing sleep, which would drop the args
+		cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+		if err := cmd.Start(); err != nil {
+			t.Fatal(err)
+		}
+		died = make(chan struct{})
+		go func() { cmd.Wait(); close(died) }()
+		pid = cmd.Process.Pid
+		t.Cleanup(func() { syscall.Kill(-pid, syscall.SIGKILL); <-died })
+		a.store.SetAgentProcess(se.ID, ag.ID, pid, "")
+		return pid, died
+	}
+	cfg := filepath.Join(dir, "agents", fmt.Sprintf("agent-%d.mcp.json", orphan.ID))
+	_, victimDied := start(orphan, cfg)
+	other, _ := start(bystander, "unrelated") // a reused pid: same pid, different process
+	a.close()
+
+	newTestApp(t, dir, "")
+	select {
+	case <-victimDied:
+	case <-time.After(10 * time.Second):
+		t.Fatal("orphan still running")
+	}
+	if err := syscall.Kill(other, 0); err != nil {
+		t.Fatalf("unrelated process was killed: %v", err)
+	}
+}
+
+func TestMergePath(t *testing.T) {
+	if got := mergePath("/opt/homebrew/bin:/usr/bin", "/usr/bin:/bin::"); got != "/opt/homebrew/bin:/usr/bin:/bin" {
+		t.Fatalf("mergePath = %q", got)
 	}
 }
 

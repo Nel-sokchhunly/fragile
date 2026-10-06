@@ -49,7 +49,7 @@ func (s *Server) newMCPServer(a Agent, cache *mcp.SchemaCache) *mcp.Server {
 	addTool(srv, a, "get_subagent_status", "Orchestrator only. Status of one sub-agent (pass id), or of all sub-agents in the session (omit id): "+
 		"agent and task status, pid, times, exit code, its latest note, and whether it posted a done note.", true, s.subagentStatus)
 	addTool(srv, a, "escalate_to_user", "Orchestrator only. Raise a product decision you cannot reasonably make yourself to the user. "+
-		"It returns at once. In the desktop app the user's answer arrives later as a new user message; in the Phase 0 CLI it is only logged and no answer comes back.", true, s.escalate)
+		"It returns at once. In the desktop app the user's answer arrives later as a new user message; in the one-shot CLI it is only logged and no answer comes back.", true, s.escalate)
 	return srv
 }
 
@@ -202,6 +202,7 @@ func (s *Server) updateNote(_ context.Context, a Agent, in updateNoteIn) (any, e
 // Orchestrator tools
 
 type spawnIn struct {
+	Title  string   `json:"title,omitempty" jsonschema:"short title shown on the agent card, at most 60 chars"`
 	Task   string   `json:"task" jsonschema:"self-contained task: goal, files owned, constraints, what done looks like"`
 	Scopes []string `json:"scopes,omitempty" jsonschema:"note scopes the sub-agent gets; only [\"session\"] (default)"`
 }
@@ -218,7 +219,7 @@ func (s *Server) spawnSubagent(_ context.Context, a Agent, in spawnIn) (any, err
 	if s.Runner == nil {
 		return nil, errors.New("sub-agent runner not configured")
 	}
-	sub, err := s.Runner.SpawnSubagent(a.SessionID, a.ID, in.Task)
+	sub, err := s.Runner.SpawnSubagent(a.SessionID, a.ID, in.Title, in.Task)
 	if err != nil {
 		return nil, err
 	}
