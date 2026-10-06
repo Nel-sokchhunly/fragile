@@ -76,13 +76,18 @@ function NoteRow({sessionId, note}: {sessionId: number; note: Note}) {
   })
   const setStatus = useAppStore((s) => s.setNoteStatus)
   const resolved = note.status === 'resolved'
+  const [open, setOpen] = useState(false)
   return (
     <li className={cn('group relative flex gap-2 text-[13px] leading-[18px]', resolved && 'opacity-55')} title={`${formatExact(note.created_at)}${resolved ? ' · resolved' : ''}`}>
-      <p className={cn('min-w-0 flex-1 break-words whitespace-pre-wrap', resolved && 'line-through')}>
+      {/* Collapsed to one line by default; click to expand. */}
+      <button
+        type="button" aria-expanded={open} onClick={() => setOpen(!open)}
+        className={cn('min-w-0 flex-1 cursor-pointer text-left', open ? 'break-words whitespace-pre-wrap' : 'truncate', resolved && 'line-through')}
+      >
         <span className={cn('font-mono text-xs', TYPE_STYLE[note.type])}>{note.type}</span>{' '}
         <span className="font-mono text-xs text-muted-foreground">{author}</span>{' '}
         {note.content}
-      </p>
+      </button>
       <time className="shrink-0 font-mono text-mini text-muted-foreground group-focus-within:opacity-0 group-hover:opacity-0" dateTime={note.created_at}>{formatTime(note.created_at)}</time>
       <Button
         variant="ghost" size="icon-xs" className="absolute top-0 right-0 size-[18px] bg-background opacity-0 group-focus-within:opacity-100 group-hover:opacity-100"
