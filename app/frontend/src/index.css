@@ -222,3 +222,11 @@
 .code-block pre { @apply m-0 bg-transparent! p-0; }
 .shiki span { color: var(--shiki-light); }
 .dark .shiki span { color: var(--shiki-dark); }
+
+/* Sidebar collapse/expand from the toggle (App.tsx sets the class briefly). */
+.panels-animating > [data-panel] {
+  transition: flex-grow 180ms ease-out;
+}
+@media (prefers-reduced-motion: reduce) {
+  .panels-animating > [data-panel] { transition: none; }
+}

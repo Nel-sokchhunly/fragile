@@ -1,12 +1,16 @@
 import {useDeferredValue, useEffect, useState} from 'react'
 import {AgentsPanel} from '@/components/AgentsPanel'
 import {NotesPanel} from '@/components/NotesPanel'
+import {NewSessionDialog} from '@/components/NewSessionDialog'
 import {SessionsSidebar} from '@/components/SessionsSidebar'
+import {Button} from '@/components/ui/button'
 import {AgentOutputView} from '@/components/chat/AgentOutputView'
 import {ChatView} from '@/components/chat/ChatView'
 import {ResizableHandle, ResizablePanel, ResizablePanelGroup} from '@/components/ui/resizable'
 import {TooltipProvider} from '@/components/ui/tooltip'
 import {useDefaultLayout, usePanelRef} from 'react-resizable-panels'
+import {Plus} from 'lucide-react'
+import {MOD} from '@/lib/keys'
 import {useAppStore} from '@/store/app'
 
 // Panel sizing in one place. The chat column never drops below CENTER_MIN: the right column shrinks
@@ -38,9 +42,15 @@ function Toasts() {
   )
 }
 
-// The sidebar's + (and Cmd/Ctrl+N) is the one way to create a session, so no button here.
 function EmptyCenter() {
-  return <div className="flex h-full items-center justify-center p-8 text-[13px] text-muted-foreground">No sessions yet.</div>
+  return (
+    <div className="flex h-full flex-col items-center justify-center gap-3 p-8 text-[13px] text-muted-foreground">
+      No sessions yet.
+      <NewSessionDialog>
+        <Button variant="outline" size="sm"><Plus/>New session <kbd className="font-mono text-muted-foreground">{MOD}N</kbd></Button>
+      </NewSessionDialog>
+    </div>
+  )
 }
 
 export default function App() {
@@ -57,9 +67,14 @@ export default function App() {
   const [startNarrow] = useState(narrowLayout)
   const right = useDefaultLayout({id: 'fragile-right-v2'})
 
+  // Animate only button/shortcut toggles (flex-grow transition); drags and window resizes stay instant.
+  const [animating, setAnimating] = useState(false)
   const toggleSidebar = () => {
     const p = sidebar.current
-    if (p) p.isCollapsed() ? p.expand() : p.collapse()
+    if (!p) return
+    setAnimating(true)
+    setTimeout(() => setAnimating(false), 200)
+    p.isCollapsed() ? p.expand() : p.collapse()
   }
   // Fold the sidebar into its rail whenever the window is too narrow to keep the chat usable.
   useEffect(() => {
@@ -96,7 +111,7 @@ export default function App() {
 
   return (
     <TooltipProvider delayDuration={300}>
-      <ResizablePanelGroup id="fragile-main-v2" orientation="horizontal" defaultLayout={startNarrow ?? main.defaultLayout} onLayoutChanged={main.onLayoutChanged}>
+      <ResizablePanelGroup id="fragile-main-v2" orientation="horizontal" className={animating ? 'panels-animating' : undefined} defaultLayout={startNarrow ?? main.defaultLayout} onLayoutChanged={main.onLayoutChanged}>
         <ResizablePanel
           id="sidebar" panelRef={sidebar} collapsible collapsedSize={SIDEBAR.rail} minSize={SIDEBAR.min} defaultSize={SIDEBAR.default} maxSize={SIDEBAR.max}
           onResize={() => setCollapsed(sidebar.current?.isCollapsed() ?? false)}
