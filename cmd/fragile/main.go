@@ -89,6 +89,17 @@ func run(cfg notes.Config, task string) error {
 	}
 	defer evlog.Close()
 
+	title := task
+	if title == "" {
+		title = "phase0"
+	}
+	session, err := store.CreateSession(title)
+	if err != nil {
+		return err
+	}
+
+	defer store.SetSessionStatus(session.ID, notes.SessionDone) // runs before store.Close
+
 	runner := notes.NewRunner(cfg, store, evlog)
 	srv := &notes.Server{Store: store, Log: evlog, Runner: runner}
 	httpSrv := &http.Server{Handler: srv.Handler()}
@@ -100,7 +111,7 @@ func run(cfg notes.Config, task string) error {
 	}
 	errc := make(chan error, 1)
 	go func() { errc <- httpSrv.Serve(ln) }()
-	log.Printf("fragile notes server listening on http://%s (session %d)", cfg.Addr, store.SessionID)
+	log.Printf("fragile notes server listening on http://%s (session %d)", cfg.Addr, session.ID)
 	log.Printf("observation log: %s", cfg.LogPath)
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
@@ -109,12 +120,12 @@ func run(cfg notes.Config, task string) error {
 	var done chan struct{} // stays nil (blocks forever) when only serving
 	var orch notes.Agent
 	if task != "" {
-		if orch, err = runner.StartOrchestrator(task); err != nil {
+		if orch, err = runner.StartOrchestrator(session.ID, task); err != nil {
 			return err
 		}
 		log.Printf("orchestrator agent %d started (pid %d), output: %s", orch.ID, orch.PID, orch.LogPath)
 		done = make(chan struct{})
-		go func() { runner.Wait(); close(done) }()
+		go func() { runner.Wait(session.ID); close(done) }()
 	}
 
 	select {

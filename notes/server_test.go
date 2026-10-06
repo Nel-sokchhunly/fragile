@@ -2,6 +2,7 @@ package notes
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -70,9 +71,10 @@ func toolNames(t *testing.T, cs *mcp.ClientSession) []string {
 
 func TestMCPRolesAndNotes(t *testing.T) {
 	s, ts := newTestServer(t)
-	orch, _ := s.Store.CreateAgent("orchestrator", 0, 0)
-	a, _ := s.Store.CreateAgent("subagent", orch.ID, 0)
-	b, _ := s.Store.CreateAgent("subagent", orch.ID, 0)
+	sess, _ := s.Store.CreateSession("test")
+	orch, _ := s.Store.CreateAgent(sess.ID, "orchestrator", 0, 0)
+	a, _ := s.Store.CreateAgent(sess.ID, "subagent", orch.ID, 0)
+	b, _ := s.Store.CreateAgent(sess.ID, "subagent", orch.ID, 0)
 	ca, cb, co := connect(t, ts, a.Token), connect(t, ts, b.Token), connect(t, ts, orch.Token)
 
 	if got := toolNames(t, ca); len(got) != 3 {
@@ -122,7 +124,8 @@ func TestMCPRolesAndNotes(t *testing.T) {
 
 func TestMCPUnknownAgent(t *testing.T) {
 	s, ts := newTestServer(t)
-	orch, _ := s.Store.CreateAgent("orchestrator", 0, 0)
+	sess, _ := s.Store.CreateSession("test")
+	orch, _ := s.Store.CreateAgent(sess.ID, "orchestrator", 0, 0)
 	if len(orch.Token) != 32 {
 		t.Fatalf("token = %q, want 32 hex chars", orch.Token)
 	}
@@ -141,10 +144,11 @@ func TestMCPUnknownAgent(t *testing.T) {
 
 func TestMCPSpawnSubagent(t *testing.T) {
 	s, ts := newTestServer(t)
+	sess, _ := s.Store.CreateSession("test")
 	dir := t.TempDir()
 	s.Runner = NewRunner(Config{Addr: strings.TrimPrefix(ts.URL, "http://"), AgentDir: dir, WorkDir: dir}, s.Store, s.Log)
 	s.Runner.Command = writeFake(t, dir, `exit 0`)
-	orch, _ := s.Store.CreateAgent("orchestrator", 0, 0)
+	orch, _ := s.Store.CreateAgent(sess.ID, "orchestrator", 0, 0)
 	co := connect(t, ts, orch.Token)
 
 	for _, bad := range []string{"", "  \n\t"} {
@@ -156,13 +160,13 @@ func TestMCPSpawnSubagent(t *testing.T) {
 	if isErr {
 		t.Fatal(out)
 	}
-	s.Runner.Wait()
+	s.Runner.Wait(sess.ID)
 
-	subs, _ := s.Store.ListAgents("subagent")
+	subs, _ := s.Store.ListAgents(sess.ID, "subagent")
 	if len(subs) != 1 || subs[0].ParentID != orch.ID || subs[0].TaskID == 0 {
 		t.Fatalf("subagents = %+v", subs)
 	}
-	if task, err := s.Store.GetTask(subs[0].TaskID); err != nil || task.Title != "write the thing" || task.AgentID != subs[0].ID {
+	if task, err := s.Store.GetTask(sess.ID, subs[0].TaskID); err != nil || task.Title != "write the thing" || task.AgentID != subs[0].ID {
 		t.Fatalf("task = %+v, err %v", task, err)
 	}
 	path := filepath.Join(dir, "agent-"+itoa(subs[0].ID)+".mcp.json")
@@ -172,4 +176,123 @@ func TestMCPSpawnSubagent(t *testing.T) {
 	if fi, _ := os.Stat(path); fi.Mode().Perm() != 0o600 {
 		t.Fatalf("mcp config mode = %v, want 0600", fi.Mode().Perm())
 	}
+}
+
+// Two sessions share one store and server; nothing of one is visible to the other.
+func TestSessionIsolation(t *testing.T) {
+	s, ts := newTestServer(t)
+	var events []Event
+	s.Log.OnEvent = func(e Event) { events = append(events, e) }
+
+	type side struct {
+		sess       Session
+		orch, sub  Agent
+		co, cs     *mcp.ClientSession
+		secretNote string
+	}
+	mk := func(title string) *side {
+		sess, err := s.Store.CreateSession(title)
+		if err != nil {
+			t.Fatal(err)
+		}
+		orch, _ := s.Store.CreateAgent(sess.ID, "orchestrator", 0, 0)
+		task, _ := s.Store.CreateTask(sess.ID, title+" task", "")
+		sub, err := s.Store.CreateAgent(sess.ID, "subagent", orch.ID, task.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		s.Store.SetTaskAgent(sess.ID, task.ID, sub.ID)
+		return &side{sess: sess, orch: orch, sub: sub, co: connect(t, ts, orch.Token), cs: connect(t, ts, sub.Token), secretNote: "secret-of-" + title}
+	}
+	a, b := mk("A"), mk("B")
+	for _, x := range []*side{a, b} {
+		if out, isErr := call(t, x.cs, "post_note", map[string]any{"scope": "session", "type": "decision", "content": x.secretNote}); isErr {
+			t.Fatal(out)
+		}
+	}
+
+	// Tools: each caller sees only its own session.
+	for _, x := range []struct{ me, other *side }{{a, b}, {b, a}} {
+		for _, c := range []*mcp.ClientSession{x.me.co, x.me.cs} {
+			out, _ := call(t, c, "read_notes", map[string]any{"scope": "session"})
+			if !strings.Contains(out, x.me.secretNote) || strings.Contains(out, x.other.secretNote) {
+				t.Fatalf("read_notes in %s = %s", x.me.sess.Title, out)
+			}
+		}
+		out, isErr := call(t, x.me.co, "get_subagent_status", nil)
+		if isErr || !strings.Contains(out, `"agent_id":`+itoa(x.me.sub.ID)) || strings.Contains(out, `"agent_id":`+itoa(x.other.sub.ID)) {
+			t.Fatalf("get_subagent_status in %s = %s", x.me.sess.Title, out)
+		}
+		if out, isErr := call(t, x.me.co, "get_subagent_status", map[string]any{"id": x.other.sub.ID}); !isErr {
+			t.Fatalf("status of another session's sub-agent allowed: %s", out)
+		}
+		otherNote := noteIDs(t, s.Store, x.other.sess.ID)[0]
+		if out, isErr := call(t, x.me.cs, "update_note", map[string]any{"id": otherNote, "status": "resolved"}); !isErr {
+			t.Fatalf("update of another session's note allowed: %s", out)
+		}
+	}
+
+	// Store: every query is scoped to its session.
+	for _, x := range []struct{ me, other *side }{{a, b}, {b, a}} {
+		board, _ := s.Store.SessionBoard(x.me.sess.ID)
+		otherBoard, _ := s.Store.SessionBoard(x.other.sess.ID)
+		if got, _ := s.Store.ListNotes(x.me.sess.ID, board, NoteFilter{}); len(got) != 1 || got[0].Content != x.me.secretNote {
+			t.Fatalf("ListNotes own = %+v", got)
+		}
+		if got, _ := s.Store.ListNotes(x.me.sess.ID, otherBoard, NoteFilter{}); len(got) != 0 {
+			t.Fatalf("ListNotes other board = %+v", got)
+		}
+		if _, err := s.Store.PostNote(x.me.sess.ID, otherBoard, x.me.sub.ID, "done", "x"); !errors.Is(err, ErrNotFound) {
+			t.Fatalf("post to other board = %v, want ErrNotFound", err)
+		}
+		if _, err := s.Store.PostNote(x.me.sess.ID, board, x.other.sub.ID, "done", "x"); !errors.Is(err, ErrNotFound) {
+			t.Fatalf("post as other agent = %v, want ErrNotFound", err)
+		}
+		if _, err := s.Store.GetAgent(x.me.sess.ID, x.other.sub.ID); !errors.Is(err, ErrNotFound) {
+			t.Fatalf("GetAgent other = %v, want ErrNotFound", err)
+		}
+		if _, err := s.Store.GetTask(x.me.sess.ID, x.other.sub.TaskID); !errors.Is(err, ErrNotFound) {
+			t.Fatalf("GetTask other = %v, want ErrNotFound", err)
+		}
+		if _, err := s.Store.CreateAgent(x.me.sess.ID, "subagent", x.other.orch.ID, 0); !errors.Is(err, ErrNotFound) {
+			t.Fatalf("CreateAgent with other session's parent = %v, want ErrNotFound", err)
+		}
+		if _, err := s.Store.CreateEscalation(x.me.sess.ID, x.other.orch.ID, "q", ""); !errors.Is(err, ErrNotFound) {
+			t.Fatalf("CreateEscalation as other agent = %v, want ErrNotFound", err)
+		}
+		agents, _ := s.Store.ListAgents(x.me.sess.ID, "")
+		if len(agents) != 2 || agents[0].SessionID != x.me.sess.ID || agents[1].SessionID != x.me.sess.ID {
+			t.Fatalf("ListAgents = %+v", agents)
+		}
+		if _, err := s.Store.UpdateNote(x.me.sess.ID, noteIDs(t, s.Store, x.other.sess.ID)[0], nil, ptr("resolved")); !errors.Is(err, ErrNotFound) {
+			t.Fatalf("UpdateNote other = %v, want ErrNotFound", err)
+		}
+	}
+
+	// Every observed event names its session.
+	if len(events) != 2 {
+		t.Fatalf("events = %+v, want 2 note_posted", events)
+	}
+	for i, x := range []*side{a, b} {
+		if events[i].Event != EventNotePosted || events[i].SessionID != x.sess.ID || events[i].AgentID != x.sub.ID {
+			t.Fatalf("event %d = %+v", i, events[i])
+		}
+	}
+}
+
+func ptr(s string) *string { return &s }
+
+// noteIDs lists the ids of the notes on a session's board.
+func noteIDs(t *testing.T, st *Store, sessionID int64) []int64 {
+	t.Helper()
+	board, _ := st.SessionBoard(sessionID)
+	notes, err := st.ListNotes(sessionID, board, NoteFilter{})
+	if err != nil || len(notes) == 0 {
+		t.Fatalf("notes of session %d = %+v, err %v", sessionID, notes, err)
+	}
+	var ids []int64
+	for _, n := range notes {
+		ids = append(ids, n.ID)
+	}
+	return ids
 }
