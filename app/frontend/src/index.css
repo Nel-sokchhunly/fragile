@@ -124,7 +124,21 @@
   body {
     @apply bg-background text-foreground;
     }
+  #root { @apply h-screen; }
   html {
     @apply font-sans;
     }
 }
+/* Markdown + shiki (no typography plugin; just enough for chat/log density). */
+.md { @apply text-sm leading-relaxed break-words; }
+.md > * + * { @apply mt-2; }
+.md ul { @apply list-disc pl-5; }
+.md ol { @apply list-decimal pl-5; }
+.md h1, .md h2, .md h3 { @apply font-semibold; }
+.md blockquote { @apply border-l-2 pl-3 text-muted-foreground; }
+.md table { @apply text-xs; }
+.md th, .md td { @apply border px-2 py-1; }
+.code-block { @apply overflow-x-auto rounded-md border bg-muted/40 p-3 font-mono text-xs leading-snug; }
+.code-block pre { @apply m-0 bg-transparent! p-0; }
+.shiki span { color: var(--shiki-light); }
+.dark .shiki span { color: var(--shiki-dark); }
