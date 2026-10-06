@@ -1,0 +1,132 @@
+
+<div style="height:100vh;overflow:hidden;display:grid;grid-template-columns:minmax(180px,220px) minmax(0,1fr) minmax(260px,340px);background:var(--surface-panel);color:var(--text-primary);font-family:var(--font-sans);font-size:14px;line-height:20px">
+
+  <aside data-screen-label="Sidebar" style="display:flex;flex-direction:column;min-height:0;background:var(--surface-frame);border-right:1px solid var(--border-subtle)">
+    <div style="display:flex;align-items:center;justify-content:space-between;height:52px;padding:0 10px 0 16px;flex:none">
+      <span style="font-size:16px;font-weight:600;letter-spacing:-0.01em">Fragile</span>
+      <button sc-camel-on-click="{{ newSession }}" aria-label="New session" title="New session" style="display:flex;align-items:center;justify-content:center;width:28px;height:28px;padding:0;border:0;border-radius:6px;background:transparent;color:var(--text-secondary);cursor:pointer" style-hover="background:var(--surface-hover);color:var(--text-primary)"><span style="width:16px;height:16px;background:currentColor;-webkit-mask:url(" data:image="" svg+xml,%3c!--%20%40license%20lucide-static%20v0.460.0%20-%20isc%20--%3e%20%3csvg%20class%3d%22lucide%20lucide-plus%22%20xmlns%3d%22http%3a%2f%2fwww.w3.org%2f2000%2fsvg%22%20width%3d%2224%22%20height%3d%2224%22%20viewbox%3d%220%200%2024%2024%22%20fill%3d%22none%22%20stroke%3d%22currentcolor%22%20stroke-width%3d%222%22%20stroke-linecap%3d%22round%22%20stroke-linejoin%3d%22round%22%20%3e%20%3cpath%20d%3d%22m5%2012h14%22%20%2f%3e%20%3cpath%20d%3d%22m12%205v14%22%20%2f%3e%20%3c%2fsvg%3e%20")="" center="" contain="" no-repeat;mask:url("data:image="" no-repeat"=""></span></button>
+    </div>
+    <div style="padding:4px 16px 6px;color:var(--text-muted);font-size:13px">Sessions</div>
+    <div style="display:flex;flex-direction:column;gap:4px;padding:0 8px 12px;overflow:auto;min-height:0">
+      <sc-for list="{{ sessions }}" as="s" hint-placeholder-count="3">
+        <button sc-camel-on-click="{{ s.select }}" style="{{ s.rowStyle }}">
+          <span style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%">{{ s.title }}</span>
+          <span style="{{ s.statusStyle }}">{{ s.statusLabel }}</span>
+        </button>
+      </sc-for>
+    </div>
+  </aside>
+
+  <main data-screen-label="Orchestrator chat" style="display:grid;grid-template-rows:52px minmax(0,1fr) auto;min-width:0;min-height:0">
+    <div style="display:flex;align-items:center;gap:10px;padding:0 24px;border-bottom:1px solid var(--border-subtle);min-width:0">
+      <span style="font-size:15px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">{{ cur.title }}</span>
+      <span style="{{ cur.statusStyle }}">{{ cur.statusLabel }}</span>
+      <div style="flex:1"></div>
+      <span style="color:var(--text-muted);white-space:nowrap">orchestrator · {{ cur.agentSummary }}</span>
+    </div>
+
+    <div style="overflow:auto;min-height:0">
+      <div style="max-width:680px;margin:0 auto;padding:24px 24px 16px;display:grid;gap:14px;align-content:start">
+        <sc-if value="{{ cur.empty }}" hint-placeholder-val="{{ false }}">
+          <div style="padding:48px 0;display:grid;gap:4px;justify-items:center;text-align:center">
+            <span style="font-family:var(--font-serif);font-size:18px;line-height:24px">What should this session build?</span>
+            <span style="color:var(--text-muted)">Give the orchestrator a task. It will split it up and spawn sub-agents.</span>
+          </div>
+        </sc-if>
+        <sc-for list="{{ cur.messages }}" as="m" hint-placeholder-count="3">
+          <sc-if value="{{ m.isUser }}" hint-placeholder-val="{{ false }}">
+            <div style="justify-self:end;max-width:80%;background:var(--surface-sunken);border-radius:8px;padding:6px 12px">{{ m.text }}</div>
+          </sc-if>
+          <sc-if value="{{ m.isAssistant }}" hint-placeholder-val="{{ true }}">
+            <div style="font-family:var(--font-serif);font-size:15px;line-height:22px;text-wrap:pretty">{{ m.text }}</div>
+          </sc-if>
+          <sc-if value="{{ m.isTool }}" hint-placeholder-val="{{ false }}">
+            <div style="display:flex;align-items:center;gap:6px;color:var(--text-secondary)"><span style="width:13px;height:13px;background:var(--text-muted);-webkit-mask:url(" data:image="" svg+xml,%3c!--%20%40license%20lucide-static%20v0.460.0%20-%20isc%20--%3e%20%3csvg%20class%3d%22lucide%20lucide-wrench%22%20xmlns%3d%22http%3a%2f%2fwww.w3.org%2f2000%2fsvg%22%20width%3d%2224%22%20height%3d%2224%22%20viewbox%3d%220%200%2024%2024%22%20fill%3d%22none%22%20stroke%3d%22currentcolor%22%20stroke-width%3d%222%22%20stroke-linecap%3d%22round%22%20stroke-linejoin%3d%22round%22%20%3e%20%3cpath%20d%3d%22m14.7%206.3a1%201%200%200%200%200%201.4l1.6%201.6a1%201%200%200%200%201.4%200l3.77-3.77a6%206%200%200%201-7.94%207.94l-6.91%206.91a2.12%202.12%200%200%201-3-3l6.91-6.91a6%206%200%200%201%207.94-7.94l-3.76%203.76z%22%20%2f%3e%20%3c%2fsvg%3e%20")="" center="" contain="" no-repeat;mask:url("data:image="" no-repeat;flex:none"=""></span><span>{{ m.text }}</span></div>
+          </sc-if>
+          <sc-if value="{{ m.isOpenEsc }}" hint-placeholder-val="{{ false }}">
+            <div style="background:var(--surface-escalation);border:1px solid var(--border-escalation);border-radius:8px;padding:10px 14px;color:var(--status-attention);display:grid;gap:2px">
+              <div style="display:flex;gap:6px"><span style="font-weight:500">Escalation</span><span style="opacity:.75">from {{ m.from }}</span></div>
+              <div>{{ m.text }}</div>
+              <div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:8px">
+                <sc-for list="{{ m.options }}" as="o" hint-placeholder-count="2">
+                  <button sc-camel-on-click="{{ o.pick }}" style="font:inherit;font-size:13px;line-height:18px;color:var(--status-attention);background:transparent;border:1px solid var(--border-escalation);border-radius:6px;padding:3px 10px;cursor:pointer;white-space:nowrap" style-hover="background:var(--amber-800);color:var(--text-primary)">{{ o.label }}</button>
+                </sc-for>
+                <span style="align-self:center;font-size:13px;opacity:.75;padding-left:4px">or reply below</span>
+              </div>
+            </div>
+          </sc-if>
+          <sc-if value="{{ m.isClosedEsc }}" hint-placeholder-val="{{ false }}">
+            <div style="border:1px solid var(--border-default);border-radius:8px;padding:8px 14px;display:grid;gap:2px">
+              <div style="display:flex;gap:6px;color:var(--text-muted)"><span>Escalation</span><span>from {{ m.from }}</span><span>· answered</span></div>
+              <div style="color:var(--text-secondary)">{{ m.text }}</div>
+              <div><span style="color:var(--status-decision)">you</span> {{ m.answer }}</div>
+            </div>
+          </sc-if>
+        </sc-for>
+      </div>
+    </div>
+
+    <div style="padding:0 24px 18px">
+      <div style="max-width:680px;margin:0 auto">
+        <input value="{{ draft }}" sc-camel-on-change="{{ onDraft }}" sc-camel-on-key-down="{{ onKey }}" placeholder="{{ placeholder }}" style="width:100%;box-sizing:border-box;font:inherit;color:var(--text-primary);background:var(--surface-sunken);outline:none;border:1px solid var(--border-strong);border-radius:10px;padding:11px 14px" style-focus="border-color:var(--text-muted)">
+      </div>
+    </div>
+  </main>
+
+  <aside data-screen-label="Agents and notes" style="border-left:1px solid var(--border-subtle);display:flex;flex-direction:column;min-height:0;min-width:0">
+    <sc-if value="{{ listMode }}" hint-placeholder-val="{{ true }}">
+      <div style="display:flex;align-items:center;justify-content:space-between;height:52px;padding:0 16px;flex:none;border-bottom:1px solid var(--border-subtle)">
+        <span style="font-size:15px;font-weight:600">Agents</span>
+        <span style="color:var(--text-muted);white-space:nowrap">{{ cur.agentSummary }}</span>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:8px;padding:12px;overflow:auto;flex:1 1 55%;min-height:0">
+        <sc-for list="{{ cur.agents }}" as="a" hint-placeholder-count="3">
+          <button sc-camel-on-click="{{ a.open }}" style="font:inherit;text-align:left;color:var(--text-primary);background:transparent;border:1px solid var(--border-default);border-radius:8px;padding:8px 12px;cursor:pointer;display:flex;flex-direction:column;min-width:0" style-hover="background:var(--surface-hover);border-color:var(--border-strong)">
+            <span style="display:flex;justify-content:space-between;gap:8px;width:100%"><span style="font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">#{{ a.id }} {{ a.name }}</span><span style="{{ a.statusStyle }}">{{ a.statusLabel }}</span></span>
+            <span style="color:var(--text-secondary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%">{{ a.task }}</span>
+            <span style="display:flex;align-items:center;gap:6px;color:var(--text-muted);min-width:0;max-width:100%"><span style="{{ a.iconStyle }}"></span><span style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis">{{ a.latest }}</span></span>
+          </button>
+        </sc-for>
+        <sc-if value="{{ cur.noAgents }}" hint-placeholder-val="{{ false }}">
+          <div style="color:var(--text-muted);padding:4px">Sub-agents appear here once the orchestrator spawns them.</div>
+        </sc-if>
+      </div>
+      <div style="display:flex;align-items:center;justify-content:space-between;height:44px;padding:0 10px 0 16px;flex:none;border-top:1px solid var(--border-subtle)">
+        <span style="font-size:15px;font-weight:600">Notes</span>
+        <button sc-camel-on-click="{{ toggleNoteInput }}" aria-label="Add note" title="Add note" style="display:flex;align-items:center;justify-content:center;width:28px;height:28px;padding:0;border:0;border-radius:6px;background:transparent;color:var(--text-secondary);cursor:pointer" style-hover="background:var(--surface-hover);color:var(--text-primary)"><span style="width:16px;height:16px;background:currentColor;-webkit-mask:url(" data:image="" svg+xml,%3c!--%20%40license%20lucide-static%20v0.460.0%20-%20isc%20--%3e%20%3csvg%20class%3d%22lucide%20lucide-plus%22%20xmlns%3d%22http%3a%2f%2fwww.w3.org%2f2000%2fsvg%22%20width%3d%2224%22%20height%3d%2224%22%20viewbox%3d%220%200%2024%2024%22%20fill%3d%22none%22%20stroke%3d%22currentcolor%22%20stroke-width%3d%222%22%20stroke-linecap%3d%22round%22%20stroke-linejoin%3d%22round%22%20%3e%20%3cpath%20d%3d%22m5%2012h14%22%20%2f%3e%20%3cpath%20d%3d%22m12%205v14%22%20%2f%3e%20%3c%2fsvg%3e%20")="" center="" contain="" no-repeat;mask:url("data:image="" no-repeat"=""></span></button>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:7px;padding:0 16px 16px;overflow:auto;flex:1 1 45%;min-height:0">
+        <sc-if value="{{ noteInputOpen }}" hint-placeholder-val="{{ false }}">
+          <input value="{{ noteDraft }}" sc-camel-on-change="{{ onNoteDraft }}" sc-camel-on-key-down="{{ onNoteKey }}" placeholder="Post a decision to all agents" style="width:100%;box-sizing:border-box;font:inherit;color:var(--text-primary);background:transparent;outline:none;border:1px solid var(--border-strong);border-radius:8px;padding:5px 10px" style-focus="border-color:var(--text-muted)">
+        </sc-if>
+        <sc-for list="{{ cur.notes }}" as="n" hint-placeholder-count="3">
+          <div style="display:flex;flex-wrap:wrap;column-gap:0.3em"><span style="{{ n.kindStyle }}">{{ n.type }}</span><span style="color:var(--text-muted)">{{ n.author }}</span><span>{{ n.text }}</span></div>
+        </sc-for>
+      </div>
+    </sc-if>
+
+    <sc-if value="{{ agentMode }}" hint-placeholder-val="{{ false }}">
+      <div style="display:flex;align-items:center;gap:8px;height:52px;padding:0 16px 0 8px;flex:none;border-bottom:1px solid var(--border-subtle);min-width:0">
+        <button sc-camel-on-click="{{ closeAgent }}" aria-label="Back to agents" title="Back to agents" style="display:flex;align-items:center;justify-content:center;width:28px;height:28px;padding:0;border:0;border-radius:6px;background:transparent;color:var(--text-secondary);cursor:pointer;flex:none" style-hover="background:var(--surface-hover);color:var(--text-primary)"><span style="width:16px;height:16px;background:currentColor;-webkit-mask:url(" data:image="" svg+xml,%3c!--%20%40license%20lucide-static%20v0.460.0%20-%20isc%20--%3e%20%3csvg%20class%3d%22lucide%20lucide-arrow-left%22%20xmlns%3d%22http%3a%2f%2fwww.w3.org%2f2000%2fsvg%22%20width%3d%2224%22%20height%3d%2224%22%20viewbox%3d%220%200%2024%2024%22%20fill%3d%22none%22%20stroke%3d%22currentcolor%22%20stroke-width%3d%222%22%20stroke-linecap%3d%22round%22%20stroke-linejoin%3d%22round%22%20%3e%20%3cpath%20d%3d%22m12%2019-7-7%207-7%22%20%2f%3e%20%3cpath%20d%3d%22m19%2012h5%22%20%2f%3e%20%3c%2fsvg%3e%20")="" center="" contain="" no-repeat;mask:url("data:image="" no-repeat"=""></span></button>
+        <span style="font-size:15px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">#{{ ag.id }} {{ ag.name }}</span>
+        <div style="flex:1"></div>
+        <span style="{{ ag.statusStyle }}">{{ ag.statusLabel }}</span>
+      </div>
+      <div style="padding:10px 16px;border-bottom:1px solid var(--border-subtle);display:grid;gap:2px;flex:none">
+        <span style="color:var(--text-secondary)">{{ ag.task }}</span>
+        <span style="color:var(--text-muted);font-size:13px">Output stream · view only</span>
+      </div>
+      <div style="overflow:auto;flex:1;min-height:0;padding:10px 16px 16px;display:grid;gap:6px;align-content:start">
+        <sc-for list="{{ ag.stream }}" as="l" hint-placeholder-count="5">
+          <div style="display:grid;grid-template-columns:40px minmax(0,1fr);gap:8px;align-items:start">
+            <span style="font-family:var(--font-mono);font-size:11px;line-height:20px;color:var(--text-muted)">{{ l.time }}</span>
+            <span style="{{ l.style }}"><span style="{{ l.tagStyle }}">{{ l.tag }}</span>{{ l.text }}</span>
+          </div>
+        </sc-for>
+        <sc-if value="{{ ag.live }}" hint-placeholder-val="{{ false }}">
+          <div style="display:grid;grid-template-columns:40px minmax(0,1fr);gap:8px"><span></span><span style="color:var(--text-muted)">streaming…</span></div>
+        </sc-if>
+      </div>
+    </sc-if>
+  </aside>
+</div>
