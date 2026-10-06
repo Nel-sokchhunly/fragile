@@ -109,7 +109,7 @@ export function SessionsSidebar({onToggle}: {onToggle: () => void}) {
   }
   return (
     <nav aria-label="Sessions" className="flex h-full flex-col bg-sidebar text-sidebar-foreground">
-      <header className="flex h-10 shrink-0 items-center gap-0.5 pr-1.5 pl-3">
+      <header className="flex h-[52px] shrink-0 items-center gap-0.5 pr-1.5 pl-3">
         <h2 className="flex-1 text-base font-semibold tracking-[-0.01em]">Fragile</h2>
         {toggle}
         {add}

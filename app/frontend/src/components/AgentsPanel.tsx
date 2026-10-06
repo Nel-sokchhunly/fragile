@@ -25,7 +25,7 @@ export function AgentsPanel({sessionId}: {sessionId: number | null}) {
 
   return (
     <section className="flex h-full min-h-0 flex-col" aria-label="Agents">
-      <header className="flex h-10 shrink-0 items-center justify-between gap-2 border-b px-3">
+      <header className="flex h-[52px] shrink-0 items-center justify-between gap-2 border-b px-3">
         <h2 className="text-title font-semibold">Agents</h2>
         <span className="truncate font-mono text-xs text-muted-foreground">{agentSummary(agents)}</span>
       </header>
