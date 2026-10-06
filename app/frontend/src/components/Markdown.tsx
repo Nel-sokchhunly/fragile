@@ -25,9 +25,9 @@ const components: Components = {
     const text = String(children)
     return lang || text.includes('\n')
       ? <CodeBlock code={text.replace(/\n$/, '')} lang={lang ?? ''}/>
-      : <code className="rounded bg-muted px-1 py-0.5 font-mono text-[0.85em]">{children}</code>
+      : <code className="rounded-sm bg-surface-sunken px-1 py-px font-mono text-[0.85em]">{children}</code>
   },
-  a: ({children, href}) => <a href={href} target="_blank" rel="noreferrer" className="underline underline-offset-2">{children}</a>,
+  a: ({children, href}) => <a href={href} target="_blank" rel="noreferrer">{children}</a>,
 }
 
 export const Markdown = memo(function Markdown({children}: {children: string}) {

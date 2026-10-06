@@ -1,54 +1,73 @@
 import {memo, useEffect, useState} from 'react'
 import {Virtuoso} from 'react-virtuoso'
-import {ArrowLeft, ChevronRight, Wrench} from 'lucide-react'
+import {ArrowLeft, ChevronRight} from 'lucide-react'
 import {Button} from '@/components/ui/button'
 import {Collapsible, CollapsibleContent, CollapsibleTrigger} from '@/components/ui/collapsible'
+import {Tooltip, TooltipContent, TooltipTrigger} from '@/components/ui/tooltip'
 import {Markdown} from '@/components/Markdown'
 import {useNow} from '@/hooks/use-now'
-import {agentElapsed, agentName} from '@/lib/format'
+import {agentElapsed, agentLabel, agentState, formatElapsed, formatExact} from '@/lib/format'
 import type {Agent, AgentEvent} from '@/lib/types'
 import {cn} from '@/lib/utils'
 import {NO_EVENTS, useAppStore} from '@/store/app'
 
-// View only (Phase 2 adds messaging). Payloads are JSON text; unknown shapes fall back to raw text.
+// View only. Payloads are JSON text; unknown shapes fall back to raw text.
 function parse(payload: string): Record<string, unknown> {
   try { return JSON.parse(payload) } catch { return {text: payload} }
 }
 
-function Fold({icon, title, body, tone}: {icon?: boolean; title: string; body: string; tone?: string}) {
+// One mono line (chevron, name, truncated body); opens to the full text.
+function Fold({title, body, tone}: {title: string; body: string; tone?: string}) {
   const [open, setOpen] = useState(false)
   return (
-    <Collapsible open={open} onOpenChange={setOpen} className="rounded border bg-muted/40 font-mono text-xs">
-      <CollapsibleTrigger className="flex w-full items-center gap-1.5 px-2 py-1 text-left text-muted-foreground hover:text-foreground">
-        <ChevronRight className={cn('size-3 shrink-0 transition-transform', open && 'rotate-90')} aria-hidden/>
-        {icon && <Wrench className="size-3 shrink-0" aria-hidden/>}
-        <span className={cn('font-medium text-foreground', tone)}>{title}</span>
-        {!open && <span className="min-w-0 flex-1 truncate">{body.replace(/\s+/g, ' ')}</span>}
+    <Collapsible open={open} onOpenChange={setOpen} className="font-mono text-xs leading-5 text-text-secondary">
+      <CollapsibleTrigger className="flex w-full items-baseline gap-1.5 text-left hover:text-foreground">
+        <ChevronRight className={cn('size-3 shrink-0 translate-y-[2px] text-muted-foreground transition-transform', open && 'rotate-90')} aria-hidden/>
+        <span className={cn('shrink-0', tone)}>{title}</span>
+        {!open && <span className="min-w-0 flex-1 truncate text-muted-foreground">{body.replace(/\s+/g, ' ')}</span>}
       </CollapsibleTrigger>
       <CollapsibleContent>
-        <pre className="max-h-72 overflow-auto border-t p-2 whitespace-pre-wrap break-words">{body}</pre>
+        <pre className="mt-0.5 max-h-72 overflow-auto rounded-md border border-border-default bg-surface-sunken p-2 whitespace-pre-wrap break-words">{body}</pre>
       </CollapsibleContent>
     </Collapsible>
   )
 }
 
-const EventRow = memo(function EventRow({ev}: {ev: AgentEvent}) {
+// Rows are a 40px mono relative-time column (exact time on hover) and the content.
+const EventRow = memo(function EventRow({ev, start}: {ev: AgentEvent; start: number}) {
   const p = parse(ev.payload)
   return (
-    <div className="px-4 py-1">
-      {ev.event_type === 'assistant_text' && <Markdown>{String(p.text ?? '')}</Markdown>}
-      {ev.event_type === 'tool_use' && <Fold icon title={String(p.name ?? 'tool')} body={JSON.stringify(p.input ?? {}, null, 2)}/>}
-      {ev.event_type === 'tool_result' && <Fold title="result" tone={p.is_error ? 'text-destructive' : undefined} body={String(p.content ?? '')}/>}
-      {!['assistant_text', 'tool_use', 'tool_result'].includes(ev.event_type) && <Fold title={ev.event_type} body={ev.payload}/>}
+    <div className="mx-auto grid max-w-[680px] grid-cols-[40px_minmax(0,1fr)] gap-2 px-6 py-[3px]">
+      <time className="font-mono text-mini leading-5 text-muted-foreground" dateTime={ev.created_at} title={formatExact(ev.created_at)}>{formatElapsed(Date.parse(ev.created_at) - start)}</time>
+      <div className="min-w-0">
+        {ev.event_type === 'assistant_text' && <div className="leading-5"><Markdown>{String(p.text ?? '')}</Markdown></div>}
+        {ev.event_type === 'tool_use' && <Fold title={String(p.name ?? 'tool')} body={JSON.stringify(p.input ?? {}, null, 2)}/>}
+        {ev.event_type === 'tool_result' && <Fold title="result" tone={p.is_error ? 'text-destructive' : undefined} body={String(p.content ?? '')}/>}
+        {!['assistant_text', 'tool_use', 'tool_result'].includes(ev.event_type) && <Fold title={ev.event_type} body={ev.payload}/>}
+      </div>
     </div>
   )
 })
 
+const STATE_CLS = {running: 'text-status-working', exited: 'text-status-exited', crashed: 'text-status-crashed'} as const
+
 // Own component so the 1s clock tick re-renders only this label, not the virtualized list.
 function Meta({agent, count}: {agent: Agent; count: number}) {
   const now = useNow()
-  return <span className="shrink-0 text-xs text-muted-foreground">{agent.status} · {agentElapsed(agent, now)} · {count.toLocaleString()} events</span>
+  return (
+    <span className="shrink-0 font-mono text-xs text-muted-foreground" title={`pid ${agent.pid ?? '-'} · started ${formatExact(agent.created_at)}`}>
+      <span className={STATE_CLS[agent.status]}>{agentState(agent)}</span> {agentElapsed(agent, now)} · {count.toLocaleString()} ev
+    </span>
+  )
 }
+
+const Pad = () => <div className="h-3"/>
+// "streaming…" tail while the agent is alive (context carries that flag; the components stay module-level).
+const Tail = ({context}: {context?: {live: boolean}}) => (
+  <div className="mx-auto max-w-[680px] px-6 pt-[3px] pb-3">
+    {context?.live && <div className="grid grid-cols-[40px_minmax(0,1fr)] gap-2 text-muted-foreground"><span/><span className="font-mono text-xs leading-5">streaming…</span></div>}
+  </div>
+)
 
 export function AgentOutputView({sessionId, agentId}: {sessionId: number; agentId: number}) {
   const agent = useAppStore((s) => s.data[sessionId]?.agents.find((a) => a.id === agentId))
@@ -58,35 +77,43 @@ export function AgentOutputView({sessionId, agentId}: {sessionId: number; agentI
   const load = useAppStore((s) => s.loadAgentEvents)
   const back = useAppStore((s) => s.selectAgent)
   useEffect(() => { void load(agentId) }, [load, agentId]) // no-op once cached; live events keep appending
+  const start = agent ? Date.parse(agent.created_at) : 0
 
   return (
     <div className="flex h-full min-h-0 min-w-0 flex-col">
-      <header className="flex h-9 shrink-0 items-center gap-2 border-b px-2">
-        <Button variant="ghost" size="sm" onClick={() => back(null)} aria-label="Back to orchestrator chat"><ArrowLeft/> Chat</Button>
-        <h1 className="min-w-0 flex-1 truncate text-sm font-semibold">{agentName(agent, task)}</h1>
+      <header className="flex h-10 shrink-0 items-center gap-2 border-b pr-6 pl-2">
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button variant="ghost" size="icon-sm" onClick={() => back(null)} aria-label="Back to orchestrator chat"><ArrowLeft/></Button>
+          </TooltipTrigger>
+          <TooltipContent side="bottom">Back to chat (Esc)</TooltipContent>
+        </Tooltip>
+        <h1 className="min-w-0 flex-1 truncate text-title font-semibold">{agentLabel(agent, task)}</h1>
         {agent && <Meta agent={agent} count={events.length}/>}
       </header>
+      {task?.description && <p className="truncate border-b px-6 py-1 text-[13px] text-text-secondary" title={task.description}>{task.description}</p>}
       {/* Absolutely positioned list: its height never depends on percentage resolution inside flex. */}
       <div className="relative min-h-0 flex-1">
         {!loaded ? (
-          <p className="p-6 text-sm text-muted-foreground">Loading...</p>
+          <p className="p-6 text-[13px] text-muted-foreground">Loading...</p>
         ) : events.length === 0 ? (
-          <p className="p-6 text-sm text-muted-foreground">No output from this agent yet.</p>
+          <p className="p-6 text-[13px] text-muted-foreground">No output.</p>
         ) : (
           <Virtuoso
             key={agentId}
             data={events}
             computeItemKey={(_, e) => e.id}
             initialTopMostItemIndex={{index: 'LAST', align: 'end'}}
-            defaultItemHeight={28}
+            defaultItemHeight={26}
             followOutput={(atBottom) => (atBottom ? 'auto' : false)}
             increaseViewportBy={400}
-            itemContent={(_, ev) => <EventRow ev={ev}/>}
+            itemContent={(_, ev) => <EventRow ev={ev} start={start}/>}
+            components={{Header: Pad, Footer: Tail}}
+            context={{live: agent?.status === 'running'}}
             className="absolute inset-0"
           />
         )}
       </div>
-      <p className="border-t px-4 py-2 text-xs text-muted-foreground">View only. Messaging sub-agents directly arrives in Phase 2.</p>
     </div>
   )
 }

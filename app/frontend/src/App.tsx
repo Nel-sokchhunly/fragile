@@ -1,12 +1,9 @@
 import {useDeferredValue, useEffect, useState} from 'react'
-import {Plus} from 'lucide-react'
 import {AgentsPanel} from '@/components/AgentsPanel'
-import {NewSessionDialog} from '@/components/NewSessionDialog'
 import {NotesPanel} from '@/components/NotesPanel'
 import {SessionsSidebar} from '@/components/SessionsSidebar'
 import {AgentOutputView} from '@/components/chat/AgentOutputView'
 import {ChatView} from '@/components/chat/ChatView'
-import {Button} from '@/components/ui/button'
 import {ResizableHandle, ResizablePanel, ResizablePanelGroup} from '@/components/ui/resizable'
 import {TooltipProvider} from '@/components/ui/tooltip'
 import {useDefaultLayout, usePanelRef} from 'react-resizable-panels'
@@ -36,19 +33,14 @@ function Toasts() {
   const toasts = useAppStore((s) => s.toasts)
   return (
     <div className="pointer-events-none fixed right-4 bottom-4 z-[100] flex max-w-sm flex-col gap-2" aria-live="polite">
-      {toasts.map((t) => <div key={t.id} role="alert" className="rounded-md border border-destructive bg-background px-3 py-2 text-sm text-destructive shadow-md">{t.text}</div>)}
+      {toasts.map((t) => <div key={t.id} role="alert" className="rounded-md border border-destructive bg-background px-3 py-1.5 text-[13px] text-destructive">{t.text}</div>)}
     </div>
   )
 }
 
+// The sidebar's + (and Cmd/Ctrl+N) is the one way to create a session, so no button here.
 function EmptyCenter() {
-  return (
-    <div className="flex h-full flex-col items-center justify-center gap-3 p-8 text-center">
-      <h1 className="text-lg font-semibold">No sessions yet</h1>
-      <p className="max-w-sm text-sm text-muted-foreground">A session is one task handed to an orchestrator, which spawns sub-agents to work on it. Start one to begin.</p>
-      <NewSessionDialog><Button><Plus/> New session</Button></NewSessionDialog>
-    </div>
-  )
+  return <div className="flex h-full items-center justify-center p-8 text-[13px] text-muted-foreground">No sessions yet.</div>
 }
 
 export default function App() {
@@ -81,12 +73,22 @@ export default function App() {
     window.addEventListener('resize', fit)
     return () => { clearInterval(t); window.removeEventListener('resize', fit) }
   }, [sidebar])
+  // Keyboard: Cmd/Ctrl+B sidebar, +K or "/" composer, +N new session, +1..9 session, Esc agent view -> chat.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if ((e.metaKey || e.ctrlKey) && !e.shiftKey && !e.altKey && e.key.toLowerCase() === 'b') {
-        e.preventDefault()
-        toggleSidebar()
-      }
+      const mod = (e.metaKey || e.ctrlKey) && !e.shiftKey && !e.altKey
+      const key = e.key.toLowerCase()
+      const st = useAppStore.getState()
+      const typing = e.target instanceof HTMLElement && e.target.closest('input, textarea, select, [contenteditable]')
+      const dialogOpen = !!document.querySelector('[role=dialog]')
+      if (mod && key === 'b') toggleSidebar()
+      else if (mod && key === 'k') document.querySelector<HTMLElement>('[data-composer]')?.focus()
+      else if (key === '/' && !e.metaKey && !e.ctrlKey && !typing && !dialogOpen) document.querySelector<HTMLElement>('[data-composer]')?.focus()
+      else if (mod && key === 'n' && !dialogOpen) document.querySelector<HTMLElement>('[data-new-session]')?.click()
+      else if (mod && /^[1-9]$/.test(key)) { const s = st.sessions[Number(key) - 1]; if (s) st.selectSession(s.id) }
+      else if (key === 'escape' && st.selectedAgentId != null && !dialogOpen) st.selectAgent(null)
+      else return
+      e.preventDefault()
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
@@ -111,7 +113,7 @@ export default function App() {
         <ResizablePanel id="right" defaultSize={RIGHT.default} minSize={RIGHT.min} maxSize={RIGHT.max}>
           <ResizablePanelGroup id="fragile-right-v2" orientation="vertical" defaultLayout={right.defaultLayout} onLayoutChanged={right.onLayoutChanged}>
             <ResizablePanel id="agents" defaultSize="60%" minSize="20%"><AgentsPanel sessionId={sessionId}/></ResizablePanel>
-            <ResizableHandle withHandle/>
+            <ResizableHandle/>
             <ResizablePanel id="notes" defaultSize="40%" minSize="15%"><NotesPanel sessionId={sessionId}/></ResizablePanel>
           </ResizablePanelGroup>
         </ResizablePanel>
