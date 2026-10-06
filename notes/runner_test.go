@@ -5,7 +5,9 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 )
 
 // newTestRunner returns a Runner whose "claude" is a shell script with the given body.
@@ -149,7 +151,7 @@ func TestRunnerStopAllRecordsEverything(t *testing.T) {
 
 func TestRunnerArgs(t *testing.T) {
 	r := NewRunner(Config{}, nil, nil)
-	args := r.args("/x/agent-3.mcp.json", "do -it", "SYS")
+	args := r.args(Agent{Role: "subagent"}, "/x/agent-3.mcp.json", "do -it", "SYS")
 	for _, want := range [][]string{
 		{"--mcp-config", "/x/agent-3.mcp.json"}, {"--append-system-prompt", "SYS"},
 		{"--output-format", "stream-json"}, {"--disallowedTools", "Task,Agent,Workflow"}, {"--", "do -it"},
@@ -158,6 +160,17 @@ func TestRunnerArgs(t *testing.T) {
 		if i := slices.Index(args, want[0]); i < 0 || args[i+1] != want[1] {
 			t.Errorf("args missing %v: %v", want, args)
 		}
+	}
+	if slices.Contains(args, "--input-format") {
+		t.Errorf("one-shot args take input from stdin: %v", args)
+	}
+	r.Interactive = true
+	iargs := r.args(Agent{Role: "orchestrator"}, "/x/agent-3.mcp.json", "", "SYS")
+	if i := slices.Index(iargs, "--input-format"); i < 0 || iargs[i+1] != "stream-json" || slices.Contains(iargs, "--") || !slices.Contains(iargs, "--setting-sources") {
+		t.Errorf("interactive orchestrator args: %v", iargs)
+	}
+	if sub := r.args(Agent{Role: "subagent"}, "/x", "p", "SYS"); slices.Contains(sub, "--input-format") {
+		t.Errorf("sub-agents stay one-shot: %v", sub)
 	}
 	if !slices.Contains(args, "--strict-mcp-config") || !slices.Contains(args, "--disable-slash-commands") || !slices.Contains(args, "--verbose") || slices.Contains(args, "--dangerously-skip-permissions") {
 		t.Errorf("args: %v", args)
@@ -249,9 +262,86 @@ func TestRunnerIsolationEnvAndWorkDir(t *testing.T) {
 }
 
 func TestPromptsWorkDirAndNoSleep(t *testing.T) {
-	for name, p := range map[string]string{"orchestrator": OrchestratorPrompt("/w/dir"), "subagent": SubagentPrompt(7, "task {{WORKDIR}}", "/w/dir")} {
+	for name, p := range map[string]string{"orchestrator": OrchestratorPrompt("/w/dir", false), "subagent": SubagentPrompt(7, "task {{WORKDIR}}", "/w/dir")} {
 		if !strings.Contains(p, "`/w/dir`") || !strings.Contains(p, "wait_for_notes") || strings.Contains(p, "sleep") {
 			t.Errorf("%s prompt: workdir/wait_for_notes/sleep check failed", name)
 		}
+	}
+}
+
+// An interactive orchestrator takes stream-json user messages on stdin, and
+// OnLine sees every output line while the log file still gets all of it.
+func TestRunnerInteractiveStdinAndOnLine(t *testing.T) {
+	r, store, sess, _ := newTestRunner(t, `while IFS= read -r line; do echo "got: $line"; done`)
+	r.Interactive = true
+	var mu sync.Mutex
+	var lines []string
+	r.OnLine = func(a Agent, l []byte) {
+		mu.Lock()
+		defer mu.Unlock()
+		lines = append(lines, string(l))
+	}
+	a, err := r.StartOrchestrator(sess.ID, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !r.Running(a.ID) {
+		t.Fatal("orchestrator not running")
+	}
+	if err := r.SendUser(a.ID, `say "hi"`); err != nil {
+		t.Fatal(err)
+	}
+	for deadline := time.Now().Add(5 * time.Second); ; time.Sleep(5 * time.Millisecond) {
+		mu.Lock()
+		n := len(lines)
+		mu.Unlock()
+		if n == 1 {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("no output line")
+		}
+	}
+	want := `got: {"message":{"content":[{"text":"say \"hi\"","type":"text"}],"role":"user"},"type":"user"}`
+	if lines[0] != want {
+		t.Fatalf("line = %s\nwant   %s", lines[0], want)
+	}
+	r.StopAll()
+	if r.Running(a.ID) || r.SendUser(a.ID, "x") != ErrNotRunning {
+		t.Error("stopped orchestrator still takes messages")
+	}
+	got, _ := store.GetAgent(sess.ID, a.ID)
+	if got.Status != "crashed" {
+		t.Errorf("status = %s", got.Status)
+	}
+	if b, _ := os.ReadFile(a.LogPath); !strings.Contains(string(b), "got: ") {
+		t.Errorf("log file = %q", b)
+	}
+}
+
+func TestLineWriter(t *testing.T) {
+	var lines []string
+	var out strings.Builder
+	w := &lineWriter{w: &out, onLine: func(l []byte) { lines = append(lines, string(l)) }}
+	for _, chunk := range []string{"ab", "c\nde", "f\n\ngh\nij"} {
+		w.Write([]byte(chunk))
+	}
+	if strings.Join(lines, "|") != "abc|def|gh" || out.String() != "abc\ndef\n\ngh\nij" {
+		t.Fatalf("lines = %q, out = %q", lines, out.String())
+	}
+}
+
+func TestOrchestratorPromptModes(t *testing.T) {
+	one, chat := OrchestratorPrompt("/w", false), OrchestratorPrompt("/w", true)
+	for _, p := range []string{one, chat} {
+		if strings.Contains(p, "{{") {
+			t.Errorf("unreplaced placeholder in prompt")
+		}
+	}
+	if !strings.Contains(one, "one-shot") || !strings.Contains(one, "log-only") || strings.Contains(one, "Answer to your escalation") {
+		t.Error("one-shot prompt wrong")
+	}
+	if strings.Contains(chat, "one-shot") || strings.Contains(chat, "log-only") || !strings.Contains(chat, "Answer to your escalation #N") {
+		t.Error("interactive prompt wrong")
 	}
 }

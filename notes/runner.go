@@ -1,8 +1,11 @@
 package notes
 
 import (
+	"bytes"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -44,6 +47,15 @@ const (
 type Runner struct {
 	Command string // binary to run; "claude" unless a test substitutes a fake
 
+	// Interactive (set before use) makes the orchestrator a long-lived process
+	// that reads stream-json user messages from stdin (see SendUser) instead of
+	// taking its prompt as an argument, and uses the interactive prompt.
+	Interactive bool
+	// OnLine, if set before use, is called with every line an agent writes to
+	// stdout/stderr, in order, from that agent's copy goroutine; the slice is only
+	// valid during the call. The raw output still goes to the agent's log file.
+	OnLine func(a Agent, line []byte)
+
 	cfg   Config
 	store *Store
 	log   *EventLog
@@ -57,7 +69,15 @@ type Runner struct {
 // proc is a live agent process; exited is closed once it has exited.
 type proc struct {
 	sessionID int64
+	agentID   int64
 	exited    chan struct{}
+	stdin     *stdinPipe // nil unless the agent takes messages on stdin
+}
+
+// stdinPipe serializes writes to an agent's stdin.
+type stdinPipe struct {
+	mu sync.Mutex
+	w  io.WriteCloser
 }
 
 // sessionRun tracks one session's processes.
@@ -68,6 +88,23 @@ type sessionRun struct {
 	// as it can spawn; once stopped is set, start never calls Add again.
 	wg      sync.WaitGroup
 	stopped bool // set by StopSession/StopAll; final for this session in this process
+}
+
+// FirstLine returns the first line of text, trimmed and cut to titleMax characters.
+func FirstLine(text string) string {
+	title, _, _ := strings.Cut(strings.TrimSpace(text), "\n")
+	if rs := []rune(title); len(rs) > titleMax {
+		title = string(rs[:titleMax])
+	}
+	return title
+}
+
+// workDir is the directory the session's agents run in: its own, else the configured one.
+func (r *Runner) workDir(sessionID int64) string {
+	if se, err := r.store.GetSession(sessionID); err == nil && se.WorkDir != "" {
+		return se.WorkDir
+	}
+	return r.cfg.WorkDir
 }
 
 func NewRunner(cfg Config, store *Store, log *EventLog) *Runner {
@@ -91,7 +128,7 @@ func (r *Runner) StartOrchestrator(sessionID int64, task string) (Agent, error) 
 	if err != nil {
 		return Agent{}, err
 	}
-	return r.launch(a, "", task, OrchestratorPrompt(r.cfg.WorkDir))
+	return r.launch(a, "", task, OrchestratorPrompt(r.workDir(sessionID), r.Interactive))
 }
 
 // SpawnSubagent creates the task and sub-agent rows in the session and launches
@@ -102,10 +139,7 @@ func (r *Runner) SpawnSubagent(sessionID, parentID int64, task string) (Agent, e
 	} else if p.Role != "orchestrator" {
 		return Agent{}, errors.New("only an orchestrator can spawn sub-agents")
 	}
-	title, _, _ := strings.Cut(strings.TrimSpace(task), "\n")
-	if rs := []rune(title); len(rs) > titleMax {
-		title = string(rs[:titleMax])
-	}
+	title := FirstLine(task)
 	t, err := r.store.CreateTask(sessionID, title, task)
 	if err != nil {
 		return Agent{}, err
@@ -117,20 +151,30 @@ func (r *Runner) SpawnSubagent(sessionID, parentID int64, task string) (Agent, e
 	if err := r.store.SetTaskAgent(sessionID, t.ID, a.ID); err != nil {
 		return Agent{}, err
 	}
-	return r.launch(a, title, task, SubagentPrompt(a.ID, task, r.cfg.WorkDir))
+	return r.launch(a, title, task, SubagentPrompt(a.ID, task, r.workDir(sessionID)))
 }
 
 // args builds the claude command line. The prompt goes after "--" so a task
 // starting with "-" is not parsed as a flag and the variadic flags stop there.
-func (r *Runner) args(mcpConfig, prompt, systemPrompt string) []string {
-	args := []string{"-p", "--output-format", "stream-json", "--verbose",
+func (r *Runner) args(a Agent, mcpConfig, prompt, systemPrompt string) []string {
+	args := []string{"-p"}
+	if r.stdinAgent(a) { // messages arrive on stdin; the first one is the task
+		args = append(args, "--input-format", "stream-json")
+	}
+	args = append(args, "--output-format", "stream-json", "--verbose",
 		"--append-system-prompt", systemPrompt,
 		"--mcp-config", mcpConfig, "--strict-mcp-config",
 		"--allowedTools", allowedTools,
-		"--disallowedTools", disallowedTools}
+		"--disallowedTools", disallowedTools)
 	args = append(args, isolationArgs...)
+	if r.stdinAgent(a) {
+		return args
+	}
 	return append(args, "--", prompt)
 }
+
+// stdinAgent reports whether the agent is the long-lived orchestrator fed over stdin.
+func (r *Runner) stdinAgent(a Agent) bool { return r.Interactive && a.Role == roleOrchestrator }
 
 func (r *Runner) launch(a Agent, taskTitle, prompt, systemPrompt string) (Agent, error) {
 	id := strconv.FormatInt(a.ID, 10)
@@ -168,34 +212,50 @@ func (r *Runner) start(a Agent, mcpConfig, logPath, prompt, systemPrompt string)
 	if err != nil {
 		return 0, nil, err
 	}
-	defer out.Close() // the child holds its own copy of the descriptor
 
 	// Deliberately not exec.CommandContext: spawn runs inside an MCP request
 	// and the process must outlive it.
-	cmd := exec.Command(r.Command, r.args(mcpConfig, prompt, systemPrompt)...)
-	cmd.Dir = r.cfg.WorkDir
+	cmd := exec.Command(r.Command, r.args(a, mcpConfig, prompt, systemPrompt)...)
+	cmd.Dir = r.workDir(a.SessionID)
 	cmd.Env = append(os.Environ(), isolationEnv)
-	cmd.Stdout, cmd.Stderr = out, out
+	cmd.Stdout, cmd.Stderr = out, out // the child writes straight to the file ...
+	if r.OnLine != nil {              // ... unless lines are wanted: then through the tee
+		lw := &lineWriter{w: out, onLine: func(l []byte) { r.OnLine(a, l) }}
+		cmd.Stdout, cmd.Stderr = lw, lw
+		cmd.WaitDelay = time.Second // a grandchild holding the pipe must not delay the exit record
+	}
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	var stdin *stdinPipe
+	if r.stdinAgent(a) {
+		w, err := cmd.StdinPipe()
+		if err != nil {
+			out.Close()
+			return 0, nil, err
+		}
+		stdin = &stdinPipe{w: w}
+	}
 	// Check, start and register under one lock so StopAll cannot miss a process.
 	r.mu.Lock()
 	sr := r.session(a.SessionID)
 	if r.stopping || sr.stopped {
 		r.mu.Unlock()
+		out.Close()
 		return 0, nil, errors.New("runner is stopping")
 	}
 	if err := cmd.Start(); err != nil {
 		r.mu.Unlock()
+		out.Close()
 		return 0, nil, err
 	}
 	pid := cmd.Process.Pid
 	exited := make(chan struct{})
 	code := make(chan int, 1)
-	r.running[pid] = proc{a.SessionID, exited}
+	r.running[pid] = proc{a.SessionID, a.ID, exited, stdin}
 	sr.wg.Add(1)
 	r.mu.Unlock()
 	go func() {
 		cmd.Wait()
+		out.Close() // all output is copied once Wait returns
 		// Forget the pid at once: it may be reused and must not be signalled again.
 		r.mu.Lock()
 		delete(r.running, pid)
@@ -311,4 +371,82 @@ func (r *Runner) signal(pid int, sig syscall.Signal) {
 	if _, ok := r.running[pid]; ok {
 		syscall.Kill(-pid, sig)
 	}
+}
+
+// ErrNotRunning is returned by SendUser when the agent has no live process taking messages.
+var ErrNotRunning = errors.New("agent is not running")
+
+// Running reports whether the agent has a live process that SendUser can reach.
+func (r *Runner) Running(agentID int64) bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for _, p := range r.running {
+		if p.agentID == agentID && p.stdin != nil {
+			return true
+		}
+	}
+	return false
+}
+
+// SendUser writes text to the agent's stdin as a stream-json user message
+// (one JSON object per line), the way Claude Code takes further chat turns.
+func (r *Runner) SendUser(agentID int64, text string) error {
+	r.mu.Lock()
+	var in *stdinPipe
+	for _, p := range r.running {
+		if p.agentID == agentID {
+			in = p.stdin
+		}
+	}
+	r.mu.Unlock()
+	if in == nil {
+		return ErrNotRunning
+	}
+	line, err := json.Marshal(map[string]any{"type": "user", "message": map[string]any{
+		"role": "user", "content": []map[string]string{{"type": "text", "text": text}}}})
+	if err != nil {
+		return err
+	}
+	in.mu.Lock()
+	defer in.mu.Unlock()
+	if _, err := in.w.Write(append(line, '\n')); err != nil {
+		return fmt.Errorf("%w: %v", ErrNotRunning, err)
+	}
+	return nil
+}
+
+// maxLine bounds one buffered output line; longer lines are still written to the
+// log but not passed to the line hook.
+const maxLine = 32 << 20
+
+// lineWriter copies everything to w and hands each complete line to onLine.
+type lineWriter struct {
+	w      io.Writer
+	onLine func([]byte)
+	buf    []byte
+	skip   bool // inside an over-long line
+}
+
+func (l *lineWriter) Write(p []byte) (int, error) {
+	n, err := l.w.Write(p)
+	for rest := p; len(rest) > 0; {
+		i := bytes.IndexByte(rest, '\n')
+		if i < 0 {
+			if !l.skip {
+				if l.buf = append(l.buf, rest...); len(l.buf) > maxLine {
+					l.buf, l.skip = nil, true
+				}
+			}
+			break
+		}
+		if !l.skip {
+			l.buf = append(l.buf, rest[:i]...)
+			if len(l.buf) > 0 {
+				l.onLine(l.buf)
+			}
+		}
+		l.buf, l.skip = l.buf[:0], false
+		rest = rest[i+1:]
+	}
+	return n, err
 }

@@ -1,0 +1,381 @@
+package main
+
+import (
+	"context"
+	"encoding/json"
+	"os"
+	"strings"
+	"sync"
+	"testing"
+	"time"
+
+	"github.com/modelcontextprotocol/go-sdk/mcp"
+
+	"github.com/Nel-sokchhunly/fragile/notes"
+)
+
+// events collects what the app emits to the UI.
+type events struct {
+	mu  sync.Mutex
+	got []notes.Event
+}
+
+func (e *events) emit(_ string, data any) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	e.got = append(e.got, data.(notes.Event))
+}
+
+func (e *events) named(name string) []notes.Event {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	var out []notes.Event
+	for _, ev := range e.got {
+		if ev.Event == name {
+			out = append(out, ev)
+		}
+	}
+	return out
+}
+
+// statuses is the sequence of statuses announced by session_status_changed.
+func (e *events) statuses(sessionID int64) []string {
+	var out []string
+	for _, ev := range e.named(notes.EventSessionStatusChanged) {
+		if ev.SessionID == sessionID {
+			out = append(out, ev.Payload.(map[string]string)["status"])
+		}
+	}
+	return out
+}
+
+// echoOrchestrator stands in for `claude -p --input-format stream-json`: for
+// every stdin line it prints an assistant message quoting it, then a result.
+const echoOrchestrator = `while IFS= read -r line; do
+  esc=$(printf '%s' "$line" | sed 's/\\/\\\\/g; s/"/\\"/g')
+  printf '{"type":"assistant","message":{"content":[{"type":"text","text":"echo: %s"}]}}\n' "$esc"
+  printf '{"type":"result","subtype":"success","is_error":false,"result":"ok"}\n'
+done`
+
+func newTestApp(t *testing.T, dir, script string) (*App, *events) {
+	t.Helper()
+	ev := &events{}
+	a := NewApp()
+	if err := a.open(dir, ev.emit); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(a.close)
+	if script != "" {
+		a.runner.Command = writeScript(t, script)
+	}
+	return a, ev
+}
+
+func writeScript(t *testing.T, script string) string {
+	t.Helper()
+	path := t.TempDir() + "/fake-claude"
+	if err := writeFile(path, "#!/bin/sh\n"+script+"\n"); err != nil {
+		t.Fatal(err)
+	}
+	return path
+}
+
+func waitFor(t *testing.T, what string, cond func() bool) {
+	t.Helper()
+	for deadline := time.Now().Add(10 * time.Second); time.Now().Before(deadline); time.Sleep(10 * time.Millisecond) {
+		if cond() {
+			return
+		}
+	}
+	t.Fatalf("timed out waiting for %s", what)
+}
+
+func snapshot(t *testing.T, a *App, id int64) SessionSnapshot {
+	t.Helper()
+	s, err := a.GetSession(id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return s
+}
+
+func chatTexts(s SessionSnapshot) []string {
+	var out []string
+	for _, c := range s.Chat {
+		out = append(out, c.Kind+": "+c.Text)
+	}
+	return out
+}
+
+func hasChat(a *App, id int64, want string) bool {
+	s, err := a.GetSession(id)
+	if err != nil {
+		return false
+	}
+	for _, c := range chatTexts(s) {
+		if strings.Contains(c, want) {
+			return true
+		}
+	}
+	return false
+}
+
+func TestSessionChatAndStatus(t *testing.T) {
+	a, ev := newTestApp(t, t.TempDir(), echoOrchestrator)
+	se, err := a.CreateSession("Write the thing\nwith details", t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if se.Title != "Write the thing" || se.Status != "working" || se.WorkDir == "" {
+		t.Fatalf("session = %+v", se)
+	}
+	waitFor(t, "first reply and done", func() bool {
+		return hasChat(a, se.ID, "assistant: echo: ") && snapshot(t, a, se.ID).Session.Status == "done"
+	})
+	if err := a.SendMessage(se.ID, "second message"); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, "second reply", func() bool {
+		return hasChat(a, se.ID, "second message") && snapshot(t, a, se.ID).Session.Status == "done"
+	})
+
+	s := snapshot(t, a, se.ID)
+	if len(s.Agents) != 1 || s.Agents[0].Role != "orchestrator" || s.Tasks == nil || s.Notes == nil || len(s.Escalations) != 0 {
+		t.Fatalf("snapshot = %+v", s)
+	}
+	var kinds []string
+	for _, c := range s.Chat {
+		kinds = append(kinds, c.Kind)
+	}
+	if strings.Join(kinds, ",") != "user,assistant,user,assistant" || !strings.Contains(s.Chat[0].Text, "Write the thing") {
+		t.Fatalf("chat = %v", chatTexts(s))
+	}
+	// Raw events are paged per agent.
+	page, err := a.GetAgentEvents(s.Agents[0].ID, 0, 2)
+	if err != nil || len(page) != 2 {
+		t.Fatalf("page 1 = %+v, %v", page, err)
+	}
+	rest, _ := a.GetAgentEvents(s.Agents[0].ID, page[1].ID, 100)
+	if len(rest) == 0 || rest[0].ID <= page[1].ID {
+		t.Fatalf("page 2 = %+v", rest)
+	}
+
+	waitFor(t, "status events", func() bool { return len(ev.statuses(se.ID)) >= 2 })
+	if got := strings.Join(ev.statuses(se.ID), ","); !strings.HasPrefix(got, "done") {
+		// created as working, so the first change announced is to done; later turns toggle
+		t.Fatalf("status events = %s", got)
+	}
+	if len(ev.named(notes.EventSessionCreated)) != 1 || len(ev.named(eventAgentEvent)) < 4 || len(ev.named(eventChatItem)) < 4 {
+		t.Fatalf("missing events: created=%d agent_event=%d chat_item=%d",
+			len(ev.named(notes.EventSessionCreated)), len(ev.named(eventAgentEvent)), len(ev.named(eventChatItem)))
+	}
+	if err := a.SendMessage(se.ID, " "); err == nil {
+		t.Error("empty message accepted")
+	}
+	if _, err := a.CreateSession("x", "/definitely/not/here"); err == nil {
+		t.Error("bad work dir accepted")
+	}
+}
+
+func TestStopSession(t *testing.T) {
+	a, _ := newTestApp(t, t.TempDir(), echoOrchestrator)
+	se, err := a.CreateSession("task", t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := a.StopSession(se.ID); err != nil {
+		t.Fatal(err)
+	}
+	s := snapshot(t, a, se.ID)
+	if s.Session.Status != "done" || s.Agents[0].Status != "crashed" {
+		t.Fatalf("after stop: %+v / %+v", s.Session, s.Agents[0])
+	}
+	if err := a.SendMessage(se.ID, "hello?"); err == nil {
+		t.Error("message to a stopped session accepted")
+	}
+}
+
+func TestEscalationAnswerFlow(t *testing.T) {
+	a, ev := newTestApp(t, t.TempDir(), echoOrchestrator)
+	se, err := a.CreateSession("build it", t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, "first turn done", func() bool {
+		return snapshot(t, a, se.ID).Session.Status == "done" && hasChat(a, se.ID, "assistant: echo: ")
+	})
+
+	// The orchestrator escalates through its real MCP endpoint.
+	orch := snapshot(t, a, se.ID).Agents[0]
+	full, _ := a.store.GetAgent(se.ID, orch.ID)
+	cs, err := mcp.NewClient(&mcp.Implementation{Name: "test"}, nil).Connect(context.Background(),
+		&mcp.StreamableClientTransport{Endpoint: "http://" + a.addr + "/mcp/" + full.Token}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer cs.Close()
+	res, err := cs.CallTool(context.Background(), &mcp.CallToolParams{Name: "escalate_to_user",
+		Arguments: map[string]any{"question": "Postgres or SQLite?", "context": "small app"}})
+	if err != nil || res.IsError {
+		t.Fatalf("escalate: %v %+v", err, res)
+	}
+	if txt := res.Content[0].(*mcp.TextContent).Text; !strings.Contains(txt, "Their answer will arrive as a new user message") {
+		t.Fatalf("tool result = %q", txt)
+	}
+	waitFor(t, "needs_you", func() bool { return snapshot(t, a, se.ID).Session.Status == "needs_you" })
+	s := snapshot(t, a, se.ID)
+	last := s.Chat[len(s.Chat)-1]
+	if len(s.Escalations) != 1 || last.Kind != "escalation" || last.Escalation.Question != "Postgres or SQLite?" || last.Escalation.Status != "open" {
+		t.Fatalf("snapshot after escalate: %+v / chat %+v", s.Escalations, s.Chat)
+	}
+	waitFor(t, "escalation events", func() bool { return len(ev.named(notes.EventEscalation)) == 1 && len(ev.named(eventChatItem)) >= 3 })
+
+	if err := a.AnswerEscalation(s.Escalations[0].ID, "  "); err == nil {
+		t.Error("blank answer accepted")
+	}
+	if err := a.AnswerEscalation(s.Escalations[0].ID, "SQLite"); err != nil {
+		t.Fatal(err)
+	}
+	// The orchestrator received the answer with the question for context ...
+	waitFor(t, "orchestrator echoes the answer", func() bool {
+		return hasChat(a, se.ID, "Answer to your escalation #1.") && hasChat(a, se.ID, "Postgres or SQLite?") && hasChat(a, se.ID, "The user's answer: SQLite")
+	})
+	// ... the escalation is answered in place (same chat row), the badge cleared, nothing duplicated as a user message.
+	waitFor(t, "badge cleared", func() bool { return snapshot(t, a, se.ID).Session.Status == "done" })
+	s = snapshot(t, a, se.ID)
+	var esc ChatItem
+	for _, c := range s.Chat {
+		if c.Kind == "escalation" {
+			esc = c
+		}
+		if c.Kind == "user" && strings.Contains(c.Text, "SQLite") {
+			t.Errorf("answer shown as a user message: %+v", c)
+		}
+	}
+	if len(s.Escalations) != 0 || esc.Escalation == nil || esc.Escalation.Status != "answered" || esc.Escalation.Answer != "SQLite" {
+		t.Fatalf("after answer: open=%v item=%+v", s.Escalations, esc)
+	}
+	got := strings.Join(ev.statuses(se.ID), ",")
+	if !strings.Contains(got, "needs_you,working") {
+		t.Errorf("status events = %s, want needs_you then working", got)
+	}
+	if err := a.AnswerEscalation(esc.Escalation.ID, "again"); err == nil {
+		t.Error("answered an escalation twice")
+	}
+}
+
+func TestUserNotesWakeAgents(t *testing.T) {
+	a, ev := newTestApp(t, t.TempDir(), echoOrchestrator)
+	se, err := a.CreateSession("task", t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	changed := a.log.Changed(se.ID)
+	n, err := a.AddNote(se.ID, "decision", "use tabs")
+	if err != nil || n.AuthorID != 0 || n.Status != "open" {
+		t.Fatalf("note = %+v, %v", n, err)
+	}
+	select {
+	case <-changed:
+	case <-time.After(5 * time.Second):
+		t.Fatal("user note did not wake wait_for_notes")
+	}
+	if _, err := a.AddNote(se.ID, "nonsense", "x"); err == nil {
+		t.Error("bad type accepted")
+	}
+	u, err := a.UpdateNote(se.ID, n.ID, "use spaces", "resolved")
+	if err != nil || u.Content != "use spaces" || u.Status != "resolved" || u.AuthorID != 0 {
+		t.Fatalf("updated = %+v, %v", u, err)
+	}
+	if _, err := a.UpdateNote(se.ID, n.ID, "", ""); err == nil {
+		t.Error("empty update accepted")
+	}
+	if got := snapshot(t, a, se.ID).Notes; len(got) != 1 || got[0].Content != "use spaces" {
+		t.Fatalf("snapshot notes = %+v", got)
+	}
+	waitFor(t, "note events", func() bool {
+		return len(ev.named(notes.EventNotePosted)) == 1 && len(ev.named(notes.EventNoteUpdated)) == 1
+	})
+	b, _ := json.Marshal(n)
+	if !strings.Contains(string(b), `"author_agent_id":0`) {
+		t.Errorf("user note JSON = %s", b)
+	}
+}
+
+// A previous run's running agents are recorded as crashed on start, their
+// sessions recomputed, and history stays viewable.
+func TestStartupRecovery(t *testing.T) {
+	dir := t.TempDir()
+	a, _ := newTestApp(t, dir, echoOrchestrator)
+	se, err := a.CreateSession("old session", t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, "reply", func() bool {
+		return hasChat(a, se.ID, "assistant: echo: ") && snapshot(t, a, se.ID).Session.Status == "done"
+	})
+	// Leave a sub-agent "running" with a working task, as an app crash would.
+	orch := snapshot(t, a, se.ID).Agents[0]
+	task, _ := a.store.CreateTask(se.ID, "t", "d")
+	sub, _ := a.store.CreateAgent(se.ID, "subagent", orch.ID, task.ID)
+	a.store.SetTaskAgent(se.ID, task.ID, sub.ID)
+	a.store.AppendAgentEvent(se.ID, sub.ID, "assistant_text", `{"text":"half done"}`)
+	a.store.SetSessionStatus(se.ID, "working")
+	a.close()
+
+	// Simulate that the orchestrator was also still running when the app died.
+	st, _ := notes.OpenStore(dir + "/fragile.db")
+	st.SetAgentStatus(se.ID, orch.ID, "running", nil)
+	st.Close()
+
+	b, _ := newTestApp(t, dir, "")
+	s := snapshot(t, b, se.ID)
+	if s.Session.Status != "done" || len(s.Agents) != 2 {
+		t.Fatalf("recovered session = %+v agents %d", s.Session, len(s.Agents))
+	}
+	for _, ag := range s.Agents {
+		if ag.Status != "crashed" || ag.ExitedAt == "" {
+			t.Errorf("agent %d = %+v, want crashed", ag.ID, ag)
+		}
+	}
+	if len(s.Tasks) != 1 || s.Tasks[0].Status != "blocked" {
+		t.Fatalf("tasks = %+v", s.Tasks)
+	}
+	if !hasChat(b, se.ID, "user: old session") || !hasChat(b, se.ID, "assistant: echo: ") {
+		t.Fatalf("chat lost: %v", chatTexts(s))
+	}
+	if evs, err := b.GetAgentEvents(sub.ID, 0, 10); err != nil || len(evs) != 1 {
+		t.Fatalf("sub-agent events = %+v, %v", evs, err)
+	}
+	if list, _ := b.ListSessions(); len(list) != 1 || list[0].ID != se.ID {
+		t.Fatalf("sessions = %+v", list)
+	}
+	if err := b.SendMessage(se.ID, "hi"); err == nil {
+		t.Error("message to a past session accepted")
+	}
+}
+
+func TestDeriveStatus(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		esc        int
+		orch, busy bool
+		subs       int
+		want       string
+	}{
+		{"idle", 0, true, false, 0, "done"},
+		{"mid-turn", 0, true, true, 0, "working"},
+		{"sub-agent running while orchestrator idle", 0, true, false, 2, "working"},
+		{"escalation beats working", 1, true, true, 3, "needs_you"},
+		{"escalation with a live orchestrator", 2, true, false, 0, "needs_you"},
+		{"escalation nobody can answer", 1, false, false, 0, "done"},
+		{"dead orchestrator is never mid-turn", 0, false, true, 0, "done"},
+		{"orphaned sub-agents still working", 0, false, false, 1, "working"},
+	} {
+		if got := deriveStatus(tc.esc, tc.orch, tc.busy, tc.subs); got != tc.want {
+			t.Errorf("%s: deriveStatus = %s, want %s", tc.name, got, tc.want)
+		}
+	}
+}
+
+func writeFile(path, content string) error { return os.WriteFile(path, []byte(content), 0o755) }

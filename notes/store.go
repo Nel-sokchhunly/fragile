@@ -157,25 +157,29 @@ type Session struct {
 	ID        int64  `json:"id"`
 	Title     string `json:"title"`
 	Status    string `json:"status"`
+	WorkDir   string `json:"work_dir"` // "" = none recorded; the runner's configured WorkDir applies
 	CreatedAt string `json:"created_at"`
 }
 
-const sessionCols = `id, title, status, created_at`
+const sessionCols = `id, title, status, work_dir, created_at`
 
 func scanSession(r scanner) (se Session, err error) {
-	err = r.Scan(&se.ID, &se.Title, &se.Status, &se.CreatedAt)
+	err = r.Scan(&se.ID, &se.Title, &se.Status, &se.WorkDir, &se.CreatedAt)
 	return se, one(err)
 }
 
 // CreateSession starts a session in the working state together with its
 // session-scope board.
-func (s *Store) CreateSession(title string) (Session, error) {
+func (s *Store) CreateSession(title string) (Session, error) { return s.CreateSessionIn(title, "") }
+
+// CreateSessionIn is CreateSession with the working directory its agents run in.
+func (s *Store) CreateSessionIn(title, workDir string) (Session, error) {
 	tx, err := s.db.Begin()
 	if err != nil {
 		return Session{}, err
 	}
 	defer tx.Rollback()
-	se, err := scanSession(tx.QueryRow(`INSERT INTO sessions (title) VALUES (?) RETURNING `+sessionCols, title))
+	se, err := scanSession(tx.QueryRow(`INSERT INTO sessions (title, work_dir) VALUES (?, ?) RETURNING `+sessionCols, title, workDir))
 	if err != nil {
 		return Session{}, err
 	}
@@ -272,6 +276,45 @@ func (s *Store) GetAgentByToken(token string) (Agent, error) {
 	return scanAgent(s.db.QueryRow(`SELECT `+agentCols+` FROM agent_instances WHERE token = ?`, token))
 }
 
+// FindAgent returns an agent by id alone, for callers (the app) that do not know its session yet.
+func (s *Store) FindAgent(id int64) (Agent, error) {
+	return scanAgent(s.db.QueryRow(`SELECT `+agentCols+` FROM agent_instances WHERE id = ?`, id))
+}
+
+// MarkRunningAgentsCrashed records agents still marked running as crashed (their
+// processes died with the previous run) and blocks their working tasks. It
+// returns the affected agents.
+func (s *Store) MarkRunningAgentsCrashed() ([]Agent, error) {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+	rows, err := tx.Query(`UPDATE agent_instances SET status = 'crashed', exited_at = ` + now + `
+		WHERE status = 'running' RETURNING ` + agentCols)
+	if err != nil {
+		return nil, err
+	}
+	var out []Agent
+	for rows.Next() {
+		a, err := scanAgent(rows)
+		if err != nil {
+			rows.Close()
+			return nil, err
+		}
+		out = append(out, a)
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	if _, err := tx.Exec(`UPDATE tasks SET status = 'blocked' WHERE status = 'working'
+		AND agent_id IN (SELECT id FROM agent_instances WHERE status = 'crashed')`); err != nil {
+		return nil, err
+	}
+	return out, tx.Commit()
+}
+
 func (s *Store) GetAgent(sessionID, id int64) (Agent, error) {
 	return scanAgent(s.db.QueryRow(`SELECT `+agentCols+` FROM agent_instances WHERE id = ? AND session_id = ?`,
 		id, sessionID))
@@ -336,6 +379,24 @@ func (s *Store) GetTask(sessionID, id int64) (Task, error) {
 	return scanTask(s.db.QueryRow(`SELECT `+taskCols+` FROM tasks WHERE id = ? AND session_id = ?`, id, sessionID))
 }
 
+// ListTasks returns the session's tasks, oldest first.
+func (s *Store) ListTasks(sessionID int64) ([]Task, error) {
+	rows, err := s.db.Query(`SELECT `+taskCols+` FROM tasks WHERE session_id = ? ORDER BY id`, sessionID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []Task
+	for rows.Next() {
+		t, err := scanTask(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, t)
+	}
+	return out, rows.Err()
+}
+
 func (s *Store) SetTaskAgent(sessionID, taskID, agentID int64) error {
 	return affected(s.db.Exec(`UPDATE tasks SET agent_id = ?1 WHERE id = ?2 AND session_id = ?3
 		AND (?1 IS NULL OR EXISTS (SELECT 1 FROM agent_instances WHERE id = ?1 AND session_id = ?3))`,
@@ -352,7 +413,7 @@ func (s *Store) SetTaskStatus(sessionID, taskID int64, status string) error {
 type Note struct {
 	ID        int64  `json:"id"`
 	BoardID   int64  `json:"board_id"`
-	AuthorID  int64  `json:"author_agent_id"`
+	AuthorID  int64  `json:"author_agent_id"` // 0 = the user
 	Type      string `json:"type"`
 	Content   string `json:"content"`
 	Status    string `json:"status"`
@@ -367,7 +428,7 @@ type NoteFilter struct {
 	SinceID      int64 // only notes with id > SinceID
 }
 
-const noteCols = `id, board_id, author_agent_id, type, content, status, created_at, updated_at`
+const noteCols = `id, board_id, COALESCE(author_agent_id,0), type, content, status, created_at, updated_at`
 
 // inSession restricts a notes query to boards of the given session (one ? arg).
 const inSession = `board_id IN (SELECT id FROM boards WHERE session_id = ?)`
@@ -377,13 +438,13 @@ func scanNote(r scanner) (n Note, err error) {
 	return n, one(err)
 }
 
-// PostNote adds a note to a board of the session; the author must be an agent of
-// the same session (else ErrNotFound).
+// PostNote adds a note to a board of the session. authorID 0 means the user;
+// otherwise the author must be an agent of the same session (else ErrNotFound).
 func (s *Store) PostNote(sessionID, boardID, authorID int64, typ, content string) (Note, error) {
 	return scanNote(s.db.QueryRow(`INSERT INTO notes (board_id, author_agent_id, type, content)
-		SELECT b.id, a.id, ?1, ?2 FROM boards b, agent_instances a
-		WHERE b.id = ?3 AND b.session_id = ?4 AND a.id = ?5 AND a.session_id = ?4 RETURNING `+noteCols,
-		typ, content, boardID, sessionID, authorID))
+		SELECT b.id, ?5, ?1, ?2 FROM boards b WHERE b.id = ?3 AND b.session_id = ?4
+		AND (?5 IS NULL OR EXISTS (SELECT 1 FROM agent_instances WHERE id = ?5 AND session_id = ?4))
+		RETURNING `+noteCols, typ, content, boardID, sessionID, nullable(authorID)))
 }
 
 func (s *Store) GetNote(sessionID, id int64) (Note, error) {
@@ -435,10 +496,47 @@ func (s *Store) CreateEscalation(sessionID, agentID int64, question, context str
 	var e Escalation
 	err := s.db.QueryRow(`INSERT INTO escalations (session_id, agent_id, question, context)
 		SELECT session_id, id, ?, ? FROM agent_instances WHERE id = ? AND session_id = ?
-		RETURNING id, session_id, agent_id, question, context, status, COALESCE(answer,'')`,
+		RETURNING `+escalationCols,
 		question, context, agentID, sessionID).
 		Scan(&e.ID, &e.SessionID, &e.AgentID, &e.Question, &e.Context, &e.Status, &e.Answer)
 	return e, one(err)
+}
+
+const escalationCols = `id, session_id, agent_id, question, context, status, COALESCE(answer,'')`
+
+func scanEscalation(r scanner) (e Escalation, err error) {
+	err = r.Scan(&e.ID, &e.SessionID, &e.AgentID, &e.Question, &e.Context, &e.Status, &e.Answer)
+	return e, one(err)
+}
+
+// FindEscalation returns an escalation by id alone (it carries its SessionID).
+func (s *Store) FindEscalation(id int64) (Escalation, error) {
+	return scanEscalation(s.db.QueryRow(`SELECT `+escalationCols+` FROM escalations WHERE id = ?`, id))
+}
+
+// ListEscalations returns the session's escalations, oldest first.
+func (s *Store) ListEscalations(sessionID int64) ([]Escalation, error) {
+	rows, err := s.db.Query(`SELECT `+escalationCols+` FROM escalations WHERE session_id = ? ORDER BY id`, sessionID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []Escalation
+	for rows.Next() {
+		e, err := scanEscalation(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, e)
+	}
+	return out, rows.Err()
+}
+
+// AnswerEscalation stores the answer and marks the escalation answered; an
+// escalation that is already answered is ErrNotFound.
+func (s *Store) AnswerEscalation(sessionID, id int64, answer string) (Escalation, error) {
+	return scanEscalation(s.db.QueryRow(`UPDATE escalations SET status = 'answered', answer = ?
+		WHERE id = ? AND session_id = ? AND status = 'open' RETURNING `+escalationCols, answer, id, sessionID))
 }
 
 // Agent events: per-agent history for the UI (output lines, status changes).
@@ -487,4 +585,40 @@ func (s *Store) ListAgentEvents(sessionID, agentID, sinceID int64, limit int) ([
 		out = append(out, e)
 	}
 	return out, rows.Err()
+}
+
+// ListAgentEventsOfType is ListAgentEvents restricted to the given event types, with no paging.
+func (s *Store) ListAgentEventsOfType(sessionID, agentID int64, types ...string) ([]AgentEvent, error) {
+	args := []any{agentID, sessionID}
+	marks := ""
+	for i, t := range types {
+		if i > 0 {
+			marks += ","
+		}
+		marks += "?"
+		args = append(args, t)
+	}
+	rows, err := s.db.Query(`SELECT `+agentEventCols+` FROM agent_events
+		WHERE agent_id = ? AND agent_id IN (SELECT id FROM agent_instances WHERE session_id = ?)
+		AND event_type IN (`+marks+`) ORDER BY id`, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []AgentEvent
+	for rows.Next() {
+		e, err := scanAgentEvent(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, e)
+	}
+	return out, rows.Err()
+}
+
+// EscalationEvent returns the "escalation" agent event that put the escalation into its agent's history.
+func (s *Store) EscalationEvent(sessionID, escalationID int64) (AgentEvent, error) {
+	return scanAgentEvent(s.db.QueryRow(`SELECT `+agentEventCols+` FROM agent_events
+		WHERE event_type = 'escalation' AND json_extract(payload, '$.escalation_id') = ?
+		AND agent_id IN (SELECT id FROM agent_instances WHERE session_id = ?)`, escalationID, sessionID))
 }

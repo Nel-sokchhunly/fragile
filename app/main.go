@@ -27,6 +27,8 @@ func main() {
 		AssetServer:      &assetserver.Options{Assets: assets},
 		BackgroundColour: &options.RGBA{R: 10, G: 10, B: 10, A: 1},
 		OnStartup:        app.startup,
+		OnShutdown:       app.shutdown,
+		Bind:             []any{app},
 	})
 	if err != nil {
 		println("Error:", err.Error())

@@ -28,6 +28,12 @@ type Server struct {
 	Store  *Store
 	Log    *EventLog
 	Runner *Runner // launches sub-agents for spawn_subagent
+
+	// OnEscalation, if set (the desktop app), makes escalate_to_user answer
+	// asynchronously: the tool returns at once and the answer is delivered to the
+	// orchestrator later. It runs after the escalation is stored and logged. Nil
+	// keeps the Phase 0 behaviour (banner on stdout, no answer comes back).
+	OnEscalation func(a Agent, e Escalation)
 }
 
 // Handler returns the HTTP handler serving the MCP endpoint.

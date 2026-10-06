@@ -26,6 +26,10 @@ const noteTypeHelp = `Note types: ` +
 	`"done" = your work is finished, with a summary; ` +
 	`"question" = needs an answer from another agent or the orchestrator.`
 
+// CheckNoteType and CheckNoteStatus validate user-supplied note fields the way the tools do.
+func CheckNoteType(v string) error   { return checkEnum("type", v, noteTypes) }
+func CheckNoteStatus(v string) error { return checkEnum("status", v, noteStatuses) }
+
 const scopeHelp = `Only "session" (the board shared by all agents in this session) is available.`
 
 // newMCPServer builds the tool set for one agent. Orchestrator-only tools are
@@ -45,7 +49,7 @@ func (s *Server) newMCPServer(a Agent, cache *mcp.SchemaCache) *mcp.Server {
 	addTool(srv, a, "get_subagent_status", "Orchestrator only. Status of one sub-agent (pass id), or of all sub-agents in the session (omit id): "+
 		"agent and task status, pid, times, exit code, its latest note, and whether it posted a done note.", true, s.subagentStatus)
 	addTool(srv, a, "escalate_to_user", "Orchestrator only. Raise a product decision you cannot reasonably make yourself to the user. "+
-		"Phase 0: logged only, no answer comes back.", true, s.escalate)
+		"It returns at once. In the desktop app the user's answer arrives later as a new user message; in the Phase 0 CLI it is only logged and no answer comes back.", true, s.escalate)
 	return srv
 }
 
@@ -298,6 +302,10 @@ func (s *Server) escalate(_ context.Context, a Agent, in escalateIn) (any, error
 		return nil, err
 	}
 	s.Log.Write(EventEscalation, a.SessionID, a.ID, e)
+	if s.OnEscalation != nil {
+		s.OnEscalation(a, e)
+		return "Escalated to the user. Their answer will arrive as a new user message; continue with work that doesn't depend on it, or end your turn.", nil
+	}
 	fmt.Printf("\n=== ESCALATION from agent %d (#%d) ===\nQuestion: %s\nContext: %s\n=== END ESCALATION ===\n\n", a.ID, e.ID, printable(e.Question), printable(e.Context))
 	return "Logged for the user; no answer is available in this phase. Proceed with your best judgement and record the assumption as a `decision` note.", nil
 }

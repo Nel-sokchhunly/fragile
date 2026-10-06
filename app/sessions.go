@@ -1,0 +1,492 @@
+package main
+
+import (
+	"encoding/json"
+	"errors"
+	"fmt"
+	"log"
+	"os"
+	"path/filepath"
+	"strings"
+	"time"
+
+	"github.com/Nel-sokchhunly/fragile/notes"
+)
+
+// ChatItem is one row of the orchestrator chat (mirrors ChatItem in
+// frontend/src/lib/types.ts): the user's messages, the orchestrator's text and
+// tool calls, and escalations. IDs are the ids of the underlying agent_events
+// rows, so they are unique and ordered within a session.
+type ChatItem struct {
+	ID         int64             `json:"id"`
+	Kind       string            `json:"kind"` // user | assistant | tool | escalation
+	Text       string            `json:"text,omitempty"`
+	Name       string            `json:"name,omitempty"`    // tool
+	Summary    string            `json:"summary,omitempty"` // tool
+	Escalation *notes.Escalation `json:"escalation,omitempty"`
+	At         string            `json:"at"`
+}
+
+// SessionSnapshot is everything the UI shows for one session; live changes
+// after it arrive as events.
+type SessionSnapshot struct {
+	Session     notes.Session      `json:"session"`
+	Agents      []notes.Agent      `json:"agents"`
+	Tasks       []notes.Task       `json:"tasks"`
+	Notes       []notes.Note       `json:"notes"`
+	Chat        []ChatItem         `json:"chat"`
+	Escalations []notes.Escalation `json:"escalations"` // the open ones
+}
+
+// CreateSession starts a session working on task in workDir: a session row, its
+// board, and a long-lived orchestrator whose first message is the task.
+func (a *App) CreateSession(task, workDir string) (notes.Session, error) {
+	task = strings.TrimSpace(task)
+	if task == "" {
+		return notes.Session{}, errors.New("task must not be empty")
+	}
+	dir, err := filepath.Abs(workDir)
+	if err != nil {
+		return notes.Session{}, err
+	}
+	if fi, err := os.Stat(dir); err != nil || !fi.IsDir() {
+		return notes.Session{}, fmt.Errorf("%q is not a directory", workDir)
+	}
+	se, err := a.store.CreateSessionIn(notes.FirstLine(task), dir)
+	if err != nil {
+		return notes.Session{}, err
+	}
+	a.setBusy(se.ID, true) // before the process exists, so the session never flickers to done
+	a.log.Write(notes.EventSessionCreated, se.ID, 0, se)
+	orch, err := a.runner.StartOrchestrator(se.ID, "")
+	if err != nil {
+		return se, err // the runner recorded the crash; the session derives to done
+	}
+	if err := a.deliver(orch, task, true); err != nil {
+		return se, err
+	}
+	return se, nil
+}
+
+// SendMessage sends a chat message to the session's orchestrator.
+func (a *App) SendMessage(sessionID int64, text string) error {
+	if strings.TrimSpace(text) == "" {
+		return errors.New("message must not be empty")
+	}
+	orch, err := a.liveOrchestrator(sessionID)
+	if err != nil {
+		return err
+	}
+	return a.deliver(orch, text, true)
+}
+
+// StopSession stops the session's orchestrator and sub-agents (for good: past
+// sessions are not resumed).
+func (a *App) StopSession(sessionID int64) error {
+	if _, err := a.store.GetSession(sessionID); err != nil {
+		return err
+	}
+	a.runner.StopSession(sessionID)
+	a.setBusy(sessionID, false)
+	a.recompute(sessionID)
+	return nil
+}
+
+// GetSession returns the session's full state from the database, live or past.
+func (a *App) GetSession(sessionID int64) (SessionSnapshot, error) {
+	var s SessionSnapshot
+	var err error
+	if s.Session, err = a.store.GetSession(sessionID); err != nil {
+		return s, err
+	}
+	if s.Agents, err = a.store.ListAgents(sessionID, ""); err != nil {
+		return s, err
+	}
+	if s.Tasks, err = a.store.ListTasks(sessionID); err != nil {
+		return s, err
+	}
+	board, err := a.store.SessionBoard(sessionID)
+	if err != nil {
+		return s, err
+	}
+	if s.Notes, err = a.store.ListNotes(sessionID, board, notes.NoteFilter{}); err != nil {
+		return s, err
+	}
+	escs, err := a.store.ListEscalations(sessionID)
+	if err != nil {
+		return s, err
+	}
+	s.Escalations = []notes.Escalation{}
+	for _, e := range escs {
+		if e.Status == "open" {
+			s.Escalations = append(s.Escalations, e)
+		}
+	}
+	s.Chat = []ChatItem{}
+	for _, ag := range s.Agents {
+		if ag.Role != "orchestrator" {
+			continue
+		}
+		evs, err := a.store.ListAgentEventsOfType(sessionID, ag.ID, evUserMessage, evAssistantText, evToolUse, evEscalation, evResult)
+		if err != nil {
+			return s, err
+		}
+		for _, ev := range evs {
+			if item, ok := a.chatItem(sessionID, ev); ok {
+				s.Chat = append(s.Chat, item)
+			}
+		}
+	}
+	// ponytail: the whole chat in one call; page it if sessions grow past a few thousand items.
+	if s.Agents == nil {
+		s.Agents = []notes.Agent{}
+	}
+	if s.Tasks == nil {
+		s.Tasks = []notes.Task{}
+	}
+	if s.Notes == nil {
+		s.Notes = []notes.Note{}
+	}
+	return s, nil
+}
+
+// AnswerEscalation stores the user's answer, delivers it to the orchestrator as
+// a user message that restates the question, and recomputes the session status.
+func (a *App) AnswerEscalation(escalationID int64, answer string) error {
+	if strings.TrimSpace(answer) == "" {
+		return errors.New("answer must not be empty")
+	}
+	a.ansMu.Lock()
+	defer a.ansMu.Unlock()
+	e, err := a.store.FindEscalation(escalationID)
+	if err != nil {
+		return err
+	}
+	if e.Status != "open" {
+		return fmt.Errorf("escalation %d is already answered", e.ID)
+	}
+	orch, err := a.liveOrchestrator(e.SessionID)
+	if err != nil {
+		return err
+	}
+	msg := fmt.Sprintf("Answer to your escalation #%d.\nYour question: %s\nContext you gave: %s\nThe user's answer: %s",
+		e.ID, e.Question, e.Context, answer)
+	if err := a.deliver(orch, msg, false); err != nil { // the chat shows the answer on the escalation itself
+		return err
+	}
+	e, err = a.store.AnswerEscalation(e.SessionID, e.ID, answer)
+	if err != nil {
+		return err
+	}
+	a.log.Write(notes.EventEscalation, e.SessionID, e.AgentID, e) // react() recomputes the status
+	if ev, err := a.store.EscalationEvent(e.SessionID, e.ID); err == nil {
+		if item, ok := a.chatItem(e.SessionID, ev); ok {
+			a.pushEvent(eventChatItem, e.SessionID, ev.AgentID, item)
+		}
+	}
+	return nil
+}
+
+// onEscalation (notes.Server.OnEscalation) puts a new escalation into the
+// orchestrator's history, which is what the chat shows. The status change comes
+// from the escalation event the server already logged.
+func (a *App) onEscalation(ag notes.Agent, e notes.Escalation) {
+	b, _ := json.Marshal(map[string]int64{"escalation_id": e.ID})
+	if _, err := a.record(ag, evEscalation, string(b)); err != nil {
+		log.Printf("escalation %d: recording chat item: %v", e.ID, err)
+	}
+}
+
+// liveOrchestrator returns the session's orchestrator if its process can take a message.
+func (a *App) liveOrchestrator(sessionID int64) (notes.Agent, error) {
+	orchs, err := a.store.ListAgents(sessionID, "orchestrator")
+	if err != nil {
+		return notes.Agent{}, err
+	}
+	if len(orchs) == 0 || !a.runner.Running(orchs[len(orchs)-1].ID) {
+		return notes.Agent{}, errors.New("this session's orchestrator is not running (it was stopped, exited, or the app was restarted)")
+	}
+	return orchs[len(orchs)-1], nil
+}
+
+// deliver writes a message to the orchestrator's stdin; with persist it is also
+// stored (and shown) as a user message. The orchestrator is mid-turn from then on.
+func (a *App) deliver(orch notes.Agent, text string, persist bool) error {
+	a.sendMu.Lock()
+	defer a.sendMu.Unlock()
+	if persist {
+		b, _ := json.Marshal(map[string]string{"text": text})
+		if _, err := a.record(orch, evUserMessage, string(b)); err != nil {
+			return err
+		}
+	}
+	a.setBusy(orch.SessionID, true)
+	if err := a.runner.SendUser(orch.ID, text); err != nil {
+		a.setBusy(orch.SessionID, false)
+		a.recompute(orch.SessionID)
+		return err
+	}
+	a.recompute(orch.SessionID)
+	return nil
+}
+
+// Output handling
+
+// onLine (notes.Runner.OnLine) turns one line of an agent's stream-json output
+// into stored and emitted agent events, and tracks whether the orchestrator is mid-turn.
+func (a *App) onLine(ag notes.Agent, line []byte) {
+	changed := false
+	for _, pe := range parseLine(line) {
+		if _, err := a.record(ag, pe.Type, pe.Payload); err != nil {
+			log.Printf("agent %d: storing %s event: %v", ag.ID, pe.Type, err)
+			continue
+		}
+		if ag.Role == "orchestrator" {
+			// A result ends the turn; any other activity means a turn is under way
+			// (self-corrects if Claude Code folded queued messages into one turn).
+			switch pe.Type {
+			case evResult:
+				changed = a.setBusy(ag.SessionID, false)
+			case evAssistantText, evToolUse, evToolResult:
+				changed = a.setBusy(ag.SessionID, true)
+			}
+		}
+	}
+	if changed {
+		a.recompute(ag.SessionID)
+	}
+}
+
+// record stores an agent event and emits it, plus the chat item it makes for the orchestrator.
+func (a *App) record(ag notes.Agent, typ, payload string) (notes.AgentEvent, error) {
+	ev, err := a.store.AppendAgentEvent(ag.SessionID, ag.ID, typ, payload)
+	if err != nil {
+		return ev, err
+	}
+	a.pushEvent(eventAgentEvent, ag.SessionID, ag.ID, ev)
+	if ag.Role == "orchestrator" {
+		if item, ok := a.chatItem(ag.SessionID, ev); ok {
+			a.pushEvent(eventChatItem, ag.SessionID, ag.ID, item)
+		}
+	}
+	return ev, nil
+}
+
+// chatItem maps an orchestrator agent event to its chat row; ok is false for
+// events the chat does not show.
+func (a *App) chatItem(sessionID int64, ev notes.AgentEvent) (ChatItem, bool) {
+	item := ChatItem{ID: ev.ID, At: ev.CreatedAt}
+	var p struct {
+		Text         string          `json:"text"`
+		Name         string          `json:"name"`
+		Input        json.RawMessage `json:"input"`
+		EscalationID int64           `json:"escalation_id"`
+		IsError      bool            `json:"is_error"`
+		Result       string          `json:"result"`
+	}
+	if json.Unmarshal([]byte(ev.Payload), &p) != nil {
+		return item, false
+	}
+	switch ev.Type {
+	case evUserMessage:
+		item.Kind, item.Text = "user", p.Text
+	case evAssistantText:
+		item.Kind, item.Text = "assistant", p.Text
+	case evResult:
+		if !p.IsError {
+			return item, false
+		}
+		item.Kind, item.Text = "assistant", "Error: "+p.Result
+	case evToolUse:
+		item.Kind, item.Name, item.Summary = "tool", strings.TrimPrefix(p.Name, "mcp__fragile__"), toolSummary(p.Input)
+	case evEscalation:
+		e, err := a.store.FindEscalation(p.EscalationID)
+		if err != nil || e.SessionID != sessionID {
+			return item, false
+		}
+		item.Kind, item.Escalation = "escalation", &e
+	default:
+		return item, false
+	}
+	return item, true
+}
+
+// toolSummary picks the most telling argument of a tool call as a one-line summary.
+func toolSummary(input json.RawMessage) string {
+	var m map[string]any
+	if json.Unmarshal(input, &m) == nil {
+		for _, k := range []string{"file_path", "path", "command", "pattern", "task", "question", "url", "query", "description", "content"} {
+			if s, ok := m[k].(string); ok && s != "" {
+				return oneLine(s)
+			}
+		}
+	}
+	return oneLine(string(input))
+}
+
+func oneLine(s string) string {
+	s = strings.Join(strings.Fields(s), " ")
+	if rs := []rune(s); len(rs) > 120 {
+		s = string(rs[:120]) + "..."
+	}
+	return s
+}
+
+// Status
+
+// Session status rules: needs_you while an escalation is open and the
+// orchestrator is alive to receive the answer; else working while the
+// orchestrator is mid-turn or any sub-agent runs; else done.
+func deriveStatus(openEscalations int, orchRunning, orchBusy bool, subagentsRunning int) string {
+	switch {
+	case openEscalations > 0 && orchRunning:
+		return notes.SessionNeedsYou
+	case orchRunning && orchBusy, subagentsRunning > 0:
+		return notes.SessionWorking
+	}
+	return notes.SessionDone
+}
+
+// setBusy records whether the session's orchestrator is mid-turn and reports whether that changed.
+func (a *App) setBusy(sessionID int64, busy bool) bool {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	changed := a.busy[sessionID] != busy
+	a.busy[sessionID] = busy
+	return changed
+}
+
+// recompute derives the session's status and, if it changed, stores it and
+// writes session_status_changed (which the UI receives and the log keeps).
+func (a *App) recompute(sessionID int64) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	se, err := a.store.GetSession(sessionID)
+	if err != nil {
+		return
+	}
+	agents, err := a.store.ListAgents(sessionID, "")
+	if err != nil {
+		log.Printf("session %d: status: %v", sessionID, err)
+		return
+	}
+	escs, err := a.store.ListEscalations(sessionID)
+	if err != nil {
+		log.Printf("session %d: status: %v", sessionID, err)
+		return
+	}
+	open := 0
+	for _, e := range escs {
+		if e.Status == "open" {
+			open++
+		}
+	}
+	orchRunning, subs := false, 0
+	for _, ag := range agents {
+		if ag.Status != "running" {
+			continue
+		}
+		if ag.Role == "orchestrator" {
+			orchRunning = true
+		} else {
+			subs++
+		}
+	}
+	st := deriveStatus(open, orchRunning, a.busy[sessionID], subs)
+	if st == se.Status {
+		return
+	}
+	if err := a.store.SetSessionStatus(sessionID, st); err != nil {
+		log.Printf("session %d: storing status: %v", sessionID, err)
+		return
+	}
+	a.log.Write(notes.EventSessionStatusChanged, sessionID, 0, map[string]string{"status": st})
+}
+
+// Event flow
+
+// push is the EventLog.OnEvent hook: it only queues, so it returns at once.
+func (a *App) push(ev notes.Event) {
+	a.qmu.Lock()
+	a.queue = append(a.queue, ev)
+	a.qmu.Unlock()
+	select {
+	case a.wake <- struct{}{}:
+	default:
+	}
+}
+
+// pushEvent queues an app-level event (not written to the log) in the same stream.
+func (a *App) pushEvent(name string, sessionID, agentID int64, payload any) {
+	a.push(notes.Event{Time: nowUTC(), Event: name, SessionID: sessionID, AgentID: agentID, Payload: payload})
+}
+
+// loop forwards queued events to the UI, in order, then lets the status react to them.
+// On stop it drains what is queued (and what that causes) before returning.
+func (a *App) loop() {
+	defer close(a.stopped)
+	stopping := false
+	for {
+		a.qmu.Lock()
+		batch := a.queue
+		a.queue = nil
+		a.qmu.Unlock()
+		for _, ev := range batch {
+			a.emit(ev.Event, ev)
+			a.react(ev)
+		}
+		if len(batch) > 0 {
+			continue
+		}
+		if stopping {
+			return
+		}
+		select {
+		case <-a.wake:
+		case <-a.stop:
+			stopping = true
+		}
+	}
+}
+
+// react updates what depends on an event: the session status, and the agent and
+// task rows the UI upserts after a spawn or an exit.
+func (a *App) react(ev notes.Event) {
+	switch ev.Event {
+	case notes.EventAgentSpawned, notes.EventAgentStatusChanged:
+		if ag, err := a.store.GetAgent(ev.SessionID, ev.AgentID); err == nil {
+			a.pushEvent(eventAgentUpdated, ev.SessionID, ag.ID, ag)
+			if t, err := a.store.GetTask(ev.SessionID, ag.TaskID); err == nil {
+				a.pushEvent(eventTaskUpdated, ev.SessionID, ag.ID, t)
+			}
+		}
+		a.recompute(ev.SessionID)
+	case notes.EventEscalation:
+		a.recompute(ev.SessionID)
+	}
+}
+
+// Startup recovery
+
+// recoverStale records agents a previous run left "running" as crashed (their
+// processes died with it; nothing is resumed) and recomputes every session's status.
+func (a *App) recoverStale() error {
+	stale, err := a.store.MarkRunningAgentsCrashed()
+	if err != nil {
+		return err
+	}
+	for _, ag := range stale {
+		a.log.Write(notes.EventAgentStatusChanged, ag.SessionID, ag.ID,
+			map[string]any{"role": ag.Role, "status": "crashed", "reason": "app restarted"})
+	}
+	sessions, err := a.store.ListSessions()
+	if err != nil {
+		return err
+	}
+	for _, se := range sessions {
+		a.recompute(se.ID)
+	}
+	return nil
+}
+
+func nowUTC() string { return time.Now().UTC().Format(time.RFC3339Nano) }

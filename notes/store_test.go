@@ -237,8 +237,8 @@ func TestMigratePhase0Database(t *testing.T) {
 
 	var v int
 	s.db.QueryRow(`PRAGMA user_version`).Scan(&v)
-	if v != 2 {
-		t.Fatalf("user_version = %d, want 2", v)
+	if v != 3 {
+		t.Fatalf("user_version = %d, want 3", v)
 	}
 	sess, err := s.GetSession(1)
 	if err != nil || sess.Title != "old" || sess.Status != SessionDone {
@@ -294,5 +294,78 @@ func TestOpenStoreRefusesUnknownSchemas(t *testing.T) {
 			s.Close()
 			t.Errorf("%s database opened, want refusal", name)
 		}
+	}
+}
+
+// Migration 003: notes may be authored by the user (NULL author, 0 in Go), without losing the FK for agents.
+func TestUserNotesAndMigration003(t *testing.T) {
+	s, err := OpenStore(filepath.Join(t.TempDir(), "u.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	sess, _ := s.CreateSessionIn("t", "/some/dir")
+	other, _ := s.CreateSession("other")
+	board, _ := s.SessionBoard(sess.ID)
+	agent, _ := s.CreateAgent(sess.ID, "orchestrator", 0, 0)
+	foreign, _ := s.CreateAgent(other.ID, "orchestrator", 0, 0)
+
+	un, err := s.PostNote(sess.ID, board, 0, "decision", "from the user")
+	if err != nil || un.AuthorID != 0 {
+		t.Fatalf("user note = %+v, err %v", un, err)
+	}
+	var isNull bool
+	if err := s.db.QueryRow(`SELECT author_agent_id IS NULL FROM notes WHERE id = ?`, un.ID).Scan(&isNull); err != nil || !isNull {
+		t.Fatalf("author stored as NULL = %v, err %v", isNull, err)
+	}
+	an, err := s.PostNote(sess.ID, board, agent.ID, "done", "from an agent")
+	if err != nil || an.AuthorID != agent.ID {
+		t.Fatalf("agent note = %+v, err %v", an, err)
+	}
+	// The FK still holds for agents: unknown or foreign-session authors are refused.
+	for _, bad := range []int64{9999, foreign.ID} {
+		if _, err := s.PostNote(sess.ID, board, bad, "done", "x"); err != ErrNotFound {
+			t.Errorf("author %d: err = %v, want ErrNotFound", bad, err)
+		}
+	}
+	if _, err := s.db.Exec(`UPDATE notes SET author_agent_id = 9999 WHERE id = ?`, an.ID); err == nil {
+		t.Error("notes lost the author foreign key")
+	}
+	all, _ := s.ListNotes(sess.ID, board, NoteFilter{})
+	byAgent, _ := s.ListNotes(sess.ID, board, NoteFilter{AuthorID: agent.ID})
+	if len(all) != 2 || len(byAgent) != 1 || byAgent[0].ID != an.ID {
+		t.Fatalf("all = %+v byAgent = %+v", all, byAgent)
+	}
+	if got, _ := s.GetSession(sess.ID); got.WorkDir != "/some/dir" {
+		t.Fatalf("work dir = %q", got.WorkDir)
+	}
+}
+
+func TestMarkRunningAgentsCrashed(t *testing.T) {
+	s, err := OpenStore(filepath.Join(t.TempDir(), "m.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	sess, _ := s.CreateSession("t")
+	orch, _ := s.CreateAgent(sess.ID, "orchestrator", 0, 0)
+	task, _ := s.CreateTask(sess.ID, "t", "")
+	sub, _ := s.CreateAgent(sess.ID, "subagent", orch.ID, task.ID)
+	s.SetTaskAgent(sess.ID, task.ID, sub.ID)
+	zero := 0
+	s.SetAgentStatus(sess.ID, orch.ID, "exited", &zero)
+
+	got, err := s.MarkRunningAgentsCrashed()
+	if err != nil || len(got) != 1 || got[0].ID != sub.ID || got[0].Status != "crashed" || got[0].ExitedAt == "" {
+		t.Fatalf("marked = %+v, err %v", got, err)
+	}
+	if a, _ := s.GetAgent(sess.ID, orch.ID); a.Status != "exited" {
+		t.Errorf("exited agent touched: %+v", a)
+	}
+	if tk, _ := s.GetTask(sess.ID, task.ID); tk.Status != "blocked" {
+		t.Errorf("task = %+v, want blocked", tk)
+	}
+	if again, _ := s.MarkRunningAgentsCrashed(); len(again) != 0 {
+		t.Errorf("second run marked %+v", again)
 	}
 }
