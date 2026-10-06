@@ -16,7 +16,7 @@ Stay within this task. If you notice work outside it, do not do it; mention it i
 
 ## Notes board
 
-Tools: `read_notes(scope, filter?)`, `post_note(scope, type, content)`, `update_note(id, content | status)`. Use scope `"session"`.
+Tools: `read_notes(scope, type?, status?, author_agent_id?, since_id?)`, `post_note(scope, type, content)`, `update_note(id, content | status)`. Use scope `"session"`.
 
 Workflow:
 1. **Before starting**, call `read_notes("session")`. Follow every `decision` note. Check for `heads_up` or `question` notes that touch your files.

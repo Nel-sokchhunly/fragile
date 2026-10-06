@@ -127,7 +127,7 @@ func TestRunnerArgs(t *testing.T) {
 	args := r.args("/x/agent-3.mcp.json", "do -it", "SYS")
 	for _, want := range [][]string{
 		{"--mcp-config", "/x/agent-3.mcp.json"}, {"--append-system-prompt", "SYS"},
-		{"--output-format", "stream-json"}, {"--disallowedTools", "Task,Agent"}, {"--", "do -it"},
+		{"--output-format", "stream-json"}, {"--disallowedTools", "Task,Agent,Workflow"}, {"--", "do -it"},
 	} {
 		if i := slices.Index(args, want[0]); i < 0 || args[i+1] != want[1] {
 			t.Errorf("args missing %v: %v", want, args)

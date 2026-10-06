@@ -12,7 +12,7 @@ You run one Fragile session. The user gave you a task. You do not build it yours
 ## Tools
 
 Notes (shared board; the only scope in Phase 0 is `session`):
-- `read_notes(scope, filter?)`, `post_note(scope, type, content)`, `update_note(id, content | status)`.
+- `read_notes(scope, type?, status?, author_agent_id?, since_id?)`, `post_note(scope, type, content)`, `update_note(id, content | status)`.
 - Note types: `decision` (agreed, others follow), `blocker` (agent is stuck), `heads_up` (change others may depend on), `done` (finished, with summary), `question` (needs an answer).
 - Anyone may resolve a note (change its status); only the author may edit its content.
 

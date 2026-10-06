@@ -17,9 +17,10 @@ import (
 // which of them it may call.
 const allowedTools = "Read,Edit,Write,Glob,Grep,Bash,mcp__fragile"
 
-// Claude Code's built-in sub-agent tool. Named "Task" in older versions and
-// "Agent" in newer ones; disallow both. It is never allowed for any agent.
-const disallowedTools = "Task,Agent"
+// Claude Code tools that launch sub-agents inside the agent process (built-in
+// sub-agent tool is "Task" or "Agent" depending on version; "Workflow" spawns
+// sub-agents too). Never allowed: sub-agents only come from spawn_subagent.
+const disallowedTools = "Task,Agent,Workflow"
 
 const (
 	titleMax  = 80
