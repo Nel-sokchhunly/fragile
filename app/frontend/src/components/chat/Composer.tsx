@@ -15,7 +15,7 @@ export function Composer({onSend, placeholder, label}: {onSend: (text: string) =
     <div className="flex items-end gap-2 border-t p-3">
       <Textarea
         value={text} onChange={(e) => setText(e.target.value)} rows={1} aria-label={label} placeholder={placeholder}
-        className="max-h-40 min-h-9 resize-none"
+        className="max-h-40 min-h-9 min-w-0 flex-1 resize-none"
         onKeyDown={(e) => {
           if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) { e.preventDefault(); send() }
         }}

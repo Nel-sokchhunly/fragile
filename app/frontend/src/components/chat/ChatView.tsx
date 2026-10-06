@@ -19,8 +19,8 @@ function EscalationBlock({sessionId, item}: {sessionId: number; item: Extract<Ch
     if (answer.trim()) answerEscalation(sessionId, e.id, answer.trim())
   }
   return (
-    <div role="group" aria-label="Escalation" className={cn('rounded-lg border-2 p-3', open ? 'border-amber-500 bg-amber-500/10' : 'border-border bg-muted/30')}>
-      <div className={cn('mb-1 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide', open ? 'text-amber-600 dark:text-amber-400' : 'text-muted-foreground')}>
+    <div role="group" aria-label="Escalation" className={cn('rounded-lg border-2 p-3', open ? 'border-escalation bg-escalation/10' : 'border-border bg-muted/30')}>
+      <div className={cn('mb-1 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide', open ? 'text-escalation-fg' : 'text-muted-foreground')}>
         <CircleHelp className="size-3.5" aria-hidden/> {open ? 'Needs your answer' : 'Answered'}
       </div>
       <p className="text-sm font-medium">{e.question}</p>
@@ -48,7 +48,7 @@ const Row = memo(function Row({sessionId, item}: {sessionId: number; item: ChatI
       {item.kind === 'user' && (
         <div className="flex flex-col items-end gap-0.5">
           <div className="max-w-[80%] rounded-2xl rounded-br-sm bg-primary px-3 py-2 text-sm whitespace-pre-wrap break-words text-primary-foreground">{item.text}</div>
-          <time className="text-[10px] text-muted-foreground" dateTime={item.at}>{formatTime(item.at)}</time>
+          <time className="text-2xs text-muted-foreground" dateTime={item.at}>{formatTime(item.at)}</time>
         </div>
       )}
       {item.kind === 'assistant' && <div className="max-w-[90%]"><Markdown>{item.text}</Markdown></div>}
@@ -70,11 +70,12 @@ export function ChatView({sessionId}: {sessionId: number}) {
   const send = useAppStore((s) => s.sendUserMessage)
 
   return (
-    <div className="flex h-full min-h-0 flex-col">
+    <div className="flex h-full min-h-0 min-w-0 flex-col">
       <header className="flex h-9 shrink-0 items-center border-b px-4">
         <h1 className="truncate text-sm font-semibold">{title}</h1>
       </header>
-      <div className="min-h-0 flex-1">
+      {/* Absolutely positioned list: its height never depends on percentage resolution inside flex. */}
+      <div className="relative min-h-0 flex-1">
         {chat.length === 0 ? (
           <p className="p-6 text-sm text-muted-foreground">Give the orchestrator its task to get started.</p>
         ) : (
@@ -82,10 +83,10 @@ export function ChatView({sessionId}: {sessionId: number}) {
             key={sessionId}
             data={chat}
             computeItemKey={(_, c) => c.id}
-            initialTopMostItemIndex={chat.length - 1}
+            initialTopMostItemIndex={{index: 'LAST', align: 'end'}}
             followOutput={(atBottom) => (atBottom ? 'smooth' : false)} // stop following once the user scrolls up
             itemContent={(_, item) => <Row sessionId={sessionId} item={item}/>}
-            className="h-full"
+            className="absolute inset-0"
           />
         )}
       </div>

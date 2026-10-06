@@ -31,8 +31,11 @@ const now = () => new Date().toISOString()
 const patchData = (s: AppState, sid: number, f: (d: SessionData) => Partial<SessionData>) =>
   ({data: {...s.data, [sid]: {...s.data[sid], ...f(s.data[sid])}}})
 
+const mock = mockState() // MOCK: replace with `sessions: [], data: {}, ...` when wired to the backend
+
 export const useAppStore = create<AppState>((set) => ({
-  ...mockState(), // MOCK: replace with `sessions: [], data: {}, ...` when wired to the backend
+  ...mock,
+  selectedSessionId: mock.sessions[0]?.id ?? null, // the one place the initial selection is decided (sidebar highlight and center both read it)
   selectedAgentId: null,
   sidebarCollapsed: false,
 

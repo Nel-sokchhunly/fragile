@@ -46,6 +46,25 @@
     --radius-2xl: calc(var(--radius) * 1.8);
     --radius-3xl: calc(var(--radius) * 2.2);
     --radius-4xl: calc(var(--radius) * 2.6);
+
+    /* Semantic tokens (values below in :root / .dark). Components use these, never raw palette colors. */
+    --color-status-working: var(--status-working);
+    --color-status-working-fg: var(--status-working-fg);
+    --color-status-exited: var(--status-exited);
+    --color-status-done: var(--status-done);
+    --color-status-needs-you: var(--status-needs-you);
+    --color-status-needs-you-fg: var(--status-needs-you-fg);
+    --color-on-needs-you: var(--on-needs-you);
+    --color-status-crashed: var(--status-crashed);
+    --color-note-decision: var(--note-decision);
+    --color-note-blocker: var(--note-blocker);
+    --color-note-heads-up: var(--note-heads-up);
+    --color-note-done: var(--note-done);
+    --color-note-question: var(--note-question);
+    --color-escalation: var(--escalation);
+    --color-escalation-fg: var(--escalation-fg);
+    --text-2xs: 10px;
+    --text-mini: 11px;
 }
 
 :root {
@@ -81,6 +100,25 @@
     --sidebar-accent-foreground: oklch(0.205 0 0);
     --sidebar-border: oklch(0.922 0 0);
     --sidebar-ring: oklch(0.708 0 0);
+
+    /* status: sessions + agents */
+    --status-working: oklch(0.685 0.169 237.323); /* dots, spinner */
+    --status-working-fg: oklch(0.588 0.158 241.966); /* text on tinted bg */
+    --status-exited: oklch(0.696 0.17 162.48);
+    --status-done: var(--muted-foreground);
+    --status-needs-you: oklch(0.769 0.188 70.08);
+    --status-needs-you-fg: oklch(0.666 0.179 58.318);
+    --on-needs-you: black; /* text on a solid needs-you badge */
+    --status-crashed: var(--destructive);
+    /* note types: text colour; tinted backgrounds use the same token at 15% */
+    --note-decision: oklch(0.588 0.158 241.966);
+    --note-blocker: oklch(0.577 0.245 27.325);
+    --note-heads-up: oklch(0.666 0.179 58.318);
+    --note-done: oklch(0.596 0.145 163.225);
+    --note-question: oklch(0.541 0.281 293.009);
+    /* escalation block */
+    --escalation: var(--status-needs-you);
+    --escalation-fg: var(--status-needs-you-fg);
 }
 
 .dark {
@@ -115,6 +153,14 @@
     --sidebar-accent-foreground: oklch(0.985 0 0);
     --sidebar-border: oklch(1 0 0 / 10%);
     --sidebar-ring: oklch(0.556 0 0);
+
+    --status-working-fg: oklch(0.746 0.16 232.661);
+    --status-needs-you-fg: oklch(0.828 0.189 84.429);
+    --note-decision: oklch(0.746 0.16 232.661);
+    --note-blocker: oklch(0.704 0.191 22.216);
+    --note-heads-up: oklch(0.828 0.189 84.429);
+    --note-done: oklch(0.765 0.177 163.223);
+    --note-question: oklch(0.702 0.183 293.541);
 }
 
 @layer base {

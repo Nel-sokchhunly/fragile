@@ -8,9 +8,9 @@ import {cn} from '@/lib/utils'
 import {useAppStore} from '@/store/app'
 
 const STATUS: Record<SessionStatus, {label: string; dot: string; badge: string}> = {
-  working: {label: 'working', dot: 'bg-sky-500 animate-pulse', badge: 'bg-sky-500/15 text-sky-600 dark:text-sky-400'},
-  done: {label: 'done', dot: 'bg-muted-foreground/50', badge: 'bg-muted text-muted-foreground'},
-  needs_you: {label: 'needs you', dot: 'bg-amber-500 ring-2 ring-amber-500/30', badge: 'bg-amber-500 text-black font-semibold'},
+  working: {label: 'working', dot: 'bg-status-working animate-pulse', badge: 'bg-status-working/15 text-status-working-fg'},
+  done: {label: 'done', dot: 'bg-status-done/50', badge: 'bg-muted text-status-done'},
+  needs_you: {label: 'needs you', dot: 'bg-status-needs-you ring-2 ring-status-needs-you/30', badge: 'bg-status-needs-you text-on-needs-you font-semibold'},
 }
 
 function SessionRow({session, selected}: {session: Session; selected: boolean}) {
@@ -21,12 +21,13 @@ function SessionRow({session, selected}: {session: Session; selected: boolean}) 
       type="button" onClick={() => select(session.id)} aria-current={selected ? 'true' : undefined}
       className={cn(
         'flex w-full items-center gap-2 rounded-md border-l-2 border-transparent px-2 py-1.5 text-left text-sm hover:bg-sidebar-accent focus-visible:ring-2 focus-visible:ring-sidebar-ring focus-visible:outline-none',
-        selected && 'bg-sidebar-accent',
-        session.status === 'needs_you' && 'border-amber-500 bg-amber-500/10',
+        selected && 'bg-sidebar-accent ring-1 ring-sidebar-ring', // clearly the open session, even if it also needs you
+        session.status === 'needs_you' && 'border-status-needs-you',
+        session.status === 'needs_you' && !selected && 'bg-status-needs-you/10',
       )}
     >
       <span className="min-w-0 flex-1 truncate">{session.title}</span>
-      <span className={cn('shrink-0 rounded-full px-1.5 py-0.5 text-[10px] leading-none', st.badge)}>{st.label}</span>
+      <span className={cn('shrink-0 rounded-full px-1.5 py-0.5 text-2xs leading-none', st.badge)}>{st.label}</span>
     </button>
   )
 }
@@ -93,7 +94,7 @@ export function SessionsSidebar({onToggle}: {onToggle: () => void}) {
       <header className="flex h-9 shrink-0 items-center gap-1 border-b px-2">
         {toggle}
         <h2 className="flex-1 text-sm font-medium">Sessions</h2>
-        {needsYou > 0 && <span className="rounded-full bg-amber-500 px-1.5 text-[10px] font-semibold text-black">{needsYou}</span>}
+        {needsYou > 0 && <span className="rounded-full bg-status-needs-you px-1.5 text-2xs font-semibold text-on-needs-you">{needsYou}</span>}
         {add}
       </header>
       <ScrollArea className="min-h-0 flex-1">

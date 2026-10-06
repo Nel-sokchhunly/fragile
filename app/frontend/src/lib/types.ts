@@ -13,6 +13,7 @@ export type Session = {
   id: number
   title: string
   status: SessionStatus
+  work_dir?: string // directory its agents run in; absent/'' for sessions without one
   created_at: string
 }
 
@@ -39,7 +40,7 @@ export type Task = {
   agent_id?: number
 }
 
-// author_agent_id 0 = the user (assumption; backend contract not decided yet).
+// author_agent_id 0 = the user (backend: NULL author in the database, 0 in JSON).
 export type Note = {
   id: number
   board_id: number

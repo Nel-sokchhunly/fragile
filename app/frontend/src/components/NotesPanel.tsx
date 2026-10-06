@@ -14,11 +14,11 @@ import {NO_NOTES, useAppStore} from '@/store/app'
 
 const NOTE_TYPES: NoteType[] = ['decision', 'blocker', 'heads_up', 'done', 'question']
 const TYPE_STYLE: Record<NoteType, string> = {
-  decision: 'bg-sky-500/15 text-sky-600 dark:text-sky-400',
-  blocker: 'bg-red-500/15 text-red-600 dark:text-red-400',
-  heads_up: 'bg-amber-500/15 text-amber-600 dark:text-amber-400',
-  done: 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400',
-  question: 'bg-violet-500/15 text-violet-600 dark:text-violet-400',
+  decision: 'bg-note-decision/15 text-note-decision',
+  blocker: 'bg-note-blocker/15 text-note-blocker',
+  heads_up: 'bg-note-heads-up/15 text-note-heads-up',
+  done: 'bg-note-done/15 text-note-done',
+  question: 'bg-note-question/15 text-note-question',
 }
 const typeLabel = (t: NoteType) => t.replace('_', ' ')
 
@@ -79,7 +79,7 @@ function NoteRow({sessionId, note}: {sessionId: number; note: Note}) {
   return (
     <li className={cn('group flex flex-col gap-1 rounded-lg border bg-card p-2 text-sm', resolved && 'opacity-55')}>
       <div className="flex items-center gap-1.5 text-xs">
-        <Badge variant="secondary" className={cn('h-4 border-0 px-1.5 text-[10px]', TYPE_STYLE[note.type])}>{typeLabel(note.type)}</Badge>
+        <Badge variant="secondary" className={cn('h-4 border-0 px-1.5 text-2xs', TYPE_STYLE[note.type])}>{typeLabel(note.type)}</Badge>
         <span className="min-w-0 flex-1 truncate font-medium">{author}</span>
         {resolved && <span className="text-muted-foreground">resolved</span>}
         <time className="text-muted-foreground" dateTime={note.created_at}>{formatTime(note.created_at)}</time>

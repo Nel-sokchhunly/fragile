@@ -1,4 +1,4 @@
-import {useEffect} from 'react'
+import {useDeferredValue, useEffect, useState} from 'react'
 import {Plus} from 'lucide-react'
 import {AgentsPanel} from '@/components/AgentsPanel'
 import {NewSessionDialog} from '@/components/NewSessionDialog'
@@ -11,6 +11,25 @@ import {ResizableHandle, ResizablePanel, ResizablePanelGroup} from '@/components
 import {TooltipProvider} from '@/components/ui/tooltip'
 import {useDefaultLayout, usePanelRef} from 'react-resizable-panels'
 import {useAppStore} from '@/store/app'
+
+// Panel sizing in one place. The chat column never drops below CENTER_MIN: the right column shrinks
+// toward RIGHT.min, and below SIDEBAR_COLLAPSE_BELOW the sidebar folds into its rail.
+const SIDEBAR = {rail: '52px', min: '200px', default: '240px', max: '400px'}
+const RIGHT = {min: '240px', default: '300px', max: '560px'}
+const CENTER_MIN = '360px'
+const SIDEBAR_COLLAPSE_BELOW = 900 // px of window width
+
+// Below the collapse width, start with the sidebar already folded (the constraints can't all hold otherwise,
+// and the panel group then refuses to collapse anything). Layout values are percentages of the window.
+function narrowLayout(): Record<string, number> | undefined {
+  const w = window.innerWidth
+  if (w >= SIDEBAR_COLLAPSE_BELOW) return undefined
+  const px = (v: string) => parseFloat(v)
+  const sidebar = px(SIDEBAR.rail)
+  const right = Math.max(px(RIGHT.min), Math.min(px(RIGHT.default), w - sidebar - px(CENTER_MIN)))
+  const pct = (n: number) => (n / w) * 100
+  return {sidebar: pct(sidebar), center: pct(w - sidebar - right), right: pct(right)}
+}
 
 function EmptyCenter() {
   return (
@@ -25,17 +44,33 @@ function EmptyCenter() {
 export default function App() {
   const sessionId = useAppStore((s) => s.selectedSessionId)
   const agentId = useAppStore((s) => s.selectedAgentId)
+  // Highlights (sidebar rows, agent cards) read the live ids and paint at once; the heavy center view follows.
+  const viewSessionId = useDeferredValue(sessionId)
+  const viewAgentId = useDeferredValue(agentId)
   const setCollapsed = useAppStore((s) => s.setSidebarCollapsed)
   const sidebar = usePanelRef()
 
   // Persist panel sizes (react-resizable-panels v4's replacement for autoSaveId).
-  const main = useDefaultLayout({id: 'fragile-main'})
-  const right = useDefaultLayout({id: 'fragile-right'})
+  const main = useDefaultLayout({id: 'fragile-main-v2'})
+  const [startNarrow] = useState(narrowLayout)
+  const right = useDefaultLayout({id: 'fragile-right-v2'})
 
   const toggleSidebar = () => {
     const p = sidebar.current
     if (p) p.isCollapsed() ? p.expand() : p.collapse()
   }
+  // Fold the sidebar into its rail whenever the window is too narrow to keep the chat usable.
+  useEffect(() => {
+    const fit = () => {
+      const p = sidebar.current
+      if (!p) return false // panel group not mounted yet
+      if (window.innerWidth < SIDEBAR_COLLAPSE_BELOW && !p.isCollapsed()) p.collapse()
+      return true
+    }
+    const t = setInterval(() => fit() && clearInterval(t), 50) // initial fit, once the panel has registered
+    window.addEventListener('resize', fit)
+    return () => { clearInterval(t); window.removeEventListener('resize', fit) }
+  }, [sidebar])
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && !e.shiftKey && !e.altKey && e.key.toLowerCase() === 'b') {
@@ -49,22 +84,22 @@ export default function App() {
 
   return (
     <TooltipProvider delayDuration={300}>
-      <ResizablePanelGroup id="fragile-main" orientation="horizontal" defaultLayout={main.defaultLayout} onLayoutChanged={main.onLayoutChanged}>
+      <ResizablePanelGroup id="fragile-main-v2" orientation="horizontal" defaultLayout={startNarrow ?? main.defaultLayout} onLayoutChanged={main.onLayoutChanged}>
         <ResizablePanel
-          id="sidebar" panelRef={sidebar} collapsible collapsedSize="52px" minSize="200px" defaultSize="240px" maxSize="400px"
+          id="sidebar" panelRef={sidebar} collapsible collapsedSize={SIDEBAR.rail} minSize={SIDEBAR.min} defaultSize={SIDEBAR.default} maxSize={SIDEBAR.max}
           onResize={() => setCollapsed(sidebar.current?.isCollapsed() ?? false)}
         >
           <SessionsSidebar onToggle={toggleSidebar}/>
         </ResizablePanel>
         <ResizableHandle/>
-        <ResizablePanel id="center" minSize="30%">
-          {sessionId == null ? <EmptyCenter/>
-            : agentId != null ? <AgentOutputView key={agentId} sessionId={sessionId} agentId={agentId}/>
-            : <ChatView key={sessionId} sessionId={sessionId}/>}
+        <ResizablePanel id="center" minSize={CENTER_MIN}>
+          {viewSessionId == null ? <EmptyCenter/>
+            : viewAgentId != null ? <AgentOutputView key={viewAgentId} sessionId={viewSessionId} agentId={viewAgentId}/>
+            : <ChatView key={viewSessionId} sessionId={viewSessionId}/>}
         </ResizablePanel>
         <ResizableHandle/>
-        <ResizablePanel id="right" defaultSize="300px" minSize="240px" maxSize="560px">
-          <ResizablePanelGroup id="fragile-right" orientation="vertical" defaultLayout={right.defaultLayout} onLayoutChanged={right.onLayoutChanged}>
+        <ResizablePanel id="right" defaultSize={RIGHT.default} minSize={RIGHT.min} maxSize={RIGHT.max}>
+          <ResizablePanelGroup id="fragile-right-v2" orientation="vertical" defaultLayout={right.defaultLayout} onLayoutChanged={right.onLayoutChanged}>
             <ResizablePanel id="agents" defaultSize="60%" minSize="20%"><AgentsPanel sessionId={sessionId}/></ResizablePanel>
             <ResizableHandle withHandle/>
             <ResizablePanel id="notes" defaultSize="40%" minSize="15%"><NotesPanel sessionId={sessionId}/></ResizablePanel>

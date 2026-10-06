@@ -57,13 +57,14 @@ export function AgentOutputView({sessionId, agentId}: {sessionId: number; agentI
   const back = useAppStore((s) => s.selectAgent)
 
   return (
-    <div className="flex h-full min-h-0 flex-col">
+    <div className="flex h-full min-h-0 min-w-0 flex-col">
       <header className="flex h-9 shrink-0 items-center gap-2 border-b px-2">
         <Button variant="ghost" size="sm" onClick={() => back(null)} aria-label="Back to orchestrator chat"><ArrowLeft/> Chat</Button>
         <h1 className="min-w-0 flex-1 truncate text-sm font-semibold">{agentName(agent, task)}</h1>
         {agent && <Meta agent={agent} count={events.length}/>}
       </header>
-      <div className="min-h-0 flex-1">
+      {/* Absolutely positioned list: its height never depends on percentage resolution inside flex. */}
+      <div className="relative min-h-0 flex-1">
         {events.length === 0 ? (
           <p className="p-6 text-sm text-muted-foreground">No output from this agent yet.</p>
         ) : (
@@ -71,11 +72,12 @@ export function AgentOutputView({sessionId, agentId}: {sessionId: number; agentI
             key={agentId}
             data={events}
             computeItemKey={(_, e) => e.id}
-            initialTopMostItemIndex={events.length - 1}
+            initialTopMostItemIndex={{index: 'LAST', align: 'end'}}
+            defaultItemHeight={28}
             followOutput={(atBottom) => (atBottom ? 'auto' : false)}
             increaseViewportBy={400}
             itemContent={(_, ev) => <EventRow ev={ev}/>}
-            className="h-full"
+            className="absolute inset-0"
           />
         )}
       </div>
