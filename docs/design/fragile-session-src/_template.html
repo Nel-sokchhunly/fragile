@@ -1,0 +1,729 @@
+<!DOCTYPE html>
+<html><head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="ecd075e9-5be6-4966-9866-a97acc8b1e18"></script>
+</head>
+<body>
+
+<x-dc>
+<helmet>
+<style>/* Substitutes picked from Google Fonts — replace with licensed originals if available */
+/* latin-ext */
+@font-face {
+  font-family: 'Instrument Sans';
+  font-style: normal;
+  font-weight: 400;
+  font-stretch: 100%;
+  font-display: swap;
+  src: url("0b087e75-78a7-4dfd-ad48-d1e638abd5f6") format('woff2');
+  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C4, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+/* latin */
+@font-face {
+  font-family: 'Instrument Sans';
+  font-style: normal;
+  font-weight: 400;
+  font-stretch: 100%;
+  font-display: swap;
+  src: url("7b3a97ac-2d3e-4d0b-8d41-c19fd12be4cb") format('woff2');
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+/* latin-ext */
+@font-face {
+  font-family: 'Instrument Sans';
+  font-style: normal;
+  font-weight: 500;
+  font-stretch: 100%;
+  font-display: swap;
+  src: url("0b087e75-78a7-4dfd-ad48-d1e638abd5f6") format('woff2');
+  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C4, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+/* latin */
+@font-face {
+  font-family: 'Instrument Sans';
+  font-style: normal;
+  font-weight: 500;
+  font-stretch: 100%;
+  font-display: swap;
+  src: url("7b3a97ac-2d3e-4d0b-8d41-c19fd12be4cb") format('woff2');
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+/* latin-ext */
+@font-face {
+  font-family: 'Instrument Sans';
+  font-style: normal;
+  font-weight: 600;
+  font-stretch: 100%;
+  font-display: swap;
+  src: url("0b087e75-78a7-4dfd-ad48-d1e638abd5f6") format('woff2');
+  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C4, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+/* latin */
+@font-face {
+  font-family: 'Instrument Sans';
+  font-style: normal;
+  font-weight: 600;
+  font-stretch: 100%;
+  font-display: swap;
+  src: url("7b3a97ac-2d3e-4d0b-8d41-c19fd12be4cb") format('woff2');
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+/* cyrillic-ext */
+@font-face {
+  font-family: 'JetBrains Mono';
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url("2748cbb9-7440-4bb4-b895-35b3f681b78b") format('woff2');
+  unicode-range: U+0460-052F, U+1C80-1C8A, U+20B4, U+2DE0-2DFF, U+A640-A69F, U+FE2E-FE2F;
+}
+/* cyrillic */
+@font-face {
+  font-family: 'JetBrains Mono';
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url("2e8cd250-ca04-4d8d-a371-fcb7ca78cdde") format('woff2');
+  unicode-range: U+0301, U+0400-045F, U+0490-0491, U+04B0-04B1, U+2116;
+}
+/* greek */
+@font-face {
+  font-family: 'JetBrains Mono';
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url("fe367239-a037-45fe-afe7-6222b2a9145c") format('woff2');
+  unicode-range: U+0370-0377, U+037A-037F, U+0384-038A, U+038C, U+038E-03A1, U+03A3-03FF;
+}
+/* vietnamese */
+@font-face {
+  font-family: 'JetBrains Mono';
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url("65a4acde-7535-4f09-963f-ea4578218bc6") format('woff2');
+  unicode-range: U+0102-0103, U+0110-0111, U+0128-0129, U+0168-0169, U+01A0-01A1, U+01AF-01B0, U+0300-0301, U+0303-0304, U+0308-0309, U+0323, U+0329, U+1EA0-1EF9, U+20AB;
+}
+/* latin-ext */
+@font-face {
+  font-family: 'JetBrains Mono';
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url("9934ea13-f9fb-4415-8abe-669ae80d791a") format('woff2');
+  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C4, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+/* latin */
+@font-face {
+  font-family: 'JetBrains Mono';
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url("16a2f521-054f-4d23-a626-867f7978a20a") format('woff2');
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+/* cyrillic-ext */
+@font-face {
+  font-family: 'JetBrains Mono';
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src: url("2748cbb9-7440-4bb4-b895-35b3f681b78b") format('woff2');
+  unicode-range: U+0460-052F, U+1C80-1C8A, U+20B4, U+2DE0-2DFF, U+A640-A69F, U+FE2E-FE2F;
+}
+/* cyrillic */
+@font-face {
+  font-family: 'JetBrains Mono';
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src: url("2e8cd250-ca04-4d8d-a371-fcb7ca78cdde") format('woff2');
+  unicode-range: U+0301, U+0400-045F, U+0490-0491, U+04B0-04B1, U+2116;
+}
+/* greek */
+@font-face {
+  font-family: 'JetBrains Mono';
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src: url("fe367239-a037-45fe-afe7-6222b2a9145c") format('woff2');
+  unicode-range: U+0370-0377, U+037A-037F, U+0384-038A, U+038C, U+038E-03A1, U+03A3-03FF;
+}
+/* vietnamese */
+@font-face {
+  font-family: 'JetBrains Mono';
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src: url("65a4acde-7535-4f09-963f-ea4578218bc6") format('woff2');
+  unicode-range: U+0102-0103, U+0110-0111, U+0128-0129, U+0168-0169, U+01A0-01A1, U+01AF-01B0, U+0300-0301, U+0303-0304, U+0308-0309, U+0323, U+0329, U+1EA0-1EF9, U+20AB;
+}
+/* latin-ext */
+@font-face {
+  font-family: 'JetBrains Mono';
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src: url("9934ea13-f9fb-4415-8abe-669ae80d791a") format('woff2');
+  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C4, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+/* latin */
+@font-face {
+  font-family: 'JetBrains Mono';
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src: url("16a2f521-054f-4d23-a626-867f7978a20a") format('woff2');
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+/* cyrillic-ext */
+@font-face {
+  font-family: 'Source Serif 4';
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url("a3b13cb7-06fd-4dd7-bddc-653e2a69cbc9") format('woff2');
+  unicode-range: U+0460-052F, U+1C80-1C8A, U+20B4, U+2DE0-2DFF, U+A640-A69F, U+FE2E-FE2F;
+}
+/* cyrillic */
+@font-face {
+  font-family: 'Source Serif 4';
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url("249f0ca0-c678-4c80-b9ff-682a88e72027") format('woff2');
+  unicode-range: U+0301, U+0400-045F, U+0490-0491, U+04B0-04B1, U+2116;
+}
+/* greek */
+@font-face {
+  font-family: 'Source Serif 4';
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url("16ebeb65-eeba-4cff-a977-9e211b8406a9") format('woff2');
+  unicode-range: U+0370-0377, U+037A-037F, U+0384-038A, U+038C, U+038E-03A1, U+03A3-03FF;
+}
+/* vietnamese */
+@font-face {
+  font-family: 'Source Serif 4';
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url("f8c600c3-47e9-4e8a-af1e-d645cb42b068") format('woff2');
+  unicode-range: U+0102-0103, U+0110-0111, U+0128-0129, U+0168-0169, U+01A0-01A1, U+01AF-01B0, U+0300-0301, U+0303-0304, U+0308-0309, U+0323, U+0329, U+1EA0-1EF9, U+20AB;
+}
+/* latin-ext */
+@font-face {
+  font-family: 'Source Serif 4';
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url("f2c3a0fd-d5d0-48f5-a704-042e054a4e01") format('woff2');
+  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C4, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+/* latin */
+@font-face {
+  font-family: 'Source Serif 4';
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url("73c5ac73-5b80-43a1-a130-2d40c980ec01") format('woff2');
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+/* cyrillic-ext */
+@font-face {
+  font-family: 'Source Serif 4';
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src: url("a3b13cb7-06fd-4dd7-bddc-653e2a69cbc9") format('woff2');
+  unicode-range: U+0460-052F, U+1C80-1C8A, U+20B4, U+2DE0-2DFF, U+A640-A69F, U+FE2E-FE2F;
+}
+/* cyrillic */
+@font-face {
+  font-family: 'Source Serif 4';
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src: url("249f0ca0-c678-4c80-b9ff-682a88e72027") format('woff2');
+  unicode-range: U+0301, U+0400-045F, U+0490-0491, U+04B0-04B1, U+2116;
+}
+/* greek */
+@font-face {
+  font-family: 'Source Serif 4';
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src: url("16ebeb65-eeba-4cff-a977-9e211b8406a9") format('woff2');
+  unicode-range: U+0370-0377, U+037A-037F, U+0384-038A, U+038C, U+038E-03A1, U+03A3-03FF;
+}
+/* vietnamese */
+@font-face {
+  font-family: 'Source Serif 4';
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src: url("f8c600c3-47e9-4e8a-af1e-d645cb42b068") format('woff2');
+  unicode-range: U+0102-0103, U+0110-0111, U+0128-0129, U+0168-0169, U+01A0-01A1, U+01AF-01B0, U+0300-0301, U+0303-0304, U+0308-0309, U+0323, U+0329, U+1EA0-1EF9, U+20AB;
+}
+/* latin-ext */
+@font-face {
+  font-family: 'Source Serif 4';
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src: url("f2c3a0fd-d5d0-48f5-a704-042e054a4e01") format('woff2');
+  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C4, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+/* latin */
+@font-face {
+  font-family: 'Source Serif 4';
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src: url("73c5ac73-5b80-43a1-a130-2d40c980ec01") format('woff2');
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+
+
+:root {
+  /* Neutrals — warm charcoal ramp */
+  --neutral-950: #141413;
+  --neutral-900: #1a1a19;
+  --neutral-850: #1c1c1b;
+  --neutral-800: #1f1f1e;
+  --neutral-750: #262624;
+  --neutral-700: #2f2f2d;
+  --neutral-650: #3a3a37;
+  --neutral-600: #55544f;
+  --neutral-400: #8f8e89;
+  --neutral-200: #c9c8c2;
+  --neutral-50:  #f2f1ec;
+
+  /* Signal hues */
+  --green-500: #34b233;
+  --amber-500: #e39b0e;
+  --amber-900: #3a2502;
+  --amber-800: #6e4605;
+  --blue-400:  #6ea8ef;
+  --red-400:   #e5655a;
+
+  /* Semantic: surfaces */
+  --surface-page: var(--neutral-900);
+  --surface-frame: var(--neutral-850);
+  --surface-panel: var(--neutral-800);
+  --surface-sunken: var(--neutral-950);
+  --surface-hover: var(--neutral-750);
+  --surface-escalation: var(--amber-900);
+
+  /* Semantic: borders */
+  --border-subtle: var(--neutral-700);
+  --border-default: var(--neutral-650);
+  --border-strong: var(--neutral-600);
+  --border-escalation: var(--amber-800);
+
+  /* Semantic: text */
+  --text-primary: var(--neutral-50);
+  --text-secondary: var(--neutral-200);
+  --text-muted: var(--neutral-400);
+
+  /* Semantic: status */
+  --status-running: var(--green-500);
+  --status-done: var(--green-500);
+  --status-attention: var(--amber-500);
+  --status-decision: var(--blue-400);
+  --status-blocked: var(--red-400);
+  --status-idle: var(--neutral-400);
+}
+
+:root {
+  --font-sans: "Instrument Sans", "Helvetica Neue", Helvetica, sans-serif;
+  --font-serif: "Source Serif 4", Georgia, serif;
+  --font-mono: "JetBrains Mono", ui-monospace, Menlo, monospace;
+
+  /* One working size; hierarchy comes from weight + color */
+  --text-sm: 13px;
+  --text-base: 14px;
+  --text-title: 15px;
+  --text-assistant: 15px;
+
+  --leading-tight: 18px;
+  --leading-base: 20px;
+  --leading-prose: 21px;
+
+  --weight-regular: 400;
+  --weight-medium: 500;
+  --weight-semibold: 600;
+}
+
+:root {
+  --space-1: 2px;
+  --space-2: 4px;
+  --space-3: 6px;
+  --space-4: 8px;
+  --space-5: 10px;
+  --space-6: 12px;
+  --space-7: 14px;
+  --space-8: 16px;
+  --space-10: 20px;
+
+  --radius-sm: 6px;
+  --radius-md: 8px;
+  --radius-lg: 10px;
+  --radius-xl: 12px;
+
+  --border-width: 1px;
+  --panel-header-h: 44px;
+  --sidebar-w: 160px;
+  --duration-fast: 120ms;
+  --ease-standard: cubic-bezier(.2,0,0,1);
+}
+
+body { margin: 0; background: var(--surface-page); color: var(--text-primary); font-family: var(--font-sans); font-size: var(--text-base); line-height: var(--leading-base); -webkit-font-smoothing: antialiased; }
+a { color: var(--status-decision); text-decoration: none; }
+a:hover { color: var(--text-primary); }
+.ico { display: inline-block; width: 1em; height: 1em; background: currentColor; -webkit-mask: var(--ico) center/contain no-repeat; mask: var(--ico) center/contain no-repeat; flex: none; }
+
+</style>
+<style>html,body{height:100%;margin:0}a{color:var(--status-decision)}a:hover{color:var(--text-primary)}</style>
+</helmet>
+<div style="height:100vh;overflow:hidden;display:grid;grid-template-columns:minmax(180px,220px) minmax(0,1fr) minmax(260px,340px);background:var(--surface-panel);color:var(--text-primary);font-family:var(--font-sans);font-size:14px;line-height:20px">
+
+  <aside data-screen-label="Sidebar" style="display:flex;flex-direction:column;min-height:0;background:var(--surface-frame);border-right:1px solid var(--border-subtle)">
+    <div style="display:flex;align-items:center;justify-content:space-between;height:52px;padding:0 10px 0 16px;flex:none">
+      <span style="font-size:16px;font-weight:600;letter-spacing:-0.01em">Fragile</span>
+      <button sc-camel-on-click="{{ newSession }}" aria-label="New session" title="New session" style="display:flex;align-items:center;justify-content:center;width:28px;height:28px;padding:0;border:0;border-radius:6px;background:transparent;color:var(--text-secondary);cursor:pointer" style-hover="background:var(--surface-hover);color:var(--text-primary)"><span style="width:16px;height:16px;background:currentColor;-webkit-mask:url(" data:image="" svg+xml,%3c!--%20%40license%20lucide-static%20v0.460.0%20-%20isc%20--%3e%20%3csvg%20class%3d%22lucide%20lucide-plus%22%20xmlns%3d%22http%3a%2f%2fwww.w3.org%2f2000%2fsvg%22%20width%3d%2224%22%20height%3d%2224%22%20viewbox%3d%220%200%2024%2024%22%20fill%3d%22none%22%20stroke%3d%22currentcolor%22%20stroke-width%3d%222%22%20stroke-linecap%3d%22round%22%20stroke-linejoin%3d%22round%22%20%3e%20%3cpath%20d%3d%22m5%2012h14%22%20%2f%3e%20%3cpath%20d%3d%22m12%205v14%22%20%2f%3e%20%3c%2fsvg%3e%20")="" center="" contain="" no-repeat;mask:url("data:image="" no-repeat"=""></span></button>
+    </div>
+    <div style="padding:4px 16px 6px;color:var(--text-muted);font-size:13px">Sessions</div>
+    <div style="display:flex;flex-direction:column;gap:4px;padding:0 8px 12px;overflow:auto;min-height:0">
+      <sc-for list="{{ sessions }}" as="s" hint-placeholder-count="3">
+        <button sc-camel-on-click="{{ s.select }}" style="{{ s.rowStyle }}">
+          <span style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%">{{ s.title }}</span>
+          <span style="{{ s.statusStyle }}">{{ s.statusLabel }}</span>
+        </button>
+      </sc-for>
+    </div>
+  </aside>
+
+  <main data-screen-label="Orchestrator chat" style="display:grid;grid-template-rows:52px minmax(0,1fr) auto;min-width:0;min-height:0">
+    <div style="display:flex;align-items:center;gap:10px;padding:0 24px;border-bottom:1px solid var(--border-subtle);min-width:0">
+      <span style="font-size:15px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">{{ cur.title }}</span>
+      <span style="{{ cur.statusStyle }}">{{ cur.statusLabel }}</span>
+      <div style="flex:1"></div>
+      <span style="color:var(--text-muted);white-space:nowrap">orchestrator · {{ cur.agentSummary }}</span>
+    </div>
+
+    <div style="overflow:auto;min-height:0">
+      <div style="max-width:680px;margin:0 auto;padding:24px 24px 16px;display:grid;gap:14px;align-content:start">
+        <sc-if value="{{ cur.empty }}" hint-placeholder-val="{{ false }}">
+          <div style="padding:48px 0;display:grid;gap:4px;justify-items:center;text-align:center">
+            <span style="font-family:var(--font-serif);font-size:18px;line-height:24px">What should this session build?</span>
+            <span style="color:var(--text-muted)">Give the orchestrator a task. It will split it up and spawn sub-agents.</span>
+          </div>
+        </sc-if>
+        <sc-for list="{{ cur.messages }}" as="m" hint-placeholder-count="3">
+          <sc-if value="{{ m.isUser }}" hint-placeholder-val="{{ false }}">
+            <div style="justify-self:end;max-width:80%;background:var(--surface-sunken);border-radius:8px;padding:6px 12px">{{ m.text }}</div>
+          </sc-if>
+          <sc-if value="{{ m.isAssistant }}" hint-placeholder-val="{{ true }}">
+            <div style="font-family:var(--font-serif);font-size:15px;line-height:22px;text-wrap:pretty">{{ m.text }}</div>
+          </sc-if>
+          <sc-if value="{{ m.isTool }}" hint-placeholder-val="{{ false }}">
+            <div style="display:flex;align-items:center;gap:6px;color:var(--text-secondary)"><span style="width:13px;height:13px;background:var(--text-muted);-webkit-mask:url(" data:image="" svg+xml,%3c!--%20%40license%20lucide-static%20v0.460.0%20-%20isc%20--%3e%20%3csvg%20class%3d%22lucide%20lucide-wrench%22%20xmlns%3d%22http%3a%2f%2fwww.w3.org%2f2000%2fsvg%22%20width%3d%2224%22%20height%3d%2224%22%20viewbox%3d%220%200%2024%2024%22%20fill%3d%22none%22%20stroke%3d%22currentcolor%22%20stroke-width%3d%222%22%20stroke-linecap%3d%22round%22%20stroke-linejoin%3d%22round%22%20%3e%20%3cpath%20d%3d%22m14.7%206.3a1%201%200%200%200%200%201.4l1.6%201.6a1%201%200%200%200%201.4%200l3.77-3.77a6%206%200%200%201-7.94%207.94l-6.91%206.91a2.12%202.12%200%200%201-3-3l6.91-6.91a6%206%200%200%201%207.94-7.94l-3.76%203.76z%22%20%2f%3e%20%3c%2fsvg%3e%20")="" center="" contain="" no-repeat;mask:url("data:image="" no-repeat;flex:none"=""></span><span>{{ m.text }}</span></div>
+          </sc-if>
+          <sc-if value="{{ m.isOpenEsc }}" hint-placeholder-val="{{ false }}">
+            <div style="background:var(--surface-escalation);border:1px solid var(--border-escalation);border-radius:8px;padding:10px 14px;color:var(--status-attention);display:grid;gap:2px">
+              <div style="display:flex;gap:6px"><span style="font-weight:500">Escalation</span><span style="opacity:.75">from {{ m.from }}</span></div>
+              <div>{{ m.text }}</div>
+              <div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:8px">
+                <sc-for list="{{ m.options }}" as="o" hint-placeholder-count="2">
+                  <button sc-camel-on-click="{{ o.pick }}" style="font:inherit;font-size:13px;line-height:18px;color:var(--status-attention);background:transparent;border:1px solid var(--border-escalation);border-radius:6px;padding:3px 10px;cursor:pointer;white-space:nowrap" style-hover="background:var(--amber-800);color:var(--text-primary)">{{ o.label }}</button>
+                </sc-for>
+                <span style="align-self:center;font-size:13px;opacity:.75;padding-left:4px">or reply below</span>
+              </div>
+            </div>
+          </sc-if>
+          <sc-if value="{{ m.isClosedEsc }}" hint-placeholder-val="{{ false }}">
+            <div style="border:1px solid var(--border-default);border-radius:8px;padding:8px 14px;display:grid;gap:2px">
+              <div style="display:flex;gap:6px;color:var(--text-muted)"><span>Escalation</span><span>from {{ m.from }}</span><span>· answered</span></div>
+              <div style="color:var(--text-secondary)">{{ m.text }}</div>
+              <div><span style="color:var(--status-decision)">you</span> {{ m.answer }}</div>
+            </div>
+          </sc-if>
+        </sc-for>
+      </div>
+    </div>
+
+    <div style="padding:0 24px 18px">
+      <div style="max-width:680px;margin:0 auto">
+        <input value="{{ draft }}" sc-camel-on-change="{{ onDraft }}" sc-camel-on-key-down="{{ onKey }}" placeholder="{{ placeholder }}" style="width:100%;box-sizing:border-box;font:inherit;color:var(--text-primary);background:var(--surface-sunken);outline:none;border:1px solid var(--border-strong);border-radius:10px;padding:11px 14px" style-focus="border-color:var(--text-muted)">
+      </div>
+    </div>
+  </main>
+
+  <aside data-screen-label="Agents and notes" style="border-left:1px solid var(--border-subtle);display:flex;flex-direction:column;min-height:0;min-width:0">
+    <sc-if value="{{ listMode }}" hint-placeholder-val="{{ true }}">
+      <div style="display:flex;align-items:center;justify-content:space-between;height:52px;padding:0 16px;flex:none;border-bottom:1px solid var(--border-subtle)">
+        <span style="font-size:15px;font-weight:600">Agents</span>
+        <span style="color:var(--text-muted);white-space:nowrap">{{ cur.agentSummary }}</span>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:8px;padding:12px;overflow:auto;flex:1 1 55%;min-height:0">
+        <sc-for list="{{ cur.agents }}" as="a" hint-placeholder-count="3">
+          <button sc-camel-on-click="{{ a.open }}" style="font:inherit;text-align:left;color:var(--text-primary);background:transparent;border:1px solid var(--border-default);border-radius:8px;padding:8px 12px;cursor:pointer;display:flex;flex-direction:column;min-width:0" style-hover="background:var(--surface-hover);border-color:var(--border-strong)">
+            <span style="display:flex;justify-content:space-between;gap:8px;width:100%"><span style="font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">#{{ a.id }} {{ a.name }}</span><span style="{{ a.statusStyle }}">{{ a.statusLabel }}</span></span>
+            <span style="color:var(--text-secondary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%">{{ a.task }}</span>
+            <span style="display:flex;align-items:center;gap:6px;color:var(--text-muted);min-width:0;max-width:100%"><span style="{{ a.iconStyle }}"></span><span style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis">{{ a.latest }}</span></span>
+          </button>
+        </sc-for>
+        <sc-if value="{{ cur.noAgents }}" hint-placeholder-val="{{ false }}">
+          <div style="color:var(--text-muted);padding:4px">Sub-agents appear here once the orchestrator spawns them.</div>
+        </sc-if>
+      </div>
+      <div style="display:flex;align-items:center;justify-content:space-between;height:44px;padding:0 10px 0 16px;flex:none;border-top:1px solid var(--border-subtle)">
+        <span style="font-size:15px;font-weight:600">Notes</span>
+        <button sc-camel-on-click="{{ toggleNoteInput }}" aria-label="Add note" title="Add note" style="display:flex;align-items:center;justify-content:center;width:28px;height:28px;padding:0;border:0;border-radius:6px;background:transparent;color:var(--text-secondary);cursor:pointer" style-hover="background:var(--surface-hover);color:var(--text-primary)"><span style="width:16px;height:16px;background:currentColor;-webkit-mask:url(" data:image="" svg+xml,%3c!--%20%40license%20lucide-static%20v0.460.0%20-%20isc%20--%3e%20%3csvg%20class%3d%22lucide%20lucide-plus%22%20xmlns%3d%22http%3a%2f%2fwww.w3.org%2f2000%2fsvg%22%20width%3d%2224%22%20height%3d%2224%22%20viewbox%3d%220%200%2024%2024%22%20fill%3d%22none%22%20stroke%3d%22currentcolor%22%20stroke-width%3d%222%22%20stroke-linecap%3d%22round%22%20stroke-linejoin%3d%22round%22%20%3e%20%3cpath%20d%3d%22m5%2012h14%22%20%2f%3e%20%3cpath%20d%3d%22m12%205v14%22%20%2f%3e%20%3c%2fsvg%3e%20")="" center="" contain="" no-repeat;mask:url("data:image="" no-repeat"=""></span></button>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:7px;padding:0 16px 16px;overflow:auto;flex:1 1 45%;min-height:0">
+        <sc-if value="{{ noteInputOpen }}" hint-placeholder-val="{{ false }}">
+          <input value="{{ noteDraft }}" sc-camel-on-change="{{ onNoteDraft }}" sc-camel-on-key-down="{{ onNoteKey }}" placeholder="Post a decision to all agents" style="width:100%;box-sizing:border-box;font:inherit;color:var(--text-primary);background:transparent;outline:none;border:1px solid var(--border-strong);border-radius:8px;padding:5px 10px" style-focus="border-color:var(--text-muted)">
+        </sc-if>
+        <sc-for list="{{ cur.notes }}" as="n" hint-placeholder-count="3">
+          <div style="display:flex;flex-wrap:wrap;column-gap:0.3em"><span style="{{ n.kindStyle }}">{{ n.type }}</span><span style="color:var(--text-muted)">{{ n.author }}</span><span>{{ n.text }}</span></div>
+        </sc-for>
+      </div>
+    </sc-if>
+
+    <sc-if value="{{ agentMode }}" hint-placeholder-val="{{ false }}">
+      <div style="display:flex;align-items:center;gap:8px;height:52px;padding:0 16px 0 8px;flex:none;border-bottom:1px solid var(--border-subtle);min-width:0">
+        <button sc-camel-on-click="{{ closeAgent }}" aria-label="Back to agents" title="Back to agents" style="display:flex;align-items:center;justify-content:center;width:28px;height:28px;padding:0;border:0;border-radius:6px;background:transparent;color:var(--text-secondary);cursor:pointer;flex:none" style-hover="background:var(--surface-hover);color:var(--text-primary)"><span style="width:16px;height:16px;background:currentColor;-webkit-mask:url(" data:image="" svg+xml,%3c!--%20%40license%20lucide-static%20v0.460.0%20-%20isc%20--%3e%20%3csvg%20class%3d%22lucide%20lucide-arrow-left%22%20xmlns%3d%22http%3a%2f%2fwww.w3.org%2f2000%2fsvg%22%20width%3d%2224%22%20height%3d%2224%22%20viewbox%3d%220%200%2024%2024%22%20fill%3d%22none%22%20stroke%3d%22currentcolor%22%20stroke-width%3d%222%22%20stroke-linecap%3d%22round%22%20stroke-linejoin%3d%22round%22%20%3e%20%3cpath%20d%3d%22m12%2019-7-7%207-7%22%20%2f%3e%20%3cpath%20d%3d%22m19%2012h5%22%20%2f%3e%20%3c%2fsvg%3e%20")="" center="" contain="" no-repeat;mask:url("data:image="" no-repeat"=""></span></button>
+        <span style="font-size:15px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">#{{ ag.id }} {{ ag.name }}</span>
+        <div style="flex:1"></div>
+        <span style="{{ ag.statusStyle }}">{{ ag.statusLabel }}</span>
+      </div>
+      <div style="padding:10px 16px;border-bottom:1px solid var(--border-subtle);display:grid;gap:2px;flex:none">
+        <span style="color:var(--text-secondary)">{{ ag.task }}</span>
+        <span style="color:var(--text-muted);font-size:13px">Output stream · view only</span>
+      </div>
+      <div style="overflow:auto;flex:1;min-height:0;padding:10px 16px 16px;display:grid;gap:6px;align-content:start">
+        <sc-for list="{{ ag.stream }}" as="l" hint-placeholder-count="5">
+          <div style="display:grid;grid-template-columns:40px minmax(0,1fr);gap:8px;align-items:start">
+            <span style="font-family:var(--font-mono);font-size:11px;line-height:20px;color:var(--text-muted)">{{ l.time }}</span>
+            <span style="{{ l.style }}"><span style="{{ l.tagStyle }}">{{ l.tag }}</span>{{ l.text }}</span>
+          </div>
+        </sc-for>
+        <sc-if value="{{ ag.live }}" hint-placeholder-val="{{ false }}">
+          <div style="display:grid;grid-template-columns:40px minmax(0,1fr);gap:8px"><span></span><span style="color:var(--text-muted)">streaming…</span></div>
+        </sc-if>
+      </div>
+    </sc-if>
+  </aside>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script="">
+const ICON_DATA = {"plus":"data:image/svg+xml;base64,PCEtLSBAbGljZW5zZSBsdWNpZGUtc3RhdGljIHYwLjQ2MC4wIC0gSVNDIC0tPiA8c3ZnIGNsYXNzPSJsdWNpZGUgbHVjaWRlLXBsdXMiIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyIgd2lkdGg9IjI0IiBoZWlnaHQ9IjI0IiB2aWV3Qm94PSIwIDAgMjQgMjQiIGZpbGw9Im5vbmUiIHN0cm9rZT0iY3VycmVudENvbG9yIiBzdHJva2Utd2lkdGg9IjIiIHN0cm9rZS1saW5lY2FwPSJyb3VuZCIgc3Ryb2tlLWxpbmVqb2luPSJyb3VuZCIgPiA8cGF0aCBkPSJNNSAxMmgxNCIgLz4gPHBhdGggZD0iTTEyIDV2MTQiIC8+IDwvc3ZnPiA=","wrench":"data:image/svg+xml;base64,PCEtLSBAbGljZW5zZSBsdWNpZGUtc3RhdGljIHYwLjQ2MC4wIC0gSVNDIC0tPiA8c3ZnIGNsYXNzPSJsdWNpZGUgbHVjaWRlLXdyZW5jaCIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIiB3aWR0aD0iMjQiIGhlaWdodD0iMjQiIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0ibm9uZSIgc3Ryb2tlPSJjdXJyZW50Q29sb3IiIHN0cm9rZS13aWR0aD0iMiIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIiBzdHJva2UtbGluZWpvaW49InJvdW5kIiA+IDxwYXRoIGQ9Ik0xNC43IDYuM2ExIDEgMCAwIDAgMCAxLjRsMS42IDEuNmExIDEgMCAwIDAgMS40IDBsMy43Ny0zLjc3YTYgNiAwIDAgMS03Ljk0IDcuOTRsLTYuOTEgNi45MWEyLjEyIDIuMTIgMCAwIDEtMy0zbDYuOTEtNi45MWE2IDYgMCAwIDEgNy45NC03Ljk0bC0zLjc2IDMuNzZ6IiAvPiA8L3N2Zz4g","arrow-left":"data:image/svg+xml;base64,PCEtLSBAbGljZW5zZSBsdWNpZGUtc3RhdGljIHYwLjQ2MC4wIC0gSVNDIC0tPiA8c3ZnIGNsYXNzPSJsdWNpZGUgbHVjaWRlLWFycm93LWxlZnQiIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyIgd2lkdGg9IjI0IiBoZWlnaHQ9IjI0IiB2aWV3Qm94PSIwIDAgMjQgMjQiIGZpbGw9Im5vbmUiIHN0cm9rZT0iY3VycmVudENvbG9yIiBzdHJva2Utd2lkdGg9IjIiIHN0cm9rZS1saW5lY2FwPSJyb3VuZCIgc3Ryb2tlLWxpbmVqb2luPSJyb3VuZCIgPiA8cGF0aCBkPSJtMTIgMTktNy03IDctNyIgLz4gPHBhdGggZD0iTTE5IDEySDUiIC8+IDwvc3ZnPiA=","terminal":"data:image/svg+xml;base64,PCEtLSBAbGljZW5zZSBsdWNpZGUtc3RhdGljIHYwLjQ2MC4wIC0gSVNDIC0tPiA8c3ZnIGNsYXNzPSJsdWNpZGUgbHVjaWRlLXRlcm1pbmFsIiB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIyNCIgaGVpZ2h0PSIyNCIgdmlld0JveD0iMCAwIDI0IDI0IiBmaWxsPSJub25lIiBzdHJva2U9ImN1cnJlbnRDb2xvciIgc3Ryb2tlLXdpZHRoPSIyIiBzdHJva2UtbGluZWNhcD0icm91bmQiIHN0cm9rZS1saW5lam9pbj0icm91bmQiID4gPHBvbHlsaW5lIHBvaW50cz0iNCAxNyAxMCAxMSA0IDUiIC8+IDxsaW5lIHgxPSIxMiIgeDI9IjIwIiB5MT0iMTkiIHkyPSIxOSIgLz4gPC9zdmc+IA==","message-square":"data:image/svg+xml;base64,PCEtLSBAbGljZW5zZSBsdWNpZGUtc3RhdGljIHYwLjQ2MC4wIC0gSVNDIC0tPiA8c3ZnIGNsYXNzPSJsdWNpZGUgbHVjaWRlLW1lc3NhZ2Utc3F1YXJlIiB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIyNCIgaGVpZ2h0PSIyNCIgdmlld0JveD0iMCAwIDI0IDI0IiBmaWxsPSJub25lIiBzdHJva2U9ImN1cnJlbnRDb2xvciIgc3Ryb2tlLXdpZHRoPSIyIiBzdHJva2UtbGluZWNhcD0icm91bmQiIHN0cm9rZS1saW5lam9pbj0icm91bmQiID4gPHBhdGggZD0iTTIxIDE1YTIgMiAwIDAgMS0yIDJIN2wtNCA0VjVhMiAyIDAgMCAxIDItMmgxNGEyIDIgMCAwIDEgMiAyeiIgLz4gPC9zdmc+IA==","gavel":"data:image/svg+xml;base64,PCEtLSBAbGljZW5zZSBsdWNpZGUtc3RhdGljIHYwLjQ2MC4wIC0gSVNDIC0tPiA8c3ZnIGNsYXNzPSJsdWNpZGUgbHVjaWRlLWdhdmVsIiB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIyNCIgaGVpZ2h0PSIyNCIgdmlld0JveD0iMCAwIDI0IDI0IiBmaWxsPSJub25lIiBzdHJva2U9ImN1cnJlbnRDb2xvciIgc3Ryb2tlLXdpZHRoPSIyIiBzdHJva2UtbGluZWNhcD0icm91bmQiIHN0cm9rZS1saW5lam9pbj0icm91bmQiID4gPHBhdGggZD0ibTE0LjUgMTIuNS04IDhhMi4xMTkgMi4xMTkgMCAxIDEtMy0zbDgtOCIgLz4gPHBhdGggZD0ibTE2IDE2IDYtNiIgLz4gPHBhdGggZD0ibTggOCA2LTYiIC8+IDxwYXRoIGQ9Im05IDcgOCA4IiAvPiA8cGF0aCBkPSJtMjEgMTEtOC04IiAvPiA8L3N2Zz4g","circle-help":"data:image/svg+xml;base64,PCEtLSBAbGljZW5zZSBsdWNpZGUtc3RhdGljIHYwLjQ2MC4wIC0gSVNDIC0tPiA8c3ZnIGNsYXNzPSJsdWNpZGUgbHVjaWRlLWNpcmNsZS1oZWxwIiB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIyNCIgaGVpZ2h0PSIyNCIgdmlld0JveD0iMCAwIDI0IDI0IiBmaWxsPSJub25lIiBzdHJva2U9ImN1cnJlbnRDb2xvciIgc3Ryb2tlLXdpZHRoPSIyIiBzdHJva2UtbGluZWNhcD0icm91bmQiIHN0cm9rZS1saW5lam9pbj0icm91bmQiID4gPGNpcmNsZSBjeD0iMTIiIGN5PSIxMiIgcj0iMTAiIC8+IDxwYXRoIGQ9Ik05LjA5IDlhMyAzIDAgMCAxIDUuODMgMWMwIDItMyAzLTMgMyIgLz4gPHBhdGggZD0iTTEyIDE3aC4wMSIgLz4gPC9zdmc+IA==","octagon-alert":"data:image/svg+xml;base64,PCEtLSBAbGljZW5zZSBsdWNpZGUtc3RhdGljIHYwLjQ2MC4wIC0gSVNDIC0tPiA8c3ZnIGNsYXNzPSJsdWNpZGUgbHVjaWRlLW9jdGFnb24tYWxlcnQiIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyIgd2lkdGg9IjI0IiBoZWlnaHQ9IjI0IiB2aWV3Qm94PSIwIDAgMjQgMjQiIGZpbGw9Im5vbmUiIHN0cm9rZT0iY3VycmVudENvbG9yIiBzdHJva2Utd2lkdGg9IjIiIHN0cm9rZS1saW5lY2FwPSJyb3VuZCIgc3Ryb2tlLWxpbmVqb2luPSJyb3VuZCIgPiA8cGF0aCBkPSJNMTIgMTZoLjAxIiAvPiA8cGF0aCBkPSJNMTIgOHY0IiAvPiA8cGF0aCBkPSJNMTUuMzEyIDJhMiAyIDAgMCAxIDEuNDE0LjU4Nmw0LjY4OCA0LjY4OEEyIDIgMCAwIDEgMjIgOC42ODh2Ni42MjRhMiAyIDAgMCAxLS41ODYgMS40MTRsLTQuNjg4IDQuNjg4YTIgMiAwIDAgMS0xLjQxNC41ODZIOC42ODhhMiAyIDAgMCAxLTEuNDE0LS41ODZsLTQuNjg4LTQuNjg4QTIgMiAwIDAgMSAyIDE1LjMxMlY4LjY4OGEyIDIgMCAwIDEgLjU4Ni0xLjQxNGw0LjY4OC00LjY4OEEyIDIgMCAwIDEgOC42ODggMnoiIC8+IDwvc3ZnPiA=","sticky-note":"data:image/svg+xml;base64,PCEtLSBAbGljZW5zZSBsdWNpZGUtc3RhdGljIHYwLjQ2MC4wIC0gSVNDIC0tPiA8c3ZnIGNsYXNzPSJsdWNpZGUgbHVjaWRlLXN0aWNreS1ub3RlIiB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIyNCIgaGVpZ2h0PSIyNCIgdmlld0JveD0iMCAwIDI0IDI0IiBmaWxsPSJub25lIiBzdHJva2U9ImN1cnJlbnRDb2xvciIgc3Ryb2tlLXdpZHRoPSIyIiBzdHJva2UtbGluZWNhcD0icm91bmQiIHN0cm9rZS1saW5lam9pbj0icm91bmQiID4gPHBhdGggZD0iTTE2IDNINWEyIDIgMCAwIDAtMiAydjE0YTIgMiAwIDAgMCAyIDJoMTRhMiAyIDAgMCAwIDItMlY4WiIgLz4gPHBhdGggZD0iTTE1IDN2NGEyIDIgMCAwIDAgMiAyaDQiIC8+IDwvc3ZnPiA=","check":"data:image/svg+xml;base64,PCEtLSBAbGljZW5zZSBsdWNpZGUtc3RhdGljIHYwLjQ2MC4wIC0gSVNDIC0tPiA8c3ZnIGNsYXNzPSJsdWNpZGUgbHVjaWRlLWNoZWNrIiB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIyNCIgaGVpZ2h0PSIyNCIgdmlld0JveD0iMCAwIDI0IDI0IiBmaWxsPSJub25lIiBzdHJva2U9ImN1cnJlbnRDb2xvciIgc3Ryb2tlLXdpZHRoPSIyIiBzdHJva2UtbGluZWNhcD0icm91bmQiIHN0cm9rZS1saW5lam9pbj0icm91bmQiID4gPHBhdGggZD0iTTIwIDYgOSAxN2wtNS01IiAvPiA8L3N2Zz4g"};
+const ICON = n => ICON_DATA[n];
+const fmt = s => { s = Math.max(0, Math.round(s)); const m = Math.floor(s / 60), r = s % 60; return m ? `${m}m${String(r).padStart(2, "0")}s` : `${r}s`; };
+const NOTE_COLOR = { decision: "var(--status-decision)", question: "var(--status-attention)", blocker: "var(--status-blocked)", heads_up: "var(--text-secondary)", done: "var(--status-done)" };
+const NOTE_ICON = { decision: "gavel", question: "circle-help", blocker: "octagon-alert", heads_up: "sticky-note", done: "check" };
+const SESSION_COLOR = { working: "var(--status-running)", "needs you": "var(--status-attention)", done: "var(--text-muted)", new: "var(--text-muted)" };
+
+const POOL = {
+  "2": [["tool", "Edit storage/sqlite.go"], ["tool", "go test ./storage/..."], ["text", "Migration creates todos table with autoincrement id."]],
+  "3": [["tool", "Edit cli/done.go"], ["tool", "Edit cli/rm.go"], ["text", "Wiring commands to Store interface."], ["tool", "go test ./cli/..."]],
+};
+
+function seed() {
+  return [
+    { id: "todo", title: "Todo CLI", created: 0,
+      messages: [
+        { k: "user", text: "Build a Go todo CLI" },
+        { k: "assistant", text: "Three sub-agents, one per package: storage, cli, format. Shared types posted as a decision so they agree on the shape of a todo." },
+        { k: "tool", text: "spawn_subagent x3" },
+        { k: "assistant", text: "Format is done. Storage needs a call from you before it picks a backend." },
+        { k: "esc", from: "#2 storage", text: "JSON file or SQLite for storage?", options: ["JSON file", "SQLite"], answer: null, agent: 2 },
+      ],
+      agents: [
+        { id: 2, name: "storage package", task: "Store interface + file backend", status: "running", start: 0,
+          stream: [{ t: 2, k: "text", text: "Reading notes before starting." }, { t: 9, k: "tool", text: "Edit storage/store.go" }, { t: 12, k: "note", type: "heads_up", text: "Store interface ready" }, { t: 70, k: "tool", text: "go test ./storage/..." }, { t: 95, k: "note", type: "question", text: "JSON or SQLite? asked orchestrator" }] },
+        { id: 3, name: "cli package", task: "add, list, done, rm commands", status: "running", start: 5,
+          stream: [{ t: 7, k: "text", text: "Reading notes before starting." }, { t: 30, k: "tool", text: "Edit cli/root.go" }, { t: 58, k: "tool", text: "Edit cli/add.go" }, { t: 101, k: "note", type: "question", text: "IDs start at 1?" }, { t: 118, k: "tool", text: "Edit cli/list.go" }] },
+        { id: 4, name: "format package", task: "Aligned table output", status: "done", start: 5, end: 105,
+          stream: [{ t: 8, k: "text", text: "Reading notes before starting." }, { t: 22, k: "tool", text: "Edit format/table.go" }, { t: 80, k: "tool", text: "go test ./format/..." }, { t: 100, k: "note", type: "done", text: "table printer + tests" }] },
+      ],
+      notes: [
+        { type: "decision", author: "orchestrator", text: "Todo{ID,Text,Done}" },
+        { type: "heads_up", author: "#2", text: "Store interface ready" },
+        { type: "question", author: "#3", text: "IDs start at 1?" },
+        { type: "done", author: "#4", text: "format finished" },
+      ] },
+    { id: "auth", title: "Auth refactor", created: -400,
+      messages: [
+        { k: "user", text: "Move auth to the new session middleware" },
+        { k: "assistant", text: "Two sub-agents: one migrates handlers, one rewrites the token store." },
+        { k: "tool", text: "spawn_subagent x2" },
+        { k: "esc", from: "#3 token store", text: "Keep legacy cookies valid for 30 days?", options: ["Yes, 30 days", "No, invalidate now"], answer: null, agent: 3 },
+      ],
+      agents: [
+        { id: 2, name: "handlers", task: "Swap handlers to session middleware", status: "running", start: -380, stream: [{ t: 10, k: "tool", text: "Edit http/login.go" }, { t: 200, k: "tool", text: "Edit http/logout.go" }] },
+        { id: 3, name: "token store", task: "Redis-backed sessions", status: "running", start: -370, stream: [{ t: 40, k: "tool", text: "Edit auth/store.go" }, { t: 300, k: "note", type: "blocker", text: "cookie policy unclear" }] },
+      ],
+      notes: [{ type: "decision", author: "orchestrator", text: "Session TTL 7d" }, { type: "blocker", author: "#3", text: "cookie policy unclear" }] },
+    { id: "docs", title: "Docs pass", created: -2000,
+      messages: [
+        { k: "user", text: "Tidy the README and add usage examples" },
+        { k: "assistant", text: "Done. README rewritten with install, usage and a flag reference." },
+      ],
+      agents: [{ id: 2, name: "readme", task: "Install, usage, flags", status: "done", start: -1990, end: -1800, stream: [{ t: 20, k: "tool", text: "Edit README.md" }, { t: 190, k: "note", type: "done", text: "README rewritten" }] }],
+      notes: [{ type: "done", author: "#2", text: "README merged" }] },
+  ];
+}
+
+class Component extends DCLogic {
+  state = { now: 140, sessions: seed(), cur: "todo", agent: null, draft: "", noteInputOpen: false, noteDraft: "" };
+
+  componentDidMount() {
+    this.timer = setInterval(() => {
+      this.setState(s => {
+        const now = s.now + 1;
+        if (now % 4) return { now };
+        const sessions = s.sessions.map(se => {
+          if (se.id !== "todo") return se;
+          return { ...se, agents: se.agents.map(a => {
+            const pool = POOL[a.id];
+            if (a.status !== "running" || !pool || Math.random() < 0.5) return a;
+            const [k, text] = pool[Math.floor(Math.random() * pool.length)];
+            return { ...a, stream: [...a.stream, { t: now - a.start, k, text }] };
+          }) };
+        });
+        return { now, sessions };
+      });
+    }, 1000);
+  }
+  componentWillUnmount() { clearInterval(this.timer); }
+
+  patch(id, fn) { this.setState(s => ({ sessions: s.sessions.map(se => (se.id === id ? fn(se, s) : se)) })); }
+
+  answer(sid, text) {
+    this.patch(sid, se => {
+      const esc = se.messages.find(m => m.k === "esc" && !m.answer);
+      return {
+        ...se,
+        messages: [...se.messages.map(m => (m === esc ? { ...m, answer: text } : m)), { k: "assistant", text: `Noted. Posted as a decision; ${esc.from.split(" ")[0]} continues with it.` }],
+        notes: [{ type: "decision", author: "you", text }, ...se.notes],
+      };
+    });
+  }
+
+  send() {
+    const text = this.state.draft.trim();
+    if (!text) return;
+    const sid = this.state.cur;
+    const se = this.state.sessions.find(x => x.id === sid);
+    this.setState({ draft: "" });
+    if (se.messages.some(m => m.k === "esc" && !m.answer)) {
+      this.patch(sid, x => ({ ...x, messages: [...x.messages, { k: "user", text }] }));
+      setTimeout(() => this.answer(sid, text), 300);
+      return;
+    }
+    const first = se.messages.length === 0;
+    this.patch(sid, x => ({ ...x, title: first ? text.slice(0, 28) : x.title, messages: [...x.messages, { k: "user", text }] }));
+    setTimeout(() => this.patch(sid, (x, s) => first
+      ? { ...x, messages: [...x.messages, { k: "assistant", text: "Splitting this into two packages. Spawning sub-agents now." }, { k: "tool", text: "spawn_subagent x2" }],
+          agents: [{ id: 2, name: "core package", task: "Domain types + logic", status: "running", start: s.now, stream: [{ t: 0, k: "text", text: "Reading notes before starting." }] },
+                   { id: 3, name: "interface package", task: "Entry point + wiring", status: "running", start: s.now, stream: [{ t: 0, k: "text", text: "Reading notes before starting." }] }],
+          notes: [{ type: "decision", author: "orchestrator", text: "Two packages: core, interface" }] }
+      : { ...x, messages: [...x.messages, { k: "assistant", text: "Understood. Passing that to the running agents through the notes board." }] }), 700);
+  }
+
+  statusOf(se) {
+    if (se.messages.some(m => m.k === "esc" && !m.answer)) return "needs you";
+    if (!se.agents.length) return se.messages.length ? "working" : "new";
+    return se.agents.some(a => a.status === "running") ? "working" : "done";
+  }
+
+  agentStatus(a) {
+    const now = this.state.now;
+    return a.status === "running"
+      ? { label: `running · ${fmt(now - a.start)}`, style: { color: "var(--status-running)", whiteSpace: "nowrap", flex: "none" } }
+      : { label: `done · ${fmt(a.end - a.start)}`, style: { color: "var(--text-muted)", whiteSpace: "nowrap", flex: "none" } };
+  }
+
+  renderVals() {
+    const { sessions, cur, agent, draft, noteInputOpen, noteDraft } = this.state;
+    const se = sessions.find(x => x.id === cur) || sessions[0];
+    const st = this.statusOf(se);
+    const running = se.agents.filter(a => a.status === "running").length;
+    const done = se.agents.length - running;
+    const openEsc = se.messages.some(m => m.k === "esc" && !m.answer);
+    const mask = n => { const m = `url(${ICON(n)}) center/contain no-repeat`; return { width: 13, height: 13, flex: "none", background: "var(--text-muted)", WebkitMask: m, mask: m }; };
+
+    const agents = se.agents.map(a => {
+      const s = this.agentStatus(a);
+      const last = a.stream[a.stream.length - 1] || { k: "text", text: "starting" };
+      const icon = last.k === "note" ? NOTE_ICON[last.type] : last.k === "tool" ? "terminal" : "message-square";
+      return { id: a.id, name: a.name, task: a.task, statusLabel: s.label, statusStyle: s.style,
+        latest: last.k === "note" ? `${last.type}: ${last.text}` : last.text, iconStyle: mask(icon),
+        open: () => this.setState({ agent: a.id }) };
+    });
+
+    const ag = se.agents.find(a => a.id === agent);
+    const agS = ag ? this.agentStatus(ag) : { label: "", style: {} };
+
+    return {
+      sessions: sessions.map(x => {
+        const s = this.statusOf(x);
+        return { title: x.title, statusLabel: s,
+          statusStyle: { color: SESSION_COLOR[s] },
+          select: () => this.setState({ cur: x.id, agent: null, noteInputOpen: false }),
+          rowStyle: { font: "inherit", textAlign: "left", display: "flex", flexDirection: "column", alignItems: "flex-start", width: "100%", padding: "6px 10px", borderRadius: 10, cursor: "pointer", color: "var(--text-primary)",
+            background: x.id === cur ? "var(--surface-panel)" : "transparent", border: "1px solid " + (x.id === cur ? "var(--border-strong)" : "transparent") } };
+      }),
+      newSession: () => this.setState(s => {
+        const id = "s" + Date.now();
+        return { sessions: [{ id, title: "New session", messages: [], agents: [], notes: [] }, ...s.sessions], cur: id, agent: null };
+      }),
+      cur: {
+        title: se.title, statusLabel: st, statusStyle: { color: SESSION_COLOR[st], whiteSpace: "nowrap" },
+        agentSummary: se.agents.length ? `${running} running · ${done} done` : "no agents",
+        empty: se.messages.length === 0,
+        messages: se.messages.map(m => ({
+          text: m.text, from: m.from, answer: m.answer,
+          isUser: m.k === "user", isAssistant: m.k === "assistant", isTool: m.k === "tool",
+          isOpenEsc: m.k === "esc" && !m.answer, isClosedEsc: m.k === "esc" && !!m.answer,
+          options: (m.options || []).map(o => ({ label: o, pick: () => this.answer(se.id, o) })),
+        })),
+        agents, noAgents: agents.length === 0,
+        notes: se.notes.map(n => ({ ...n, kindStyle: { color: NOTE_COLOR[n.type] } })),
+      },
+      placeholder: openEsc ? "Answer the escalation, or message the orchestrator" : se.messages.length ? "Message the orchestrator" : "Describe the task",
+      draft,
+      onDraft: e => this.setState({ draft: e.target.value }),
+      onKey: e => { if (e.key === "Enter") this.send(); },
+      listMode: !ag, agentMode: !!ag,
+      closeAgent: () => this.setState({ agent: null }),
+      ag: ag ? {
+        id: ag.id, name: ag.name, task: ag.task, statusLabel: agS.label, statusStyle: agS.style, live: ag.status === "running",
+        stream: ag.stream.map(l => ({
+          time: fmt(l.t), text: l.text, tag: l.k === "note" ? l.type + " " : l.k === "tool" ? "› " : "",
+          tagStyle: { color: l.k === "note" ? NOTE_COLOR[l.type] : "var(--text-muted)" },
+          style: { color: l.k === "tool" ? "var(--text-secondary)" : "var(--text-primary)", fontFamily: l.k === "tool" ? "var(--font-mono)" : "inherit", fontSize: l.k === "tool" ? 12 : 14 },
+        })),
+      } : { stream: [] },
+      noteInputOpen, noteDraft,
+      toggleNoteInput: () => this.setState(s => ({ noteInputOpen: !s.noteInputOpen })),
+      onNoteDraft: e => this.setState({ noteDraft: e.target.value }),
+      onNoteKey: e => {
+        if (e.key === "Escape") this.setState({ noteInputOpen: false });
+        if (e.key !== "Enter" || !noteDraft.trim()) return;
+        const text = noteDraft.trim();
+        this.setState({ noteDraft: "", noteInputOpen: false });
+        this.patch(se.id, x => ({ ...x, notes: [{ type: "decision", author: "you", text }, ...x.notes] }));
+      },
+    };
+  }
+}
+</script>
+
+
+</body></html>

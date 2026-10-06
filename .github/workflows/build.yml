@@ -1,0 +1,84 @@
+# Tests on every PR and push to main; on main, also builds the desktop app for
+# macOS and Linux and publishes them as a GitHub release (build-<run number>.<attempt>).
+name: build
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with: {go-version-file: go.mod}
+      - uses: pnpm/action-setup@v4
+        with: {version: 9}
+      - uses: actions/setup-node@v4
+        with: {node-version: 22}
+      - run: go vet ./...
+      - run: go test -race ./...
+      - name: frontend
+        working-directory: app/frontend
+        run: pnpm install --frozen-lockfile && pnpm tsc --noEmit && pnpm build
+
+  app:
+    if: github.event_name == 'push'
+    needs: test
+    strategy:
+      matrix:
+        include:
+          - os: macos-latest
+            platform: darwin/universal
+          - os: ubuntu-24.04
+            platform: linux/amd64
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with: {go-version-file: go.mod}
+      - uses: pnpm/action-setup@v4
+        with: {version: 9}
+      - uses: actions/setup-node@v4
+        with: {node-version: 22}
+      - if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y libgtk-3-dev libwebkit2gtk-4.1-dev
+      - run: go install github.com/wailsapp/wails/v2/cmd/wails@v2.14.0
+      - name: wails build
+        working-directory: app
+        # Ubuntu 24.04 ships webkit2gtk 4.1 only.
+        run: wails build -platform ${{ matrix.platform }} ${{ runner.os == 'Linux' && '-tags webkit2_41' || '' }}
+      - name: package
+        working-directory: app/build/bin
+        run: |
+          if [ "$RUNNER_OS" = macOS ]; then
+            ditto -c -k --keepParent Fragile.app ../../../fragile-macos-universal.zip
+          else
+            tar czf ../../../fragile-linux-amd64.tar.gz Fragile
+          fi
+      - uses: actions/upload-artifact@v4
+        with:
+          name: fragile-${{ runner.os }}
+          path: fragile-*
+
+  release:
+    needs: app
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # create the release
+    steps:
+      - uses: actions/download-artifact@v4
+        with: {merge-multiple: true}
+      - env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # run_attempt keeps the tag unique when a run is re-run.
+          gh release create "build-${{ github.run_number }}.${{ github.run_attempt }}" fragile-* \
+            --repo "${{ github.repository }}" --target "${{ github.sha }}" \
+            --title "Fragile build ${{ github.run_number }}" \
+            --notes "Built from ${{ github.sha }}. macOS build is unsigned: run \`xattr -dr com.apple.quarantine Fragile.app\` after unzipping. Linux needs libgtk-3 and libwebkit2gtk-4.1 (agents also need bubblewrap and socat)."

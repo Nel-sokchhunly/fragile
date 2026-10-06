@@ -1,0 +1,232 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+@import "shadcn/tailwind.css";
+@import "@fontsource-variable/instrument-sans";
+@import "@fontsource-variable/source-serif-4";
+@import "@fontsource-variable/jetbrains-mono";
+
+@custom-variant dark (&:is(.dark *));
+
+@theme inline {
+    --font-heading: var(--font-sans);
+    --font-sans: 'Instrument Sans Variable', 'Helvetica Neue', Helvetica, sans-serif;
+    --font-serif: 'Source Serif 4 Variable', Georgia, serif;
+    --font-mono: 'JetBrains Mono Variable', ui-monospace, Menlo, monospace;
+    --color-sidebar-ring: var(--sidebar-ring);
+    --color-sidebar-border: var(--sidebar-border);
+    --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+    --color-sidebar-accent: var(--sidebar-accent);
+    --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+    --color-sidebar-primary: var(--sidebar-primary);
+    --color-sidebar-foreground: var(--sidebar-foreground);
+    --color-sidebar: var(--sidebar);
+    --color-chart-5: var(--chart-5);
+    --color-chart-4: var(--chart-4);
+    --color-chart-3: var(--chart-3);
+    --color-chart-2: var(--chart-2);
+    --color-chart-1: var(--chart-1);
+    --color-ring: var(--ring);
+    --color-input: var(--input);
+    --color-border: var(--border);
+    --color-destructive: var(--destructive);
+    --color-accent-foreground: var(--accent-foreground);
+    --color-accent: var(--accent);
+    --color-muted-foreground: var(--muted-foreground);
+    --color-muted: var(--muted);
+    --color-secondary-foreground: var(--secondary-foreground);
+    --color-secondary: var(--secondary);
+    --color-primary-foreground: var(--primary-foreground);
+    --color-primary: var(--primary);
+    --color-popover-foreground: var(--popover-foreground);
+    --color-popover: var(--popover);
+    --color-card-foreground: var(--card-foreground);
+    --color-card: var(--card);
+    --color-foreground: var(--foreground);
+    --color-background: var(--background);
+    --radius-sm: calc(var(--radius) * 0.6);
+    --radius-md: calc(var(--radius) * 0.8);
+    --radius-lg: var(--radius);
+    --radius-xl: calc(var(--radius) * 1.4);
+    --radius-2xl: calc(var(--radius) * 1.8);
+    --radius-3xl: calc(var(--radius) * 2.2);
+    --radius-4xl: calc(var(--radius) * 2.6);
+
+    /* Semantic tokens (values below in :root / .dark). Components use these, never raw palette colors. */
+    --color-status-working: var(--status-working);
+    --color-status-working-fg: var(--status-working-fg);
+    --color-status-exited: var(--status-exited);
+    --color-status-done: var(--status-done);
+    --color-status-needs-you: var(--status-needs-you);
+    --color-status-needs-you-fg: var(--status-needs-you-fg);
+    --color-on-needs-you: var(--on-needs-you);
+    --color-status-crashed: var(--status-crashed);
+    --color-note-decision: var(--note-decision);
+    --color-note-blocker: var(--note-blocker);
+    --color-note-heads-up: var(--note-heads-up);
+    --color-note-done: var(--note-done);
+    --color-note-question: var(--note-question);
+    --color-escalation: var(--escalation);
+    --color-escalation-fg: var(--escalation-fg);
+    --color-escalation-bg: var(--escalation-bg);
+    --color-escalation-hover: var(--escalation-hover);
+    --color-status-decision: var(--status-decision);
+    /* design surfaces / borders / text levels (names follow docs/design/fragile-design-spec.md) */
+    --color-surface-sunken: var(--surface-sunken);
+    --color-surface-hover: var(--surface-hover);
+    --color-border-subtle: var(--border-subtle);
+    --color-border-default: var(--border-default);
+    --color-border-strong: var(--border-strong);
+    --color-text-secondary: var(--text-secondary);
+    --text-mini: 11px;
+    --text-title: 15px;
+    --text-title--line-height: 20px;
+    --text-assistant: 15px;
+    --text-assistant--line-height: 22px;
+}
+
+:root {
+    /* Light placeholders: the design is dark-only (html carries class="dark"), so these exist only so a
+       light theme can be filled in later. Semantic tokens below are shared by both. */
+    --background: oklch(1 0 0);
+    --foreground: oklch(0.145 0 0);
+    --card: oklch(1 0 0);
+    --card-foreground: oklch(0.145 0 0);
+    --popover: oklch(1 0 0);
+    --popover-foreground: oklch(0.145 0 0);
+    --primary: oklch(0.205 0 0);
+    --primary-foreground: oklch(0.985 0 0);
+    --secondary: oklch(0.97 0 0);
+    --secondary-foreground: oklch(0.205 0 0);
+    --muted: oklch(0.97 0 0);
+    --muted-foreground: oklch(0.556 0 0);
+    --accent: oklch(0.97 0 0);
+    --accent-foreground: oklch(0.205 0 0);
+    --destructive: oklch(0.577 0.245 27.325);
+    --border: oklch(0.922 0 0);
+    --input: oklch(0.922 0 0);
+    --ring: oklch(0.708 0 0);
+    --chart-1: oklch(0.87 0 0);
+    --chart-2: oklch(0.556 0 0);
+    --chart-3: oklch(0.439 0 0);
+    --chart-4: oklch(0.371 0 0);
+    --chart-5: oklch(0.269 0 0);
+    --radius: 0.625rem;
+    --sidebar: oklch(0.985 0 0);
+    --sidebar-foreground: oklch(0.145 0 0);
+    --sidebar-primary: oklch(0.205 0 0);
+    --sidebar-primary-foreground: oklch(0.985 0 0);
+    --sidebar-accent: oklch(0.97 0 0);
+    --sidebar-accent-foreground: oklch(0.205 0 0);
+    --sidebar-border: oklch(0.922 0 0);
+    --sidebar-ring: oklch(0.708 0 0);
+    --surface-sunken: oklch(0.96 0 0);
+    --surface-hover: oklch(0.97 0 0);
+    --border-subtle: var(--border);
+    --border-default: oklch(0.87 0 0);
+    --border-strong: oklch(0.708 0 0);
+    --text-secondary: oklch(0.371 0 0);
+
+    /* status: sessions + agents (design palette; hues are shared, a light theme may override) */
+    --status-working: #34b233; /* green: working session, running agent */
+    --status-working-fg: var(--status-working);
+    --status-exited: var(--muted-foreground); /* done agent */
+    --status-done: var(--muted-foreground);
+    --status-needs-you: #e39b0e; /* amber: needs you, question */
+    --status-needs-you-fg: var(--status-needs-you);
+    --on-needs-you: black; /* text on a solid needs-you badge */
+    --status-crashed: #e5655a; /* red: crashed, blocker */
+    --status-decision: #6ea8ef; /* blue: decision, links, "you" */
+    /* note types: text colour */
+    --note-decision: var(--status-decision);
+    --note-blocker: var(--status-crashed);
+    --note-heads-up: var(--text-secondary);
+    --note-done: var(--status-working);
+    --note-question: var(--status-needs-you);
+    /* escalation block: solid dark amber with an amber border; text is --escalation-fg */
+    --escalation: #6e4605; /* border */
+    --escalation-fg: var(--status-needs-you);
+    --escalation-bg: #3a2502;
+    --escalation-hover: #6e4605;
+}
+
+/* Design palette: warm charcoal neutrals (docs/design/fragile-design-spec.md section 1). */
+.dark {
+    color-scheme: dark;
+    --background: #1f1f1e; /* surface-panel */
+    --foreground: #f2f1ec; /* text-primary */
+    --card: #1f1f1e;
+    --card-foreground: #f2f1ec;
+    --popover: #1f1f1e;
+    --popover-foreground: #f2f1ec;
+    --primary: #f2f1ec;
+    --primary-foreground: #141413;
+    --secondary: #262624;
+    --secondary-foreground: #f2f1ec;
+    --muted: #262624;
+    --muted-foreground: #8f8e89; /* text-muted */
+    --accent: #262624; /* surface-hover */
+    --accent-foreground: #f2f1ec;
+    --destructive: #e5655a;
+    --border: #2f2f2d; /* border-subtle: dividers */
+    --input: #55544f; /* border-strong: inputs */
+    --ring: #8f8e89;
+    --chart-1: #c9c8c2;
+    --chart-2: #8f8e89;
+    --chart-3: #55544f;
+    --chart-4: #3a3a37;
+    --chart-5: #2f2f2d;
+    --sidebar: #1c1c1b; /* surface-frame */
+    --sidebar-foreground: #f2f1ec;
+    --sidebar-primary: #f2f1ec;
+    --sidebar-primary-foreground: #141413;
+    --sidebar-accent: #262624;
+    --sidebar-accent-foreground: #f2f1ec;
+    --sidebar-border: #2f2f2d;
+    --sidebar-ring: #8f8e89;
+    --surface-sunken: #141413; /* user bubble, composer, code */
+    --surface-hover: #262624;
+    --border-subtle: #2f2f2d;
+    --border-default: #3a3a37; /* card borders */
+    --border-strong: #55544f; /* selected row, hovered card, inputs */
+    --text-secondary: #c9c8c2;
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+    }
+  body {
+    @apply bg-background text-foreground text-sm antialiased;
+    }
+  #root { @apply h-screen; }
+  html {
+    @apply font-sans;
+    }
+  ::-webkit-scrollbar { width: 8px; height: 8px; }
+  ::-webkit-scrollbar-thumb { background: var(--border-default); border-radius: 4px; }
+  ::-webkit-scrollbar-thumb:hover { background: var(--border-strong); }
+  ::-webkit-scrollbar-corner { background: transparent; }
+}
+/* Markdown + shiki (no typography plugin). Size and line height come from the parent so the same
+   markup serves the serif chat voice and the sans agent stream. */
+.md { @apply break-words; }
+.md > * + * { @apply mt-1.5; }
+.md ul { @apply list-disc pl-5; }
+.md ol { @apply list-decimal pl-5; }
+.md h1, .md h2, .md h3 { @apply font-semibold; }
+.md blockquote { @apply border-l-2 pl-3 text-muted-foreground; }
+.md table { @apply text-xs; }
+.md th, .md td { @apply border px-2 py-0.5; }
+.md a { @apply text-status-decision hover:text-foreground; }
+.code-block { @apply overflow-x-auto rounded-md border border-border-default bg-surface-sunken px-2.5 py-2 font-mono text-xs leading-[18px]; }
+.code-block pre { @apply m-0 bg-transparent! p-0; }
+.shiki span { color: var(--shiki-light); }
+.dark .shiki span { color: var(--shiki-dark); }
+
+/* Sidebar collapse/expand from the toggle (App.tsx sets the class briefly). */
+.panels-animating > [data-panel] {
+  transition: flex-grow 180ms ease-out;
+}
+@media (prefers-reduced-motion: reduce) {
+  .panels-animating > [data-panel] { transition: none; }
+}

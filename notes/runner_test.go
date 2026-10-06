@@ -1,15 +1,19 @@
 package notes
 
 import (
+	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"slices"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 )
 
 // newTestRunner returns a Runner whose "claude" is a shell script with the given body.
-func newTestRunner(t *testing.T, script string) (*Runner, *Store, string) {
+func newTestRunner(t *testing.T, script string) (*Runner, *Store, Session, string) {
 	t.Helper()
 	dir := t.TempDir()
 	store, err := OpenStore(filepath.Join(dir, "f.db"))
@@ -24,8 +28,13 @@ func newTestRunner(t *testing.T, script string) (*Runner, *Store, string) {
 	}
 	t.Cleanup(func() { ev.Close() })
 	r := NewRunner(Config{Addr: "127.0.0.1:1", AgentDir: dir, WorkDir: dir}, store, ev)
+	r.Preflight = nil // tests must not depend on the host's sandbox tools
 	r.Command = writeFake(t, dir, script)
-	return r, store, evPath
+	sess, err := store.CreateSession("test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	return r, store, sess, evPath
 }
 
 // writeFake writes a shell script standing in for "claude" and returns its path.
@@ -39,29 +48,29 @@ func writeFake(t *testing.T, dir, script string) string {
 }
 
 func TestRunnerSubagentExitsCleanly(t *testing.T) {
-	r, store, evPath := newTestRunner(t, `echo '{"type":"result"}'`)
-	orch, _ := store.CreateAgent("orchestrator", 0, 0)
-	a, err := r.SpawnSubagent(orch.ID, "first line\nsecond line")
+	r, store, sess, evPath := newTestRunner(t, `echo '{"type":"result"}'`)
+	orch, _ := store.CreateAgent(sess.ID, "orchestrator", 0, 0)
+	a, err := r.SpawnSubagent(sess.ID, orch.ID, "", "first line\nsecond line")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if a.PID <= 0 || a.PID == os.Getpid() || a.LogPath == "" || a.Role != "subagent" || a.ParentID != orch.ID {
 		t.Fatalf("unexpected agent: %+v", a)
 	}
-	r.Wait()
+	r.Wait(sess.ID)
 
-	got, _ := store.GetAgent(a.ID)
+	got, _ := store.GetAgent(sess.ID, a.ID)
 	if got.Status != "exited" || got.ExitCode == nil || *got.ExitCode != 0 {
 		t.Fatalf("agent after exit: %+v", got)
 	}
-	task, _ := store.GetTask(a.TaskID)
+	task, _ := store.GetTask(sess.ID, a.TaskID)
 	if task.Title != "first line" || task.Description != "first line\nsecond line" || task.Status != "done" || task.AgentID != a.ID {
 		t.Fatalf("task: %+v", task)
 	}
 	if b, _ := os.ReadFile(a.LogPath); strings.TrimSpace(string(b)) != `{"type":"result"}` {
 		t.Fatalf("log file = %q", b)
 	}
-	tok, _ := store.GetAgent(a.ID)
+	tok, _ := store.GetAgent(sess.ID, a.ID)
 	cfgPath := strings.TrimSuffix(a.LogPath, ".jsonl") + ".mcp.json"
 	if cfg, _ := os.ReadFile(cfgPath); !strings.Contains(string(cfg), "http://127.0.0.1:1/mcp/"+tok.Token) {
 		t.Fatalf("mcp config = %q", cfg)
@@ -75,32 +84,33 @@ func TestRunnerSubagentExitsCleanly(t *testing.T) {
 }
 
 func TestRunnerDoneNoteSuppressesFlag(t *testing.T) {
-	r, store, evPath := newTestRunner(t, `sleep 1`)
-	orch, _ := store.CreateAgent("orchestrator", 0, 0)
-	a, err := r.SpawnSubagent(orch.ID, "do it")
+	r, store, sess, evPath := newTestRunner(t, `sleep 1`)
+	orch, _ := store.CreateAgent(sess.ID, "orchestrator", 0, 0)
+	a, err := r.SpawnSubagent(sess.ID, orch.ID, "", "do it")
 	if err != nil {
 		t.Fatal(err)
 	}
-	store.PostNote(store.BoardID, a.ID, "done", "finished")
-	r.Wait()
+	board, _ := store.SessionBoard(sess.ID)
+	store.PostNote(sess.ID, board, a.ID, "done", "finished")
+	r.Wait(sess.ID)
 	if ev, _ := os.ReadFile(evPath); !strings.Contains(string(ev), `"status":"exited"`) || strings.Contains(string(ev), "missing_done_note") {
 		t.Fatalf("events:\n%s", ev)
 	}
 }
 
 func TestRunnerSubagentCrashes(t *testing.T) {
-	r, store, evPath := newTestRunner(t, `echo boom >&2; exit 1`)
-	orch, _ := store.CreateAgent("orchestrator", 0, 0)
-	a, err := r.SpawnSubagent(orch.ID, "do it")
+	r, store, sess, evPath := newTestRunner(t, `echo boom >&2; exit 1`)
+	orch, _ := store.CreateAgent(sess.ID, "orchestrator", 0, 0)
+	a, err := r.SpawnSubagent(sess.ID, orch.ID, "", "do it")
 	if err != nil {
 		t.Fatal(err)
 	}
-	r.Wait()
-	got, _ := store.GetAgent(a.ID)
+	r.Wait(sess.ID)
+	got, _ := store.GetAgent(sess.ID, a.ID)
 	if got.Status != "crashed" || got.ExitCode == nil || *got.ExitCode != 1 {
 		t.Fatalf("agent: %+v", got)
 	}
-	if task, _ := store.GetTask(a.TaskID); task.Status != "blocked" {
+	if task, _ := store.GetTask(sess.ID, a.TaskID); task.Status != "blocked" {
 		t.Fatalf("task status = %q", task.Status)
 	}
 	if b, _ := os.ReadFile(a.LogPath); strings.TrimSpace(string(b)) != "boom" {
@@ -112,48 +122,390 @@ func TestRunnerSubagentCrashes(t *testing.T) {
 }
 
 func TestRunnerStopAllRecordsEverything(t *testing.T) {
-	r, store, evPath := newTestRunner(t, `sleep 300`)
-	orch, err := r.StartOrchestrator("build a thing")
+	r, store, sess, evPath := newTestRunner(t, `sleep 300`)
+	orch, err := r.StartOrchestrator(sess.ID, "build a thing")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if orch.Role != "orchestrator" || orch.PID <= 0 || orch.TaskID != 0 {
 		t.Fatalf("agent: %+v", orch)
 	}
-	sub, err := r.SpawnSubagent(orch.ID, "do it")
+	sub, err := r.SpawnSubagent(sess.ID, orch.ID, "", "do it")
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	r.StopAll() // no Wait: StopAll itself must leave state and log final
 	for _, id := range []int64{orch.ID, sub.ID} {
-		if got, _ := store.GetAgent(id); got.Status != "crashed" { // SIGTERM: exit code -1
+		if got, _ := store.GetAgent(sess.ID, id); got.Status != "stopped" { // killed on purpose, not a crash
 			t.Fatalf("agent %d status after StopAll = %q", id, got.Status)
 		}
 	}
-	if task, _ := store.GetTask(sub.TaskID); task.Status != "blocked" {
+	if task, _ := store.GetTask(sess.ID, sub.TaskID); task.Status != "working" { // a deliberate stop does not block the task
 		t.Fatalf("task status = %q", task.Status)
 	}
 	if ev, _ := os.ReadFile(evPath); strings.Count(string(ev), `"event":"agent_status_changed"`) != 2 {
 		t.Fatalf("want 2 agent_status_changed events:\n%s", ev)
 	}
-	if _, err := r.SpawnSubagent(orch.ID, "too late"); err == nil {
+	if _, err := r.SpawnSubagent(sess.ID, orch.ID, "", "too late"); err == nil {
 		t.Fatal("SpawnSubagent after StopAll succeeded")
 	}
 }
 
 func TestRunnerArgs(t *testing.T) {
-	r := NewRunner(Config{}, nil, nil)
-	args := r.args("/x/agent-3.mcp.json", "do -it", "SYS")
+	r := NewRunner(Config{AgentDir: "/d/agents", DBPath: "/d/f.db", LogPath: "/d/events.jsonl"}, nil, nil)
+	args := r.args(Agent{Role: "subagent"}, "/w/dir", "/x/agent-3.mcp.json", "do -it", "SYS")
 	for _, want := range [][]string{
 		{"--mcp-config", "/x/agent-3.mcp.json"}, {"--append-system-prompt", "SYS"},
 		{"--output-format", "stream-json"}, {"--disallowedTools", "Task,Agent,Workflow"}, {"--", "do -it"},
+		{"--setting-sources", "project"},
 	} {
 		if i := slices.Index(args, want[0]); i < 0 || args[i+1] != want[1] {
 			t.Errorf("args missing %v: %v", want, args)
 		}
 	}
-	if !slices.Contains(args, "--strict-mcp-config") || !slices.Contains(args, "--verbose") || slices.Contains(args, "--dangerously-skip-permissions") {
+	var settings struct {
+		Sandbox struct {
+			Enabled, FailIfUnavailable, AllowUnsandboxedCommands bool
+			Filesystem                                           struct{ AllowWrite, DenyRead, DenyWrite []string }
+			Credentials                                          struct{ Files []struct{ Path, Mode string } }
+			Network                                              struct{ AllowedDomains []string }
+		}
+		Permissions struct{ Allow, Deny []string }
+	}
+	if i := slices.Index(args, "--settings"); i < 0 {
+		t.Fatalf("args missing --settings: %v", args)
+	} else if err := json.Unmarshal([]byte(args[i+1]), &settings); err != nil {
+		t.Fatalf("--settings is not JSON: %v", err)
+	}
+	sb := settings.Sandbox
+	if !sb.Enabled || !sb.FailIfUnavailable || sb.AllowUnsandboxedCommands || !slices.Contains(sb.Network.AllowedDomains, "github.com") {
+		t.Errorf("sandbox settings: %+v", sb)
+	}
+	if !slices.Contains(sb.Filesystem.AllowWrite, "~/go/pkg/mod") || !slices.Contains(sb.Credentials.Files, struct{ Path, Mode string }{"~/.ssh", "deny"}) {
+		t.Errorf("sandbox misses package caches or credential denies: %+v", sb)
+	}
+	for _, p := range []string{"/d/agents", "/d/f.db", "/d/f.db-wal", "/d/events.jsonl"} {
+		if !slices.Contains(sb.Filesystem.DenyRead, p) || !slices.Contains(sb.Filesystem.DenyWrite, p) {
+			t.Errorf("sandbox does not hide %s: %+v", p, sb.Filesystem)
+		}
+	}
+	for _, rule := range []string{"Read(//d/agents)", "Edit(//d/agents)", "Read(//d/f.db)", "Edit(//d/events.jsonl)"} {
+		if !slices.Contains(settings.Permissions.Deny, rule) {
+			t.Errorf("missing deny rule %s: %v", rule, settings.Permissions.Deny)
+		}
+	}
+	// Edit/Write are allowed only inside the working directory; secrets are denied to the file tools and to Bash writes.
+	if i := slices.Index(args, "--allowedTools"); i < 0 || strings.Contains(args[i+1], "Edit") || strings.Contains(args[i+1], "Write") {
+		t.Errorf("--allowedTools must not allow Edit/Write everywhere: %v", args)
+	}
+	if !slices.Equal(settings.Permissions.Allow, []string{"Edit(//w/dir/**)"}) {
+		t.Errorf("allow rules = %v", settings.Permissions.Allow)
+	}
+	for _, rule := range []string{"Read(~/.ssh)", "Edit(~/.ssh)", "Edit(~/.claude/.credentials.json)"} {
+		if !slices.Contains(settings.Permissions.Deny, rule) {
+			t.Errorf("missing deny rule %s: %v", rule, settings.Permissions.Deny)
+		}
+	}
+	if !slices.Contains(sb.Filesystem.DenyWrite, "~/.ssh") || !slices.Contains(sb.Filesystem.DenyWrite, "~/.aws") {
+		t.Errorf("sandbox does not deny writes to credentials: %v", sb.Filesystem.DenyWrite)
+	}
+	if slices.Contains(args, "--bare") {
+		t.Errorf("--bare would break subscription login: %v", args)
+	}
+	if slices.Contains(args, "--input-format") {
+		t.Errorf("one-shot args take input from stdin: %v", args)
+	}
+	r.Interactive = true
+	iargs := r.args(Agent{Role: "orchestrator"}, "/w/dir", "/x/agent-3.mcp.json", "", "SYS")
+	if i := slices.Index(iargs, "--input-format"); i < 0 || iargs[i+1] != "stream-json" || slices.Contains(iargs, "--") || !slices.Contains(iargs, "--setting-sources") {
+		t.Errorf("interactive orchestrator args: %v", iargs)
+	}
+	if sub := r.args(Agent{Role: "subagent"}, "/w/dir", "/x", "p", "SYS"); slices.Contains(sub, "--input-format") {
+		t.Errorf("sub-agents stay one-shot: %v", sub)
+	}
+	if !slices.Contains(args, "--strict-mcp-config") || !slices.Contains(args, "--disable-slash-commands") || !slices.Contains(args, "--verbose") || slices.Contains(args, "--dangerously-skip-permissions") {
 		t.Errorf("args: %v", args)
 	}
+}
+
+// A missing sandbox prerequisite fails the launch with a readable error and starts nothing.
+func TestRunnerLaunchNeedsSandbox(t *testing.T) {
+	r, store, sess, _ := newTestRunner(t, `echo hi`)
+	r.Preflight = func() error { return errors.New(`agent sandbox needs "bwrap"`) }
+	orch, _ := store.CreateAgent(sess.ID, "orchestrator", 0, 0)
+	if _, err := r.SpawnSubagent(sess.ID, orch.ID, "", "t"); err == nil || !strings.Contains(err.Error(), "bwrap") {
+		t.Fatalf("err = %v, want the sandbox error", err)
+	}
+}
+
+// StopSession stops one session's agents, records them, and leaves the others running.
+func TestRunnerStopSessionLeavesOthers(t *testing.T) {
+	r, store, a, _ := newTestRunner(t, `sleep 300`)
+	b, _ := store.CreateSession("other")
+	oa, err := r.StartOrchestrator(a.ID, "task a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	ob, err := r.StartOrchestrator(b.ID, "task b")
+	if err != nil {
+		t.Fatal(err)
+	}
+	sa, err := r.SpawnSubagent(a.ID, oa.ID, "", "sub a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := r.SpawnSubagent(b.ID, oa.ID, "", "wrong session"); err == nil {
+		t.Fatal("spawn with another session's orchestrator succeeded")
+	}
+
+	r.StopSession(a.ID)
+	for _, id := range []int64{oa.ID, sa.ID} {
+		if got, _ := store.GetAgent(a.ID, id); got.Status != "stopped" {
+			t.Fatalf("session A agent %d status = %q", id, got.Status)
+		}
+	}
+	if got, _ := store.GetAgent(b.ID, ob.ID); got.Status != "running" {
+		t.Fatalf("session B orchestrator status = %q, want running", got.Status)
+	}
+	if _, err := r.SpawnSubagent(a.ID, oa.ID, "", "late"); err == nil {
+		t.Fatal("spawn in a stopped session succeeded")
+	}
+	if _, err := r.SpawnSubagent(b.ID, ob.ID, "", "still fine"); err != nil {
+		t.Fatalf("spawn in the other session: %v", err)
+	}
+	r.StopAll()
+	if got, _ := store.GetAgent(b.ID, ob.ID); got.Status != "stopped" {
+		t.Fatalf("session B orchestrator after StopAll = %q", got.Status)
+	}
+	if _, err := r.StartOrchestrator(b.ID, "x"); err == nil {
+		t.Fatal("start after StopAll succeeded")
+	}
+}
+
+func TestEventLogOnEvent(t *testing.T) {
+	r, store, sess, evPath := newTestRunner(t, `exit 0`)
+	var got []Event
+	r.log.OnEvent = func(e Event) { got = append(got, e) }
+	orch, _ := store.CreateAgent(sess.ID, "orchestrator", 0, 0)
+	if _, err := r.SpawnSubagent(sess.ID, orch.ID, "", "do it"); err != nil {
+		t.Fatal(err)
+	}
+	r.Wait(sess.ID)
+	if len(got) != 2 || got[0].Event != EventAgentSpawned || got[1].Event != EventAgentStatusChanged {
+		t.Fatalf("events = %+v", got)
+	}
+	for _, e := range got {
+		if e.SessionID != sess.ID || e.AgentID == 0 {
+			t.Fatalf("event without session/agent: %+v", e)
+		}
+	}
+	if ev, _ := os.ReadFile(evPath); !strings.Contains(string(ev), `"session_id":`+itoa(sess.ID)) {
+		t.Fatalf("log lines lack session_id:\n%s", ev)
+	}
+}
+
+func TestRunnerIsolationEnvAndWorkDir(t *testing.T) {
+	r, store, sess, _ := newTestRunner(t, `echo "$CLAUDE_CODE_DISABLE_AUTO_MEMORY" "$PWD"; for a in "$@"; do echo "$a"; done`)
+	orch, _ := store.CreateAgent(sess.ID, "orchestrator", 0, 0)
+	a, err := r.SpawnSubagent(sess.ID, orch.ID, "", "do it")
+	if err != nil {
+		t.Fatal(err)
+	}
+	r.Wait(sess.ID)
+	out, _ := os.ReadFile(a.LogPath)
+	if !strings.HasPrefix(string(out), "1 ") {
+		t.Fatalf("auto-memory env not set: %q", out)
+	}
+	wd := r.cfg.WorkDir
+	if !strings.Contains(string(out), "Your working directory is `"+wd+"`") || strings.Contains(string(out), "{{") {
+		t.Fatalf("prompt lacks work dir %q or has unreplaced placeholders:\n%s", wd, out)
+	}
+}
+
+func TestPromptsWorkDirAndNoSleep(t *testing.T) {
+	for name, p := range map[string]string{"orchestrator": OrchestratorPrompt("/w/dir", false), "subagent": SubagentPrompt(7, "task {{WORKDIR}}", "/w/dir")} {
+		if !strings.Contains(p, "`/w/dir`") || !strings.Contains(p, "wait_for_notes") || strings.Contains(p, "sleep") {
+			t.Errorf("%s prompt: workdir/wait_for_notes/sleep check failed", name)
+		}
+	}
+}
+
+// An interactive orchestrator takes stream-json user messages on stdin, and
+// OnLine sees every output line while the log file still gets all of it.
+func TestRunnerInteractiveStdinAndOnLine(t *testing.T) {
+	r, store, sess, _ := newTestRunner(t, `while IFS= read -r line; do echo "got: $line"; done`)
+	r.Interactive = true
+	var mu sync.Mutex
+	var lines []string
+	r.OnLine = func(a Agent, l []byte) {
+		mu.Lock()
+		defer mu.Unlock()
+		lines = append(lines, string(l))
+	}
+	a, err := r.StartOrchestrator(sess.ID, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !r.Running(a.ID) {
+		t.Fatal("orchestrator not running")
+	}
+	if err := r.SendUser(a.ID, `say "hi"`); err != nil {
+		t.Fatal(err)
+	}
+	for deadline := time.Now().Add(5 * time.Second); ; time.Sleep(5 * time.Millisecond) {
+		mu.Lock()
+		n := len(lines)
+		mu.Unlock()
+		if n == 1 {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("no output line")
+		}
+	}
+	want := `got: {"message":{"content":[{"text":"say \"hi\"","type":"text"}],"role":"user"},"type":"user"}`
+	if lines[0] != want {
+		t.Fatalf("line = %s\nwant   %s", lines[0], want)
+	}
+	r.StopAll()
+	if r.Running(a.ID) || r.SendUser(a.ID, "x") != ErrNotRunning {
+		t.Error("stopped orchestrator still takes messages")
+	}
+	got, _ := store.GetAgent(sess.ID, a.ID)
+	if got.Status != "stopped" {
+		t.Errorf("status = %s", got.Status)
+	}
+	if b, _ := os.ReadFile(a.LogPath); !strings.Contains(string(b), "got: ") {
+		t.Errorf("log file = %q", b)
+	}
+}
+
+func TestLineWriter(t *testing.T) {
+	var lines []string
+	var out strings.Builder
+	w := &lineWriter{w: &out, onLine: func(l []byte) { lines = append(lines, string(l)) }}
+	for _, chunk := range []string{"ab", "c\nde", "f\n\ngh\nij"} {
+		w.Write([]byte(chunk))
+	}
+	if strings.Join(lines, "|") != "abc|def|gh" || out.String() != "abc\ndef\n\ngh\nij" {
+		t.Fatalf("lines = %q, out = %q", lines, out.String())
+	}
+}
+
+func TestOrchestratorPromptModes(t *testing.T) {
+	one, chat := OrchestratorPrompt("/w", false), OrchestratorPrompt("/w", true)
+	for _, p := range []string{one, chat} {
+		if strings.Contains(p, "{{") {
+			t.Errorf("unreplaced placeholder in prompt")
+		}
+	}
+	if !strings.Contains(one, "one-shot") || !strings.Contains(one, "log-only") || strings.Contains(one, "Answer to your escalation") {
+		t.Error("one-shot prompt wrong")
+	}
+	if strings.Contains(chat, "one-shot") || strings.Contains(chat, "log-only") || !strings.Contains(chat, "Answer to your escalation #N") {
+		t.Error("interactive prompt wrong")
+	}
+}
+
+// Billing-related variables never reach an agent; subscription auth does.
+func TestAgentEnv(t *testing.T) {
+	in := []string{"PATH=/bin", "ANTHROPIC_API_KEY=k", "ANTHROPIC_AUTH_TOKEN=t", "ANTHROPIC_BASE_URL=u",
+		"CLAUDE_CODE_USE_BEDROCK=1", "CLAUDE_CODE_USE_VERTEX=1", "CLAUDE_CODE_OAUTH_TOKEN=o", "ANTHROPIC_MODEL=haiku"}
+	got := agentEnv(in)
+	want := []string{"PATH=/bin", "CLAUDE_CODE_OAUTH_TOKEN=o", "ANTHROPIC_MODEL=haiku", isolationEnv}
+	if !slices.Equal(got, want) {
+		t.Fatalf("agentEnv = %v, want %v", got, want)
+	}
+	// End to end: the child process sees none of them.
+	t.Setenv("ANTHROPIC_API_KEY", "sk-leak")
+	r, store, sess, _ := newTestRunner(t, `echo "key=[$ANTHROPIC_API_KEY]"`)
+	orch, _ := store.CreateAgent(sess.ID, "orchestrator", 0, 0)
+	a, err := r.SpawnSubagent(sess.ID, orch.ID, "", "t")
+	if err != nil {
+		t.Fatal(err)
+	}
+	r.Wait(sess.ID)
+	if out, _ := os.ReadFile(a.LogPath); strings.TrimSpace(string(out)) != "key=[]" {
+		t.Fatalf("child env leaked the API key: %q", out)
+	}
+}
+
+// Symlinked paths (/tmp on macOS) are resolved in the settings; missing files resolve through their directory.
+func TestSandboxSettingsResolveSymlinks(t *testing.T) {
+	base, _ := filepath.EvalSymlinks(t.TempDir())
+	if err := os.Mkdir(filepath.Join(base, "real"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(base, "link")
+	if err := os.Symlink(filepath.Join(base, "real"), link); err != nil {
+		t.Fatal(err)
+	}
+	st := sandboxSettings(Config{AgentDir: link + "/agents", DBPath: link + "/f.db"}, link)
+	for _, want := range []string{`"Edit(/` + base + `/real/**)"`, `"Read(/` + base + `/real/f.db-wal)"`, `"` + base + `/real/agents"`} {
+		if !strings.Contains(st, want) {
+			t.Errorf("settings lack %s:\n%s", want, st)
+		}
+	}
+	if strings.Contains(st, "/link") {
+		t.Errorf("settings still use the symlink:\n%s", st)
+	}
+}
+
+// At most maxRunningSubagents run per session, and a task has a size limit.
+func TestRunnerSpawnCaps(t *testing.T) {
+	r, store, sess, _ := newTestRunner(t, `sleep 300`)
+	orch, _ := store.CreateAgent(sess.ID, "orchestrator", 0, 0)
+	defer r.StopAll()
+	if _, err := r.SpawnSubagent(sess.ID, orch.ID, "", strings.Repeat("x", maxTaskBytes+1)); err == nil || !strings.Contains(err.Error(), "limit") {
+		t.Fatalf("oversized task: err = %v", err)
+	}
+	for i := 0; i < maxRunningSubagents; i++ {
+		if _, err := r.SpawnSubagent(sess.ID, orch.ID, "", "t"); err != nil {
+			t.Fatalf("spawn %d: %v", i, err)
+		}
+	}
+	if _, err := r.SpawnSubagent(sess.ID, orch.ID, "", "one too many"); err == nil || !strings.Contains(err.Error(), "already running") {
+		t.Fatalf("spawn over the cap: err = %v", err)
+	}
+	if ts, _ := store.ListTasks(sess.ID); len(ts) != maxRunningSubagents {
+		t.Fatalf("a refused spawn left a task behind: %d tasks", len(ts))
+	}
+}
+
+// A refused launch writes no files; Forget lets a session that reuses the id launch again.
+func TestRunnerRefusedLaunchAndForget(t *testing.T) {
+	r, store, sess, _ := newTestRunner(t, `exit 0`)
+	r.StopSession(sess.ID)
+	if _, err := r.StartOrchestrator(sess.ID, "x"); err == nil {
+		t.Fatal("launch in a stopped session succeeded")
+	}
+	if m, _ := filepath.Glob(filepath.Join(r.cfg.AgentDir, "agent-*")); len(m) != 0 {
+		t.Fatalf("refused launch left files: %v", m)
+	}
+	r.Forget(sess.ID)
+	a, err := r.StartOrchestrator(sess.ID, "x")
+	if err != nil {
+		t.Fatalf("launch after Forget: %v", err)
+	}
+	r.Wait(sess.ID)
+	if got, _ := store.GetAgent(sess.ID, a.ID); got.Status != "exited" {
+		t.Fatalf("status = %s", got.Status)
+	}
+}
+
+// An explicit title wins over the task's first line.
+func TestRunnerSpawnTitle(t *testing.T) {
+	r, store, sess, _ := newTestRunner(t, `exit 0`)
+	orch, _ := store.CreateAgent(sess.ID, "orchestrator", 0, 0)
+	for title, want := range map[string]string{"Auth API": "Auth API", "": "Working directory: /tmp/x"} {
+		a, err := r.SpawnSubagent(sess.ID, orch.ID, title, "Working directory: /tmp/x\nbuild it")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if task, _ := store.GetTask(sess.ID, a.TaskID); task.Title != want || !strings.Contains(task.Description, "build it") {
+			t.Errorf("title %q: task = %+v, want title %q", title, task, want)
+		}
+	}
+	r.Wait(sess.ID)
 }

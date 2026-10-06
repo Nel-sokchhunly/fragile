@@ -28,6 +28,12 @@ type Server struct {
 	Store  *Store
 	Log    *EventLog
 	Runner *Runner // launches sub-agents for spawn_subagent
+
+	// OnEscalation, if set (the desktop app), makes escalate_to_user answer
+	// asynchronously: the tool returns at once and the answer is delivered to the
+	// orchestrator later. It runs after the escalation is stored and logged. Nil
+	// keeps the CLI behaviour (banner on stdout, no answer comes back).
+	OnEscalation func(a Agent, e Escalation)
 }
 
 // Handler returns the HTTP handler serving the MCP endpoint.
@@ -39,6 +45,11 @@ func (s *Server) Handler() http.Handler {
 }
 
 type mcpServerKey struct{}
+
+// requestCtxKey carries the HTTP request's context to tool handlers: the SDK
+// detaches the handler's own context from the request, so a client that
+// disconnects (or aborts a blocking wait_for_notes) would otherwise go unnoticed.
+type requestCtxKey struct{}
 
 // mcpHandler serves one MCP endpoint per agent at /mcp/{token}. The token is a
 // random secret handed only to that agent, so a URL cannot be guessed from an
@@ -58,8 +69,12 @@ func (s *Server) mcpHandler() http.Handler {
 		} else if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
+		} else if agent.Status != "running" { // a finished agent's URL must not keep working
+			http.Error(w, "agent is not running", http.StatusForbidden)
+			return
 		}
 		srv := s.newMCPServer(agent, cache)
-		h.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), mcpServerKey{}, srv)))
+		ctx := context.WithValue(r.Context(), mcpServerKey{}, srv)
+		h.ServeHTTP(w, r.WithContext(context.WithValue(ctx, requestCtxKey{}, r.Context())))
 	})
 }

@@ -12,7 +12,7 @@
 
 This is a **source document for spec generation** (e.g. with PRD and issue-breakdown skills). It is not a PRD itself, and it is not to be implemented directly. It describes a multi-phase project; **specs and issues are generated for one phase at a time.**
 
-> **CURRENT PHASE: Phase 0 — Notes server experiment**
+> **CURRENT PHASE: Phase 1 — MVP desktop app**
 
 **Rules for the agent generating specs:**
 
@@ -322,4 +322,4 @@ Found while building a phase and accepted for now. **Not scope** for the current
 
 | Limitation | Found in | Impact | Fix direction | Tracking |
 |---|---|---|---|---|
-| Agents are not isolated from each other. All run as the same OS user with `Bash`, so a sub-agent can read another agent's token file (`.fragile/agents/agent-<id>.mcp.json`) and impersonate it, including calling orchestrator-only tools. Agents can also touch files outside their working directory. | Phase 0 review | Role gating and the one-level-deep rule (section 5.4) hold only for cooperative agents. | Run agents in a sandbox so each sees only its own config and working directory. | #37 |
+| Agents are only partly isolated from each other. Every agent runs in Claude Code's Bash sandbox (#40): writes only under its working directory and package caches, common credential files and token env vars hidden, network only to package registries and GitHub, and the agent dir (token files), DB and event log are denied to Bash and to Read/Edit/Write, so a sub-agent cannot read another agent's token. The file tools are scoped too: `Edit` and `Write` are allowed only inside the working directory (anything else is denied in `-p` mode, never prompted), and credential files cannot be read or edited through them. Linux needs `bubblewrap` and `socat`; on Ubuntu 24.04+ AppArmor's restriction on unprivileged user namespaces can block bubblewrap, and because the sandbox is configured with `failIfUnavailable` agents then fail to start (fix: an AppArmor profile for `bwrap`, or `sysctl kernel.apparmor_restrict_unprivileged_userns=0`). Still open: all agents run as the same OS user; the sandbox does not restrict Bash *reads* of files outside the working directory (other projects); `WebFetch`/`WebSearch` and processes Claude Code launches itself (MCP servers, hooks) are not sandboxed; allowed hosts such as github.com can carry data out. | Phase 0 review | Role gating and the one-level-deep rule (section 5.4) now hold against a sub-agent reading token files, not against a determined agent using the remaining gaps. | Separate OS user or container per agent; `denyRead` for the home directory; deliver the token without a readable file. | #37, #40 |

@@ -1,0 +1,36 @@
+<!-- Agreed Phase 1 session layout (issue #13, mockup v2). Visual reference only: density, hierarchy, spacing.
+     Additions agreed after this mockup: sessions sidebar is resizable AND collapsible (collapsed = narrow rail with status dots). -->
+<!doctype html><meta charset="utf-8"><title>Fragile layout v2</title>
+<style>:root{--surface-1:#f6f5f2;--surface-2:#fff;--border:rgba(0,0,0,.1);--border-strong:rgba(0,0,0,.18);--text-primary:#1a1a1a;--text-secondary:#5f5e5a;--text-muted:#888780;--text-success:#3b6d11;--text-warning:#854f0b;--text-accent:#185fa5;--bg-warning:#faeeda;--border-warning:#ef9f27;--radius:8px;--font-voice:Georgia,serif}
+@media (prefers-color-scheme:dark){:root{--surface-1:#1f1f1e;--surface-2:#262624;--border:rgba(255,255,255,.1);--border-strong:rgba(255,255,255,.18);--text-primary:#eee;--text-secondary:#b4b2a9;--text-muted:#888780;--text-success:#97c459;--text-warning:#fac775;--text-accent:#85b7eb;--bg-warning:#412402;--border-warning:#854f0b}}
+body{font-family:system-ui,sans-serif;margin:16px;background:var(--surface-1);color:var(--text-primary)}</style>
+<div style="border:0.5px solid var(--border);border-radius:12px;overflow:hidden;display:grid;grid-template-columns:120px minmax(0,1fr) 300px;height:460px;font-size:12px;background:var(--surface-2)">
+<div style="border-right:0.5px solid var(--border);background:var(--surface-1);padding:10px;display:flex;flex-direction:column;gap:6px">
+<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px"><span style="font-weight:500;font-size:13px">Sessions</span><span style="color:var(--text-secondary)">+</span></div>
+<div style="padding:6px 8px;border-radius:var(--radius);background:var(--surface-2);border:0.5px solid var(--border-strong)"><div style="font-weight:500">Todo CLI</div><div style="color:var(--text-success)">working</div></div>
+<div style="padding:6px 8px"><div>Auth refactor</div><div style="color:var(--text-warning)">needs you</div></div>
+<div style="padding:6px 8px"><div>Docs pass</div><div style="color:var(--text-muted)">done</div></div>
+</div>
+<div style="display:flex;flex-direction:column;min-width:0">
+<div style="padding:8px 12px;border-bottom:0.5px solid var(--border);font-weight:500;font-size:13px">Orchestrator</div>
+<div style="flex:1;padding:12px;display:flex;flex-direction:column;gap:8px;overflow:hidden">
+<div style="align-self:flex-end;background:var(--surface-1);padding:6px 10px;border-radius:var(--radius);max-width:85%">Build a Go todo CLI</div>
+<div style="font-family:var(--font-voice);max-width:95%">Three sub-agents, one per package. Shared types posted as decision #1.</div>
+<div style="color:var(--text-secondary)">⚙ spawn_subagent x3</div>
+<div style="border:0.5px solid var(--border-warning);background:var(--bg-warning);color:var(--text-warning);padding:8px 10px;border-radius:var(--radius)"><div style="font-weight:500">Escalation</div><div>JSON or SQLite for storage?</div></div>
+</div>
+<div style="padding:8px 12px;border-top:0.5px solid var(--border)"><div style="border:0.5px solid var(--border-strong);border-radius:var(--radius);padding:7px 10px;color:var(--text-muted)">Message the orchestrator</div></div>
+</div>
+<div style="border-left:0.5px solid var(--border);display:grid;grid-template-rows:62% 38%">
+<div style="padding:10px;border-bottom:0.5px solid var(--border);display:flex;flex-direction:column;gap:7px;overflow:hidden">
+<div style="display:flex;justify-content:space-between"><span style="font-weight:500;font-size:13px">Agents</span><span style="color:var(--text-muted)">3 running · 1 done</span></div>
+<div style="border:0.5px solid var(--border);border-radius:var(--radius);padding:7px 9px"><div style="display:flex;justify-content:space-between"><span style="font-weight:500">#2 storage package</span><span style="color:var(--text-success)">running · 1m12s</span></div><div style="color:var(--text-secondary)">Store interface + JSON file backend</div><div style="color:var(--text-muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">✎ heads_up: Store interface ready</div></div>
+<div style="border:0.5px solid var(--border);border-radius:var(--radius);padding:7px 9px"><div style="display:flex;justify-content:space-between"><span style="font-weight:500">#3 cli package</span><span style="color:var(--text-success)">running · 58s</span></div><div style="color:var(--text-secondary)">add, list, done, rm commands</div><div style="color:var(--text-muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">› Edit cli/add.go</div></div>
+<div style="border:0.5px solid var(--border);border-radius:var(--radius);padding:7px 9px"><div style="display:flex;justify-content:space-between"><span style="font-weight:500">#4 format package</span><span style="color:var(--text-muted)">exited · 1m40s</span></div><div style="color:var(--text-secondary)">Aligned table output</div><div style="color:var(--text-muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">✓ done: table printer + tests</div></div>
+</div>
+<div style="padding:10px;display:flex;flex-direction:column;gap:6px;overflow:hidden">
+<div style="display:flex;justify-content:space-between;align-items:center"><span style="font-weight:500;font-size:13px">Notes</span><span style="color:var(--text-secondary)">+</span></div>
+<div><span style="color:var(--text-accent)">decision</span> <span style="color:var(--text-muted)">orchestrator</span> <span style="color:var(--text-secondary)">Todo{ID,Text,Done}</span></div>
+<div><span style="color:var(--text-warning)">question</span> <span style="color:var(--text-muted)">#3</span> <span style="color:var(--text-secondary)">IDs start at 1?</span></div>
+<div><span style="color:var(--text-success)">done</span> <span style="color:var(--text-muted)">#4</span> <span style="color:var(--text-secondary)">format finished</span></div>
+</div></div></div>
