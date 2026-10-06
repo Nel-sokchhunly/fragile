@@ -6,6 +6,8 @@ import (
 	"errors"
 	"fmt"
 	"slices"
+	"strings"
+	"unicode"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
@@ -129,7 +131,7 @@ func (s *Server) postNote(a Agent, in postNoteIn) (any, error) {
 	if err := checkEnum("type", in.Type, noteTypes); err != nil {
 		return nil, err
 	}
-	if in.Content == "" {
+	if strings.TrimSpace(in.Content) == "" {
 		return nil, errors.New("content must not be empty")
 	}
 	n, err := s.Store.PostNote(s.Store.BoardID, a.ID, in.Type, in.Content)
@@ -155,7 +157,7 @@ func (s *Server) updateNote(a Agent, in updateNoteIn) (any, error) {
 			return nil, err
 		}
 	}
-	if in.Content != nil && *in.Content == "" {
+	if in.Content != nil && strings.TrimSpace(*in.Content) == "" {
 		return nil, errors.New("content must not be empty")
 	}
 	old, err := s.Store.GetNote(in.ID)
@@ -183,10 +185,10 @@ type spawnIn struct {
 }
 
 func (s *Server) spawnSubagent(a Agent, in spawnIn) (any, error) {
-	if in.Task == "" {
+	if strings.TrimSpace(in.Task) == "" {
 		return nil, errors.New("task must not be empty")
 	}
-	for _, sc := range in.Scopes {
+	for _, sc := range in.Scopes { // validated, but only "session" exists in Phase 0, so nothing else to apply
 		if err := checkScope(sc); err != nil {
 			return nil, err
 		}
@@ -266,7 +268,7 @@ type escalateIn struct {
 }
 
 func (s *Server) escalate(a Agent, in escalateIn) (any, error) {
-	if in.Question == "" {
+	if strings.TrimSpace(in.Question) == "" {
 		return nil, errors.New("question must not be empty")
 	}
 	e, err := s.Store.CreateEscalation(a.ID, in.Question, in.Context)
@@ -274,6 +276,17 @@ func (s *Server) escalate(a Agent, in escalateIn) (any, error) {
 		return nil, err
 	}
 	s.Log.Write(EventEscalation, a.ID, e)
-	fmt.Printf("\n=== ESCALATION from agent %d (#%d) ===\nQuestion: %s\nContext: %s\n=== END ESCALATION ===\n\n", a.ID, e.ID, e.Question, e.Context)
+	fmt.Printf("\n=== ESCALATION from agent %d (#%d) ===\nQuestion: %s\nContext: %s\n=== END ESCALATION ===\n\n", a.ID, e.ID, printable(e.Question), printable(e.Context))
 	return "Logged for the user; no answer is available in this phase. Proceed with your best judgement and record the assumption as a `decision` note.", nil
+}
+
+// printable drops control characters except newline and tab, so agent-supplied text
+// cannot inject terminal escape sequences.
+func printable(s string) string {
+	return strings.Map(func(r rune) rune {
+		if unicode.IsControl(r) && r != '\n' && r != '\t' {
+			return -1
+		}
+		return r
+	}, s)
 }

@@ -10,7 +10,6 @@ import (
 	"errors"
 	"io"
 	"net/http"
-	"strconv"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
@@ -26,7 +25,6 @@ type Config struct {
 
 // Server is the notes server. Store and Log are shared by all tool handlers.
 type Server struct {
-	Config Config
 	Store  *Store
 	Log    *EventLog
 	Runner *Runner // launches sub-agents for spawn_subagent
@@ -36,15 +34,16 @@ type Server struct {
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) { io.WriteString(w, "ok\n") })
-	mux.Handle("/mcp/{agent_id}", s.mcpHandler())
+	mux.Handle("/mcp/{token}", s.mcpHandler())
 	return mux
 }
 
 type mcpServerKey struct{}
 
-// mcpHandler serves one MCP endpoint per agent at /mcp/{agent_id}. The agent is
-// resolved on every request (stateless transport), so identity always comes
-// from the URL, and the tool set is built for that agent's role.
+// mcpHandler serves one MCP endpoint per agent at /mcp/{token}. The token is a
+// random secret handed only to that agent, so a URL cannot be guessed from an
+// agent id. The agent is resolved on every request (stateless transport), so
+// identity always comes from the URL, and the tool set is built for its role.
 func (s *Server) mcpHandler() http.Handler {
 	h := mcp.NewStreamableHTTPHandler(func(r *http.Request) *mcp.Server {
 		srv, _ := r.Context().Value(mcpServerKey{}).(*mcp.Server)
@@ -52,12 +51,7 @@ func (s *Server) mcpHandler() http.Handler {
 	}, &mcp.StreamableHTTPOptions{Stateless: true})
 	cache := mcp.NewSchemaCache()
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		id, err := strconv.ParseInt(r.PathValue("agent_id"), 10, 64)
-		if err != nil {
-			http.Error(w, "invalid agent id", http.StatusNotFound)
-			return
-		}
-		agent, err := s.Store.GetAgent(id)
+		agent, err := s.Store.GetAgentByToken(r.PathValue("token"))
 		if errors.Is(err, ErrNotFound) {
 			http.Error(w, "unknown agent", http.StatusNotFound)
 			return

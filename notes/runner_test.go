@@ -4,7 +4,6 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
-	"strconv"
 	"strings"
 	"testing"
 )
@@ -24,13 +23,19 @@ func newTestRunner(t *testing.T, script string) (*Runner, *Store, string) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { ev.Close() })
+	r := NewRunner(Config{Addr: "127.0.0.1:1", AgentDir: dir, WorkDir: dir}, store, ev)
+	r.Command = writeFake(t, dir, script)
+	return r, store, evPath
+}
+
+// writeFake writes a shell script standing in for "claude" and returns its path.
+func writeFake(t *testing.T, dir, script string) string {
+	t.Helper()
 	fake := filepath.Join(dir, "fake-claude")
 	if err := os.WriteFile(fake, []byte("#!/bin/sh\n"+script+"\n"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	r := NewRunner(Config{Addr: "127.0.0.1:1", AgentDir: dir, WorkDir: dir}, store, ev)
-	r.Command = fake
-	return r, store, evPath
+	return fake
 }
 
 func TestRunnerSubagentExitsCleanly(t *testing.T) {
@@ -56,8 +61,9 @@ func TestRunnerSubagentExitsCleanly(t *testing.T) {
 	if b, _ := os.ReadFile(a.LogPath); strings.TrimSpace(string(b)) != `{"type":"result"}` {
 		t.Fatalf("log file = %q", b)
 	}
+	tok, _ := store.GetAgent(a.ID)
 	cfgPath := strings.TrimSuffix(a.LogPath, ".jsonl") + ".mcp.json"
-	if cfg, _ := os.ReadFile(cfgPath); !strings.Contains(string(cfg), "http://127.0.0.1:1/mcp/"+strconv.FormatInt(a.ID, 10)) {
+	if cfg, _ := os.ReadFile(cfgPath); !strings.Contains(string(cfg), "http://127.0.0.1:1/mcp/"+tok.Token) {
 		t.Fatalf("mcp config = %q", cfg)
 	}
 	ev, _ := os.ReadFile(evPath)
@@ -105,20 +111,34 @@ func TestRunnerSubagentCrashes(t *testing.T) {
 	}
 }
 
-func TestRunnerOrchestratorAndStopAll(t *testing.T) {
-	r, store, _ := newTestRunner(t, `sleep 60`)
-	a, err := r.StartOrchestrator("build a thing")
+func TestRunnerStopAllRecordsEverything(t *testing.T) {
+	r, store, evPath := newTestRunner(t, `sleep 300`)
+	orch, err := r.StartOrchestrator("build a thing")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if a.Role != "orchestrator" || a.PID <= 0 || a.TaskID != 0 {
-		t.Fatalf("agent: %+v", a)
+	if orch.Role != "orchestrator" || orch.PID <= 0 || orch.TaskID != 0 {
+		t.Fatalf("agent: %+v", orch)
 	}
-	r.StopAll()
-	r.Wait()
-	got, _ := store.GetAgent(a.ID)
-	if got.Status != "crashed" { // killed by SIGTERM: exit code -1
-		t.Fatalf("status after StopAll = %q", got.Status)
+	sub, err := r.SpawnSubagent(orch.ID, "do it")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	r.StopAll() // no Wait: StopAll itself must leave state and log final
+	for _, id := range []int64{orch.ID, sub.ID} {
+		if got, _ := store.GetAgent(id); got.Status != "crashed" { // SIGTERM: exit code -1
+			t.Fatalf("agent %d status after StopAll = %q", id, got.Status)
+		}
+	}
+	if task, _ := store.GetTask(sub.TaskID); task.Status != "blocked" {
+		t.Fatalf("task status = %q", task.Status)
+	}
+	if ev, _ := os.ReadFile(evPath); strings.Count(string(ev), `"event":"agent_status_changed"`) != 2 {
+		t.Fatalf("want 2 agent_status_changed events:\n%s", ev)
+	}
+	if _, err := r.SpawnSubagent(orch.ID, "too late"); err == nil {
+		t.Fatal("SpawnSubagent after StopAll succeeded")
 	}
 }
 

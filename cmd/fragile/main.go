@@ -7,7 +7,6 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
-	"errors"
 	"flag"
 	"fmt"
 	"log"
@@ -17,6 +16,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/Nel-sokchhunly/fragile/notes"
@@ -40,7 +40,23 @@ func main() {
 	}
 }
 
+// checkLoopback rejects listen addresses that are not on this machine: the
+// server can spawn agents with Bash, so it must not be reachable from the network.
+func checkLoopback(addr string) error {
+	host, _, err := net.SplitHostPort(addr)
+	if err != nil {
+		return fmt.Errorf("invalid -addr %q: %w", addr, err)
+	}
+	if ip := net.ParseIP(host); host != "localhost" && (ip == nil || !ip.IsLoopback()) {
+		return fmt.Errorf("-addr %q: host must be a loopback address (127.0.0.1, ::1, localhost); the server can launch agents and must not be exposed to the network", addr)
+	}
+	return nil
+}
+
 func run(cfg notes.Config, task string) error {
+	if err := checkLoopback(cfg.Addr); err != nil {
+		return err
+	}
 	// Agents run in WorkDir, so every path handed to them must be absolute.
 	for _, p := range []*string{&cfg.DBPath, &cfg.LogPath, &cfg.AgentDir, &cfg.WorkDir} {
 		abs, err := filepath.Abs(*p)
@@ -49,10 +65,18 @@ func run(cfg notes.Config, task string) error {
 		}
 		*p = abs
 	}
-	for _, dir := range []string{filepath.Dir(cfg.DBPath), filepath.Dir(cfg.LogPath), cfg.AgentDir} {
+	for _, dir := range []string{filepath.Dir(cfg.DBPath), filepath.Dir(cfg.LogPath)} {
 		if err := os.MkdirAll(dir, 0o755); err != nil {
 			return err
 		}
+	}
+	// The agent dir holds the MCP configs, which contain the agents' secret URLs.
+	if err := os.MkdirAll(cfg.AgentDir, 0o700); err != nil {
+		return err
+	}
+	// MkdirAll keeps an existing dir.s mode; agent tokens live here, so tighten it.
+	if err := os.Chmod(cfg.AgentDir, 0o700); err != nil {
+		return err
 	}
 	store, err := notes.OpenStore(cfg.DBPath)
 	if err != nil {
@@ -66,7 +90,7 @@ func run(cfg notes.Config, task string) error {
 	defer evlog.Close()
 
 	runner := notes.NewRunner(cfg, store, evlog)
-	srv := &notes.Server{Config: cfg, Store: store, Log: evlog, Runner: runner}
+	srv := &notes.Server{Store: store, Log: evlog, Runner: runner}
 	httpSrv := &http.Server{Handler: srv.Handler()}
 
 	// Listen before launching agents so the orchestrator can connect at once.
@@ -79,7 +103,7 @@ func run(cfg notes.Config, task string) error {
 	log.Printf("fragile notes server listening on http://%s (session %d)", cfg.Addr, store.SessionID)
 	log.Printf("observation log: %s", cfg.LogPath)
 
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
 	var done chan struct{} // stays nil (blocks forever) when only serving
@@ -94,20 +118,19 @@ func run(cfg notes.Config, task string) error {
 	}
 
 	select {
-	case err := <-errc:
-		if !errors.Is(err, http.ErrServerClosed) {
-			runner.StopAll()
-			return err
-		}
+	case err := <-errc: // Serve only returns a real error here: Shutdown has not run yet
+		runner.StopAll()
+		return err
 	case <-ctx.Done():
 		log.Print("interrupted, stopping agents")
-		runner.StopAll()
+		runner.StopAll() // returns once every agent's final state is recorded
 	case <-done:
 		log.Print("orchestrator and all sub-agents finished")
 		if res := finalResult(orch.LogPath); res != "" {
 			fmt.Printf("\n=== ORCHESTRATOR RESULT ===\n%s\n", res)
 		}
 	}
+	// Agents are stopped and recorded; now the server can go.
 	shutCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	return httpSrv.Shutdown(shutCtx)

@@ -2,6 +2,7 @@ package notes
 
 import (
 	"errors"
+	"os"
 	"path/filepath"
 	"testing"
 )
@@ -47,5 +48,22 @@ func TestStoreNoteRoundTrip(t *testing.T) {
 	}
 	if _, err := s.GetNote(9999); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("GetNote missing = %v, want ErrNotFound", err)
+	}
+}
+
+// A path with URI metacharacters must reach SQLite unchanged.
+func TestStoreSpecialCharsInPath(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "a#b?c%d")
+	if err := os.Mkdir(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(dir, "f.db")
+	s, err := OpenStore(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	if _, err := os.Stat(path); err != nil {
+		t.Fatal(err)
 	}
 }

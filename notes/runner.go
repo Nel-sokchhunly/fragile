@@ -1,6 +1,7 @@
 package notes
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -35,9 +36,14 @@ type Runner struct {
 	store *Store
 	log   *EventLog
 
-	wg      sync.WaitGroup
-	mu      sync.Mutex
-	running map[int]chan struct{} // pid -> closed when the process has exited
+	// wg counts processes from start until finish() has recorded their outcome.
+	// wg.Add runs from request goroutines (spawn_subagent) while Wait may be
+	// blocked, which is safe because the orchestrator stays counted for as long
+	// as it can spawn; after StopAll sets stopping, start never calls Add again.
+	wg       sync.WaitGroup
+	mu       sync.Mutex            // guards running and stopping
+	running  map[int]chan struct{} // pid -> closed when the process has exited
+	stopping bool                  // set by StopAll; start refuses new processes
 }
 
 func NewRunner(cfg Config, store *Store, log *EventLog) *Runner {
@@ -101,11 +107,7 @@ func (r *Runner) launch(a Agent, taskTitle, prompt, systemPrompt string) (Agent,
 	})
 	go func() {
 		defer r.wg.Done()
-		code := <-done
-		r.mu.Lock()
-		delete(r.running, pid)
-		r.mu.Unlock()
-		r.finish(a, taskTitle, code, "")
+		r.finish(a, taskTitle, <-done, "")
 	}()
 	if setErr != nil {
 		return Agent{}, setErr
@@ -116,8 +118,8 @@ func (r *Runner) launch(a Agent, taskTitle, prompt, systemPrompt string) (Agent,
 // start writes the MCP config and starts the process in its own process
 // group. The returned channel yields the exit code once the process is gone.
 func (r *Runner) start(a Agent, mcpConfig, logPath, prompt, systemPrompt string) (int, <-chan int, error) {
-	cfg := fmt.Sprintf(`{"mcpServers":{"fragile":{"type":"http","url":"http://%s/mcp/%d"}}}`, r.cfg.Addr, a.ID)
-	if err := os.WriteFile(mcpConfig, []byte(cfg), 0o644); err != nil {
+	cfg := fmt.Sprintf(`{"mcpServers":{"fragile":{"type":"http","url":"http://%s/mcp/%s"}}}`, r.cfg.Addr, a.Token)
+	if err := os.WriteFile(mcpConfig, []byte(cfg), 0o600); err != nil {
 		return 0, nil, err
 	}
 	out, err := os.Create(logPath)
@@ -132,18 +134,28 @@ func (r *Runner) start(a Agent, mcpConfig, logPath, prompt, systemPrompt string)
 	cmd.Dir = r.cfg.WorkDir
 	cmd.Stdout, cmd.Stderr = out, out
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	// Check, start and register under one lock so StopAll cannot miss a process.
+	r.mu.Lock()
+	if r.stopping {
+		r.mu.Unlock()
+		return 0, nil, errors.New("runner is stopping")
+	}
 	if err := cmd.Start(); err != nil {
+		r.mu.Unlock()
 		return 0, nil, err
 	}
 	pid := cmd.Process.Pid
 	exited := make(chan struct{})
 	code := make(chan int, 1)
-	r.mu.Lock()
 	r.running[pid] = exited
-	r.mu.Unlock()
 	r.wg.Add(1)
+	r.mu.Unlock()
 	go func() {
 		cmd.Wait()
+		// Forget the pid at once: it may be reused and must not be signalled again.
+		r.mu.Lock()
+		delete(r.running, pid)
+		r.mu.Unlock()
 		close(exited)
 		code <- cmd.ProcessState.ExitCode() // -1 if killed by a signal
 	}()
@@ -180,10 +192,12 @@ func (r *Runner) finish(a Agent, taskTitle string, code int, launchErr string) {
 // Wait blocks until every launched process has exited.
 func (r *Runner) Wait() { r.wg.Wait() }
 
-// StopAll sends SIGTERM to every running process group, then SIGKILL to any
-// still alive after a few seconds. It returns once they have all exited.
+// StopAll refuses further launches, sends SIGTERM to every running process
+// group, then SIGKILL to any still alive after a few seconds. It returns once
+// they have all exited and their outcome is recorded in the store and log.
 func (r *Runner) StopAll() {
 	r.mu.Lock()
+	r.stopping = true
 	procs := make(map[int]chan struct{}, len(r.running))
 	for pid, ch := range r.running {
 		procs[pid] = ch
@@ -191,7 +205,7 @@ func (r *Runner) StopAll() {
 	r.mu.Unlock()
 
 	for pid := range procs {
-		syscall.Kill(-pid, syscall.SIGTERM)
+		r.signal(pid, syscall.SIGTERM)
 	}
 	expired := make(chan struct{})
 	time.AfterFunc(killAfter, func() { close(expired) })
@@ -199,8 +213,19 @@ func (r *Runner) StopAll() {
 		select {
 		case <-ch:
 		case <-expired:
-			syscall.Kill(-pid, syscall.SIGKILL)
+			r.signal(pid, syscall.SIGKILL)
 			<-ch
 		}
+	}
+	r.wg.Wait()
+}
+
+// signal signals pid's process group only while pid is still in running, so a
+// reused pid is never hit.
+func (r *Runner) signal(pid int, sig syscall.Signal) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if _, ok := r.running[pid]; ok {
+		syscall.Kill(-pid, sig)
 	}
 }

@@ -36,8 +36,9 @@ Run `./fragile -h` for all flags.
 
 ## How it works
 
-- Each agent connects to `http://127.0.0.1:7777/mcp/<agent_id>`; the server attributes every note to that agent.
+- Each agent connects to `http://127.0.0.1:7777/mcp/<token>`, where the token is a random secret generated for that agent; the server attributes every note to that agent. `-addr` must be a loopback address, since the server can launch agents.
 - All agents get `read_notes`, `post_note`, `update_note`. Only the orchestrator gets `spawn_subagent`, `get_subagent_status`, `escalate_to_user`.
 - Sub-agents are separate `claude -p` processes started by `spawn_subagent`. Claude Code's built-in sub-agent tools (`Task`, `Agent`, `Workflow`) are disallowed for every agent.
 - `escalate_to_user` prints a marked banner to stdout and logs it; there is no way to answer in Phase 0.
+- Known limit: all agents run as your OS user with Bash, so a sub-agent could read another agent's token from its `agent-<id>.mcp.json` in the agent dir (kept `0700`/`0600`) and impersonate it. Real isolation needs a sandbox (future phase).
 - Prompts live in [notes/prompts](notes/prompts).

@@ -2,6 +2,7 @@ package notes
 
 import (
 	"encoding/json"
+	"log"
 	"os"
 	"sync"
 	"time"
@@ -31,8 +32,17 @@ func OpenEventLog(path string) (*EventLog, error) {
 	return &EventLog{f: f}, nil
 }
 
-// Write appends an event. agentID 0 means the event has no agent.
+// Write appends an event. agentID 0 means the event has no agent. A failure is
+// also reported on stderr, so callers that cannot act on it may ignore the error.
 func (l *EventLog) Write(event string, agentID int64, payload any) error {
+	err := l.write(event, agentID, payload)
+	if err != nil {
+		log.Printf("event log: writing %s: %v", event, err)
+	}
+	return err
+}
+
+func (l *EventLog) write(event string, agentID int64, payload any) error {
 	line, err := json.Marshal(struct {
 		Time    string `json:"time"`
 		Event   string `json:"event"`

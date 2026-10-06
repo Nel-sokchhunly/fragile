@@ -13,6 +13,7 @@ CREATE TABLE IF NOT EXISTS agent_instances (
 	session_id INTEGER NOT NULL REFERENCES sessions(id),
 	parent_id  INTEGER REFERENCES agent_instances(id), -- future nesting; unused in P0
 	role       TEXT NOT NULL CHECK (role IN ('orchestrator','subagent')),
+	token      TEXT UNIQUE, -- secret in the agent's MCP URL; identifies the agent
 	task_id    INTEGER REFERENCES tasks(id),
 	status     TEXT NOT NULL DEFAULT 'running' CHECK (status IN ('running','exited','crashed')),
 	pid        INTEGER,

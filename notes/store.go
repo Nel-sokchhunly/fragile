@@ -1,9 +1,13 @@
 package notes
 
 import (
+	"crypto/rand"
 	"database/sql"
 	_ "embed"
+	"encoding/hex"
 	"errors"
+	"fmt"
+	"net/url"
 
 	_ "modernc.org/sqlite" // pure-Go driver, registers "sqlite"
 )
@@ -25,8 +29,9 @@ type Store struct {
 // OpenStore opens (creating if needed) the database at path, applies the
 // schema, and starts a new session with its session-scope board.
 func OpenStore(path string) (*Store, error) {
-	db, err := sql.Open("sqlite", "file:"+path+
-		"?_pragma=foreign_keys(1)&_pragma=journal_mode(WAL)&_pragma=busy_timeout(5000)")
+	dsn := url.URL{Scheme: "file", OmitHost: true, Path: path,
+		RawQuery: "_pragma=foreign_keys(1)&_pragma=journal_mode(WAL)&_pragma=busy_timeout(5000)"}
+	db, err := sql.Open("sqlite", dsn.String())
 	if err != nil {
 		return nil, err
 	}
@@ -36,6 +41,11 @@ func OpenStore(path string) (*Store, error) {
 	if _, err := db.Exec(schema); err != nil {
 		db.Close()
 		return nil, err
+	}
+	// No migrations in Phase 0: a DB from an older schema is refused, not upgraded.
+	if _, err := db.Exec(`SELECT token FROM agent_instances LIMIT 0`); err != nil {
+		db.Close()
+		return nil, fmt.Errorf("%s was created by an older fragile schema; delete it and rerun: %w", path, err)
 	}
 	if err := db.QueryRow(`INSERT INTO sessions DEFAULT VALUES RETURNING id`).Scan(&s.SessionID); err != nil {
 		db.Close()
@@ -82,6 +92,7 @@ type Agent struct {
 	SessionID int64  `json:"session_id"`
 	ParentID  int64  `json:"parent_id,omitempty"`
 	Role      string `json:"role"`
+	Token     string `json:"-"` // secret; never serialized
 	TaskID    int64  `json:"task_id,omitempty"`
 	Status    string `json:"status"`
 	PID       int    `json:"pid,omitempty"`
@@ -91,11 +102,11 @@ type Agent struct {
 	ExitedAt  string `json:"exited_at,omitempty"`
 }
 
-const agentCols = `id, session_id, COALESCE(parent_id,0), role, COALESCE(task_id,0), status,
+const agentCols = `id, session_id, COALESCE(parent_id,0), role, token, COALESCE(task_id,0), status,
 	COALESCE(pid,0), COALESCE(log_path,''), exit_code, created_at, COALESCE(exited_at,'')`
 
 func scanAgent(r scanner) (a Agent, err error) {
-	err = r.Scan(&a.ID, &a.SessionID, &a.ParentID, &a.Role, &a.TaskID, &a.Status,
+	err = r.Scan(&a.ID, &a.SessionID, &a.ParentID, &a.Role, &a.Token, &a.TaskID, &a.Status,
 		&a.PID, &a.LogPath, &a.ExitCode, &a.CreatedAt, &a.ExitedAt)
 	return a, one(err)
 }
@@ -109,9 +120,19 @@ func nullable(id int64) any {
 }
 
 // CreateAgent registers an agent instance. parentID and taskID 0 mean none.
+// Each agent gets a random token that authenticates its MCP URL.
 func (s *Store) CreateAgent(role string, parentID, taskID int64) (Agent, error) {
-	return scanAgent(s.db.QueryRow(`INSERT INTO agent_instances (session_id, parent_id, role, task_id)
-		VALUES (?, ?, ?, ?) RETURNING `+agentCols, s.SessionID, nullable(parentID), role, nullable(taskID)))
+	tok := make([]byte, 16)
+	if _, err := rand.Read(tok); err != nil {
+		return Agent{}, err
+	}
+	return scanAgent(s.db.QueryRow(`INSERT INTO agent_instances (session_id, parent_id, role, token, task_id)
+		VALUES (?, ?, ?, ?, ?) RETURNING `+agentCols, s.SessionID, nullable(parentID), role, hex.EncodeToString(tok), nullable(taskID)))
+}
+
+func (s *Store) GetAgentByToken(token string) (Agent, error) {
+	return scanAgent(s.db.QueryRow(`SELECT `+agentCols+` FROM agent_instances WHERE token = ? AND session_id = ?`,
+		token, s.SessionID))
 }
 
 func (s *Store) GetAgent(id int64) (Agent, error) {

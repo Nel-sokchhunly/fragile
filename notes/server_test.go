@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -31,10 +32,10 @@ func newTestServer(t *testing.T) (*Server, *httptest.Server) {
 	return s, ts
 }
 
-func connect(t *testing.T, ts *httptest.Server, agentID int64) *mcp.ClientSession {
+func connect(t *testing.T, ts *httptest.Server, token string) *mcp.ClientSession {
 	t.Helper()
 	c := mcp.NewClient(&mcp.Implementation{Name: "test"}, nil)
-	cs, err := c.Connect(context.Background(), &mcp.StreamableClientTransport{Endpoint: ts.URL + "/mcp/" + itoa(agentID)}, nil)
+	cs, err := c.Connect(context.Background(), &mcp.StreamableClientTransport{Endpoint: ts.URL + "/mcp/" + token}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -72,7 +73,7 @@ func TestMCPRolesAndNotes(t *testing.T) {
 	orch, _ := s.Store.CreateAgent("orchestrator", 0, 0)
 	a, _ := s.Store.CreateAgent("subagent", orch.ID, 0)
 	b, _ := s.Store.CreateAgent("subagent", orch.ID, 0)
-	ca, cb, co := connect(t, ts, a.ID), connect(t, ts, b.ID), connect(t, ts, orch.ID)
+	ca, cb, co := connect(t, ts, a.Token), connect(t, ts, b.Token), connect(t, ts, orch.Token)
 
 	if got := toolNames(t, ca); len(got) != 3 {
 		t.Fatalf("subagent tools = %v, want only read_notes, post_note, update_note", got)
@@ -120,8 +121,13 @@ func TestMCPRolesAndNotes(t *testing.T) {
 }
 
 func TestMCPUnknownAgent(t *testing.T) {
-	_, ts := newTestServer(t)
-	for _, id := range []string{"999", "abc"} {
+	s, ts := newTestServer(t)
+	orch, _ := s.Store.CreateAgent("orchestrator", 0, 0)
+	if len(orch.Token) != 32 {
+		t.Fatalf("token = %q, want 32 hex chars", orch.Token)
+	}
+	// The integer id is no longer an identity, even for a real agent.
+	for _, id := range []string{itoa(orch.ID), "999", "abc"} {
 		resp, err := http.Post(ts.URL+"/mcp/"+id, "application/json", strings.NewReader("{}"))
 		if err != nil {
 			t.Fatal(err)
@@ -130,5 +136,40 @@ func TestMCPUnknownAgent(t *testing.T) {
 		if resp.StatusCode != http.StatusNotFound {
 			t.Fatalf("/mcp/%s status = %d, want 404", id, resp.StatusCode)
 		}
+	}
+}
+
+func TestMCPSpawnSubagent(t *testing.T) {
+	s, ts := newTestServer(t)
+	dir := t.TempDir()
+	s.Runner = NewRunner(Config{Addr: strings.TrimPrefix(ts.URL, "http://"), AgentDir: dir, WorkDir: dir}, s.Store, s.Log)
+	s.Runner.Command = writeFake(t, dir, `exit 0`)
+	orch, _ := s.Store.CreateAgent("orchestrator", 0, 0)
+	co := connect(t, ts, orch.Token)
+
+	for _, bad := range []string{"", "  \n\t"} {
+		if _, isErr := call(t, co, "spawn_subagent", map[string]any{"task": bad}); !isErr {
+			t.Fatalf("spawn_subagent(%q) should be a tool error", bad)
+		}
+	}
+	out, isErr := call(t, co, "spawn_subagent", map[string]any{"task": "write the thing"})
+	if isErr {
+		t.Fatal(out)
+	}
+	s.Runner.Wait()
+
+	subs, _ := s.Store.ListAgents("subagent")
+	if len(subs) != 1 || subs[0].ParentID != orch.ID || subs[0].TaskID == 0 {
+		t.Fatalf("subagents = %+v", subs)
+	}
+	if task, err := s.Store.GetTask(subs[0].TaskID); err != nil || task.Title != "write the thing" || task.AgentID != subs[0].ID {
+		t.Fatalf("task = %+v, err %v", task, err)
+	}
+	path := filepath.Join(dir, "agent-"+itoa(subs[0].ID)+".mcp.json")
+	if cfg, _ := os.ReadFile(path); !strings.Contains(string(cfg), "/mcp/"+subs[0].Token+`"`) || subs[0].Token == orch.Token {
+		t.Fatalf("mcp config = %q", cfg)
+	}
+	if fi, _ := os.Stat(path); fi.Mode().Perm() != 0o600 {
+		t.Fatalf("mcp config mode = %v, want 0600", fi.Mode().Perm())
 	}
 }
