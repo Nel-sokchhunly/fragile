@@ -12,7 +12,7 @@
 
 This is a **source document for spec generation** (e.g. with PRD and issue-breakdown skills). It is not a PRD itself, and it is not to be implemented directly. It describes a multi-phase project; **specs and issues are generated for one phase at a time.**
 
-> **CURRENT PHASE: Phase 0 — Notes server experiment**
+> **CURRENT PHASE: Phase 1 — MVP desktop app**
 
 **Rules for the agent generating specs:**
 
