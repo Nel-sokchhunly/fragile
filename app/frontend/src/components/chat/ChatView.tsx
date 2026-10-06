@@ -136,10 +136,9 @@ export function ChatView({sessionId}: {sessionId: number}) {
             {st && <span className={cn('shrink-0 font-mono text-xs', st.cls)}>{st.label}</span>}
           </div>
           <div className="flex min-w-0 items-baseline gap-2 font-mono text-xs leading-4 text-muted-foreground">
-            <span className="shrink-0 whitespace-nowrap" title={lead ? `pid ${lead.pid ?? '-'} · started ${formatExact(lead.created_at)}` : undefined}>
+            <span className="min-w-0 truncate" title={lead ? `pid ${lead.pid ?? '-'} · started ${formatExact(lead.created_at)}` : undefined}>
               orchestrator{lead ? ` ${lead.status === 'running' ? `pid ${lead.pid ?? '-'}` : agentState(lead)}` : ' not started'} · {ctx && <><span className={ctx.cls}>ctx {ctx.text}</span> · </>}{agentSummary(agents)}
             </span>
-            {session?.work_dir && <span className="min-w-0 flex-1 truncate text-left [direction:rtl]" title={session.work_dir}><bdi>{session.work_dir}</bdi></span>}
           </div>
         </div>
         {running && <StopButton sessionId={sessionId}/>}
