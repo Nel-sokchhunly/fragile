@@ -40,6 +40,11 @@ func (s *Server) Handler() http.Handler {
 
 type mcpServerKey struct{}
 
+// requestCtxKey carries the HTTP request's context to tool handlers: the SDK
+// detaches the handler's own context from the request, so a client that
+// disconnects (or aborts a blocking wait_for_notes) would otherwise go unnoticed.
+type requestCtxKey struct{}
+
 // mcpHandler serves one MCP endpoint per agent at /mcp/{token}. The token is a
 // random secret handed only to that agent, so a URL cannot be guessed from an
 // agent id. The agent is resolved on every request (stateless transport), so
@@ -60,6 +65,7 @@ func (s *Server) mcpHandler() http.Handler {
 			return
 		}
 		srv := s.newMCPServer(agent, cache)
-		h.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), mcpServerKey{}, srv)))
+		ctx := context.WithValue(r.Context(), mcpServerKey{}, srv)
+		h.ServeHTTP(w, r.WithContext(context.WithValue(ctx, requestCtxKey{}, r.Context())))
 	})
 }

@@ -36,6 +36,10 @@ func (s *Server) newMCPServer(a Agent, cache *mcp.SchemaCache) *mcp.Server {
 	addTool(srv, a, "post_note", "Post a note to the shared board; you are recorded as the author. "+scopeHelp+" "+noteTypeHelp, false, s.postNote)
 	addTool(srv, a, "update_note", "Change a note's status (open or resolved; any agent may do this) and/or its content (only the note's author may). "+
 		"Resolve a question or blocker once it has been answered.", false, s.updateNote)
+	addTool(srv, a, "wait_for_notes", "Block until a note with id > since_id (optionally of `type`) is on the shared board, then return it. "+
+		"Returns at once if one already exists; returns an empty notes list after timeout_s (default 60, max 120). Use this instead of sleeping or polling. "+
+		"Orchestrator: also pass finished_subagents to wake when a sub-agent exits or crashes; the result then carries finished_subagents and running_subagents counts "+
+		"(and returns at once when no sub-agent is running).", false, s.waitForNotes)
 	addTool(srv, a, "spawn_subagent", "Orchestrator only. Start a new sub-agent process for a self-contained task and create its task record. "+
 		"Returns the new agent id and task id.", true, s.spawnSubagent)
 	addTool(srv, a, "get_subagent_status", "Orchestrator only. Status of one sub-agent (pass id), or of all sub-agents in the session (omit id): "+
@@ -48,16 +52,22 @@ func (s *Server) newMCPServer(a Agent, cache *mcp.SchemaCache) *mcp.Server {
 // addTool registers fn under name, wrapping its result as text (JSON unless it is a string). A returned
 // error becomes a tool error. orchOnly tools are hidden from, and refused for,
 // non-orchestrators.
-func addTool[In any](srv *mcp.Server, a Agent, name, desc string, orchOnly bool, fn func(Agent, In) (any, error)) {
+func addTool[In any](srv *mcp.Server, a Agent, name, desc string, orchOnly bool, fn func(context.Context, Agent, In) (any, error)) {
 	if orchOnly && a.Role != roleOrchestrator {
 		return
 	}
 	mcp.AddTool(srv, &mcp.Tool{Name: name, Description: desc},
-		func(_ context.Context, _ *mcp.CallToolRequest, in In) (*mcp.CallToolResult, any, error) {
+		func(ctx context.Context, _ *mcp.CallToolRequest, in In) (*mcp.CallToolResult, any, error) {
 			if orchOnly && a.Role != roleOrchestrator {
 				return nil, nil, fmt.Errorf("%s is orchestrator-only", name)
 			}
-			out, err := fn(a, in)
+			if rc, ok := ctx.Value(requestCtxKey{}).(context.Context); ok { // end the call when the client goes away
+				var cancel context.CancelFunc
+				ctx, cancel = context.WithCancel(ctx)
+				defer cancel()
+				defer context.AfterFunc(rc, cancel)()
+			}
+			out, err := fn(ctx, a, in)
 			if err != nil {
 				return nil, nil, err
 			}
@@ -97,7 +107,7 @@ type readNotesIn struct {
 	SinceID       int64  `json:"since_id,omitempty" jsonschema:"only notes with an id greater than this (to fetch what is new)"`
 }
 
-func (s *Server) readNotes(a Agent, in readNotesIn) (any, error) {
+func (s *Server) readNotes(_ context.Context, a Agent, in readNotesIn) (any, error) {
 	if err := checkScope(in.Scope); err != nil {
 		return nil, err
 	}
@@ -128,7 +138,7 @@ type postNoteIn struct {
 	Content string `json:"content" jsonschema:"the note text; short and specific"`
 }
 
-func (s *Server) postNote(a Agent, in postNoteIn) (any, error) {
+func (s *Server) postNote(_ context.Context, a Agent, in postNoteIn) (any, error) {
 	if err := checkScope(in.Scope); err != nil {
 		return nil, err
 	}
@@ -156,7 +166,7 @@ type updateNoteIn struct {
 	Status  *string `json:"status,omitempty" jsonschema:"open or resolved"`
 }
 
-func (s *Server) updateNote(a Agent, in updateNoteIn) (any, error) {
+func (s *Server) updateNote(_ context.Context, a Agent, in updateNoteIn) (any, error) {
 	if in.Content == nil && in.Status == nil {
 		return nil, errors.New("provide content and/or status")
 	}
@@ -192,7 +202,7 @@ type spawnIn struct {
 	Scopes []string `json:"scopes,omitempty" jsonschema:"note scopes the sub-agent gets; only [\"session\"] (default)"`
 }
 
-func (s *Server) spawnSubagent(a Agent, in spawnIn) (any, error) {
+func (s *Server) spawnSubagent(_ context.Context, a Agent, in spawnIn) (any, error) {
 	if strings.TrimSpace(in.Task) == "" {
 		return nil, errors.New("task must not be empty")
 	}
@@ -228,7 +238,7 @@ type subagentStatus struct {
 	HasDoneNote bool   `json:"has_done_note"`
 }
 
-func (s *Server) subagentStatus(caller Agent, in statusIn) (any, error) {
+func (s *Server) subagentStatus(_ context.Context, caller Agent, in statusIn) (any, error) {
 	var agents []Agent
 	if in.ID != 0 {
 		a, err := s.Store.GetAgent(caller.SessionID, in.ID)
@@ -279,7 +289,7 @@ type escalateIn struct {
 	Context  string `json:"context" jsonschema:"background and the options you see"`
 }
 
-func (s *Server) escalate(a Agent, in escalateIn) (any, error) {
+func (s *Server) escalate(_ context.Context, a Agent, in escalateIn) (any, error) {
 	if strings.TrimSpace(in.Question) == "" {
 		return nil, errors.New("question must not be empty")
 	}

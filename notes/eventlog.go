@@ -40,6 +40,36 @@ type EventLog struct {
 
 	mu sync.Mutex
 	f  *os.File // nil when the log has no file
+
+	wmu     sync.Mutex // guards waiters
+	waiters map[int64]chan struct{}
+}
+
+// Changed returns a channel that is closed on the next event of the session.
+// Waiters (wait_for_notes) take it BEFORE checking the store, then block on it,
+// so a change between the check and the block is never missed. Events are
+// written after the store change they report, so a wake-up always sees it.
+func (l *EventLog) Changed(sessionID int64) <-chan struct{} {
+	l.wmu.Lock()
+	defer l.wmu.Unlock()
+	ch := l.waiters[sessionID]
+	if ch == nil {
+		if l.waiters == nil {
+			l.waiters = map[int64]chan struct{}{}
+		}
+		ch = make(chan struct{})
+		l.waiters[sessionID] = ch
+	}
+	return ch
+}
+
+func (l *EventLog) wake(sessionID int64) {
+	l.wmu.Lock()
+	defer l.wmu.Unlock()
+	if ch := l.waiters[sessionID]; ch != nil {
+		close(ch)
+		delete(l.waiters, sessionID)
+	}
 }
 
 // OpenEventLog opens the log file at path. An empty path gives a log with no
@@ -66,6 +96,7 @@ func (l *EventLog) Write(event string, sessionID, agentID int64, payload any) er
 }
 
 func (l *EventLog) write(ev Event) error {
+	defer l.wake(ev.SessionID) // even if marshalling or the file write fails: the store already changed
 	line, err := json.Marshal(ev)
 	if err != nil {
 		return err

@@ -77,11 +77,11 @@ func TestMCPRolesAndNotes(t *testing.T) {
 	b, _ := s.Store.CreateAgent(sess.ID, "subagent", orch.ID, 0)
 	ca, cb, co := connect(t, ts, a.Token), connect(t, ts, b.Token), connect(t, ts, orch.Token)
 
-	if got := toolNames(t, ca); len(got) != 3 {
-		t.Fatalf("subagent tools = %v, want only read_notes, post_note, update_note", got)
+	if got := toolNames(t, ca); len(got) != 4 {
+		t.Fatalf("subagent tools = %v, want only read_notes, post_note, update_note, wait_for_notes", got)
 	}
-	if got := toolNames(t, co); len(got) != 6 {
-		t.Fatalf("orchestrator tools = %v, want 6", got)
+	if got := toolNames(t, co); len(got) != 7 {
+		t.Fatalf("orchestrator tools = %v, want 7", got)
 	}
 	if out, isErr := call(t, ca, "escalate_to_user", map[string]any{"question": "q", "context": "c"}); !isErr {
 		t.Fatalf("subagent escalate_to_user allowed: %s", out)

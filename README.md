@@ -37,7 +37,9 @@ Run `./fragile -h` for all flags.
 ## How it works
 
 - Each agent connects to `http://127.0.0.1:7777/mcp/<token>`, where the token is a random secret generated for that agent; the server attributes every note to that agent. `-addr` must be a loopback address, since the server can launch agents.
-- All agents get `read_notes`, `post_note`, `update_note`. Only the orchestrator gets `spawn_subagent`, `get_subagent_status`, `escalate_to_user`.
+- All agents get `read_notes`, `post_note`, `update_note`, `wait_for_notes`. Only the orchestrator gets `spawn_subagent`, `get_subagent_status`, `escalate_to_user`.
+- `wait_for_notes(since_id, timeout_s?, type?)` blocks (default 60 s, max 120 s) until a newer note exists in the caller's session, and returns it; an empty list means timeout. Agents use it instead of `sleep` or polling. The orchestrator can also pass `finished_subagents` to wake when a sub-agent exits or crashes. Wake-ups come from the event log (an in-process per-session signal), not from polling the database.
+- Agents are launched isolated from your personal Claude Code setup: `--setting-sources project --disable-slash-commands` (no user plugins, hooks or skills; the repo's own `.claude` settings and `CLAUDE.md` still apply) and `CLAUDE_CODE_DISABLE_AUTO_MEMORY=1`. Your `claude` login still works. Both prompts state the absolute working directory and tell agents to write only under it.
 - Sub-agents are separate `claude -p` processes started by `spawn_subagent`. Claude Code's built-in sub-agent tools (`Task`, `Agent`, `Workflow`) are disallowed for every agent.
 - `escalate_to_user` prints a marked banner to stdout and logs it; there is no way to answer in Phase 0.
 - Known limit: all agents run as your OS user with Bash, so a sub-agent could read another agent's token from its `agent-<id>.mcp.json` in the agent dir (kept `0700`/`0600`) and impersonate it. Real isolation needs a sandbox (future phase).

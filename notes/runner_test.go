@@ -153,12 +153,13 @@ func TestRunnerArgs(t *testing.T) {
 	for _, want := range [][]string{
 		{"--mcp-config", "/x/agent-3.mcp.json"}, {"--append-system-prompt", "SYS"},
 		{"--output-format", "stream-json"}, {"--disallowedTools", "Task,Agent,Workflow"}, {"--", "do -it"},
+		{"--setting-sources", "project"},
 	} {
 		if i := slices.Index(args, want[0]); i < 0 || args[i+1] != want[1] {
 			t.Errorf("args missing %v: %v", want, args)
 		}
 	}
-	if !slices.Contains(args, "--strict-mcp-config") || !slices.Contains(args, "--verbose") || slices.Contains(args, "--dangerously-skip-permissions") {
+	if !slices.Contains(args, "--strict-mcp-config") || !slices.Contains(args, "--disable-slash-commands") || !slices.Contains(args, "--verbose") || slices.Contains(args, "--dangerously-skip-permissions") {
 		t.Errorf("args: %v", args)
 	}
 }
@@ -226,5 +227,31 @@ func TestEventLogOnEvent(t *testing.T) {
 	}
 	if ev, _ := os.ReadFile(evPath); !strings.Contains(string(ev), `"session_id":`+itoa(sess.ID)) {
 		t.Fatalf("log lines lack session_id:\n%s", ev)
+	}
+}
+
+func TestRunnerIsolationEnvAndWorkDir(t *testing.T) {
+	r, store, sess, _ := newTestRunner(t, `echo "$CLAUDE_CODE_DISABLE_AUTO_MEMORY" "$PWD"; for a in "$@"; do echo "$a"; done`)
+	orch, _ := store.CreateAgent(sess.ID, "orchestrator", 0, 0)
+	a, err := r.SpawnSubagent(sess.ID, orch.ID, "do it")
+	if err != nil {
+		t.Fatal(err)
+	}
+	r.Wait(sess.ID)
+	out, _ := os.ReadFile(a.LogPath)
+	if !strings.HasPrefix(string(out), "1 ") {
+		t.Fatalf("auto-memory env not set: %q", out)
+	}
+	wd := r.cfg.WorkDir
+	if !strings.Contains(string(out), "Your working directory is `"+wd+"`") || strings.Contains(string(out), "{{") {
+		t.Fatalf("prompt lacks work dir %q or has unreplaced placeholders:\n%s", wd, out)
+	}
+}
+
+func TestPromptsWorkDirAndNoSleep(t *testing.T) {
+	for name, p := range map[string]string{"orchestrator": OrchestratorPrompt("/w/dir"), "subagent": SubagentPrompt(7, "task {{WORKDIR}}", "/w/dir")} {
+		if !strings.Contains(p, "`/w/dir`") || !strings.Contains(p, "wait_for_notes") || strings.Contains(p, "sleep") {
+			t.Errorf("%s prompt: workdir/wait_for_notes/sleep check failed", name)
+		}
 	}
 }

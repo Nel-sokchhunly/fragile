@@ -23,6 +23,16 @@ const allowedTools = "Read,Edit,Write,Glob,Grep,Bash,mcp__fragile"
 // sub-agents too). Never allowed: sub-agents only come from spawn_subagent.
 const disallowedTools = "Task,Agent,Workflow"
 
+// Isolation from the user's personal Claude Code setup (issue #39).
+// "--setting-sources project" skips user and local settings, which is where
+// their plugins, hooks and statusline come from; the project's own settings
+// and CLAUDE.md still apply. "--disable-slash-commands" disables all skills.
+// Auth is unaffected (claude.ai login lives in the keychain, not in settings).
+// Auto-memory is switched off by env so agents do not read or write ~/.claude memory.
+var isolationArgs = []string{"--setting-sources", "project", "--disable-slash-commands"}
+
+const isolationEnv = "CLAUDE_CODE_DISABLE_AUTO_MEMORY=1"
+
 const (
 	titleMax  = 80
 	killAfter = 5 * time.Second
@@ -81,7 +91,7 @@ func (r *Runner) StartOrchestrator(sessionID int64, task string) (Agent, error) 
 	if err != nil {
 		return Agent{}, err
 	}
-	return r.launch(a, "", task, OrchestratorPrompt())
+	return r.launch(a, "", task, OrchestratorPrompt(r.cfg.WorkDir))
 }
 
 // SpawnSubagent creates the task and sub-agent rows in the session and launches
@@ -107,18 +117,19 @@ func (r *Runner) SpawnSubagent(sessionID, parentID int64, task string) (Agent, e
 	if err := r.store.SetTaskAgent(sessionID, t.ID, a.ID); err != nil {
 		return Agent{}, err
 	}
-	return r.launch(a, title, task, SubagentPrompt(a.ID, task))
+	return r.launch(a, title, task, SubagentPrompt(a.ID, task, r.cfg.WorkDir))
 }
 
 // args builds the claude command line. The prompt goes after "--" so a task
 // starting with "-" is not parsed as a flag and the variadic flags stop there.
 func (r *Runner) args(mcpConfig, prompt, systemPrompt string) []string {
-	return []string{"-p", "--output-format", "stream-json", "--verbose",
+	args := []string{"-p", "--output-format", "stream-json", "--verbose",
 		"--append-system-prompt", systemPrompt,
 		"--mcp-config", mcpConfig, "--strict-mcp-config",
 		"--allowedTools", allowedTools,
-		"--disallowedTools", disallowedTools,
-		"--", prompt}
+		"--disallowedTools", disallowedTools}
+	args = append(args, isolationArgs...)
+	return append(args, "--", prompt)
 }
 
 func (r *Runner) launch(a Agent, taskTitle, prompt, systemPrompt string) (Agent, error) {
@@ -163,6 +174,7 @@ func (r *Runner) start(a Agent, mcpConfig, logPath, prompt, systemPrompt string)
 	// and the process must outlive it.
 	cmd := exec.Command(r.Command, r.args(mcpConfig, prompt, systemPrompt)...)
 	cmd.Dir = r.cfg.WorkDir
+	cmd.Env = append(os.Environ(), isolationEnv)
 	cmd.Stdout, cmd.Stderr = out, out
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	// Check, start and register under one lock so StopAll cannot miss a process.
