@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"sync"
@@ -36,6 +37,95 @@ var isolationArgs = []string{"--setting-sources", "project", "--disable-slash-co
 
 const isolationEnv = "CLAUDE_CODE_DISABLE_AUTO_MEMORY=1"
 
+// Hosts sandboxed Bash may reach (package registries and GitHub); everything
+// else is refused. Only affects Bash: WebFetch and WebSearch follow permission rules.
+var sandboxDomains = []string{
+	"registry.npmjs.org", "registry.yarnpkg.com", "pypi.org", "files.pythonhosted.org",
+	"proxy.golang.org", "sum.golang.org", "index.crates.io", "static.crates.io", "crates.io",
+	"rubygems.org", "github.com", "*.github.com", "*.githubusercontent.com",
+}
+
+// Package caches sandboxed Bash may write besides the working directory, so
+// builds and installs work (go build, npm/pnpm/pip/cargo). The OS user cache
+// dir (go-build, pip, yarn) is added in sandboxSettings.
+// ponytail: default locations only; a custom GOMODCACHE/npm cache needs adding here.
+var sandboxCaches = []string{"~/go/pkg/mod", "~/.npm", "~/.cargo/registry", "~/.cargo/git", "~/Library/pnpm", "~/.local/share/pnpm"}
+
+// Credentials sandboxed Bash may not read, including the claude login on
+// Linux; the allowed hosts (e.g. github.com) could otherwise carry them out.
+var sandboxSecretFiles = []string{"~/.ssh", "~/.aws", "~/.config/gh", "~/.netrc", "~/.docker/config.json", "~/.kube", "~/.claude/.credentials.json"}
+
+var sandboxSecretEnv = []string{"GITHUB_TOKEN", "GH_TOKEN", "NPM_TOKEN", "ANTHROPIC_API_KEY", "CLAUDE_CODE_OAUTH_TOKEN", "AWS_SECRET_ACCESS_KEY", "AWS_SESSION_TOKEN"}
+
+// sandboxSettings returns the JSON for --settings (issue #40): Claude Code's
+// built-in Bash sandbox (Seatbelt / bubblewrap) with writes limited to the
+// working directory, the network limited to sandboxDomains, and the files that
+// hold agent tokens (the agent dir) or the whole store (DB, event log) hidden
+// from Bash (sandbox rules) and from Read/Edit/Write (permission rules), even
+// when they sit under the working directory. Paths must be absolute.
+// Subscription login is untouched: no --bare, no API key.
+func sandboxSettings(cfg Config) string {
+	var hidden, rules []string
+	for _, p := range []string{cfg.AgentDir, cfg.DBPath, cfg.LogPath} {
+		if p == "" {
+			continue
+		}
+		hidden = append(hidden, p)
+		if p == cfg.DBPath { // SQLite sidecar files hold the same data
+			hidden = append(hidden, p+"-wal", p+"-shm")
+		}
+	}
+	for _, p := range hidden {
+		for _, tool := range []string{"Read", "Edit"} { // Edit also covers Write
+			rules = append(rules, tool+"(/"+p+")") // "//abs" = absolute path; a dir covers what is under it
+		}
+	}
+	writable := sandboxCaches
+	if d, err := os.UserCacheDir(); err == nil {
+		writable = append([]string{d}, sandboxCaches...)
+	}
+	var files, env []map[string]string
+	for _, f := range sandboxSecretFiles {
+		files = append(files, map[string]string{"path": f, "mode": "deny"})
+	}
+	for _, e := range sandboxSecretEnv {
+		env = append(env, map[string]string{"name": e, "mode": "deny"})
+	}
+	b, _ := json.Marshal(map[string]any{
+		"sandbox": map[string]any{
+			"enabled":                  true,
+			"failIfUnavailable":        true,  // never silently run Bash unsandboxed
+			"allowUnsandboxedCommands": false, // no dangerouslyDisableSandbox escape hatch
+			"autoAllowBashIfSandboxed": true,
+			"filesystem":               map[string]any{"allowWrite": writable, "denyRead": hidden, "denyWrite": hidden},
+			"credentials":              map[string]any{"files": files, "envVars": env},
+			"network":                  map[string]any{"allowedDomains": sandboxDomains, "strictAllowlist": true},
+		},
+		"permissions": map[string]any{"deny": rules},
+	})
+	return string(b)
+}
+
+// checkSandbox reports a missing prerequisite of the Bash sandbox. macOS ships
+// Seatbelt (sandbox-exec); Linux needs bubblewrap and socat.
+func checkSandbox() error {
+	var need []string
+	switch runtime.GOOS {
+	case "darwin":
+		need = []string{"sandbox-exec"}
+	case "linux":
+		need = []string{"bwrap", "socat"}
+	default:
+		return fmt.Errorf("agent sandbox is not supported on %s", runtime.GOOS)
+	}
+	for _, bin := range need {
+		if _, err := exec.LookPath(bin); err != nil {
+			return fmt.Errorf("agent sandbox needs %q on PATH (Linux: apt install bubblewrap socat)", bin)
+		}
+	}
+	return nil
+}
+
 const (
 	titleMax  = 80
 	killAfter = 5 * time.Second
@@ -59,6 +149,8 @@ type Runner struct {
 	cfg   Config
 	store *Store
 	log   *EventLog
+
+	preflight func() error // sandbox prerequisites, checked before every launch; tests clear it
 
 	mu       sync.Mutex // guards everything below
 	running  map[int]proc
@@ -108,7 +200,7 @@ func (r *Runner) workDir(sessionID int64) string {
 }
 
 func NewRunner(cfg Config, store *Store, log *EventLog) *Runner {
-	return &Runner{Command: "claude", cfg: cfg, store: store, log: log,
+	return &Runner{Command: "claude", cfg: cfg, store: store, log: log, preflight: checkSandbox,
 		running: map[int]proc{}, sessions: map[int64]*sessionRun{}}
 }
 
@@ -167,6 +259,7 @@ func (r *Runner) args(a Agent, mcpConfig, prompt, systemPrompt string) []string 
 		"--allowedTools", allowedTools,
 		"--disallowedTools", disallowedTools)
 	args = append(args, isolationArgs...)
+	args = append(args, "--settings", sandboxSettings(r.cfg))
 	if r.stdinAgent(a) {
 		return args
 	}
@@ -181,6 +274,12 @@ func (r *Runner) launch(a Agent, taskTitle, prompt, systemPrompt string) (Agent,
 	mcpConfig := filepath.Join(r.cfg.AgentDir, "agent-"+id+".mcp.json")
 	logPath := filepath.Join(r.cfg.AgentDir, "agent-"+id+".jsonl")
 
+	if r.preflight != nil {
+		if err := r.preflight(); err != nil {
+			r.finish(a, taskTitle, -1, err.Error())
+			return Agent{}, fmt.Errorf("launch agent %d: %w", a.ID, err)
+		}
+	}
 	pid, done, err := r.start(a, mcpConfig, logPath, prompt, systemPrompt)
 	if err != nil {
 		r.finish(a, taskTitle, -1, err.Error())

@@ -80,7 +80,8 @@ func (a *App) shutdown(context.Context) { a.close() }
 // (FRAGILE_DATA_DIR overrides the per-user default).
 func dataDir() (string, error) {
 	if d := os.Getenv("FRAGILE_DATA_DIR"); d != "" {
-		return d, nil
+		// Absolute: agents run in another cwd and the sandbox deny rules need absolute paths.
+		return filepath.Abs(d)
 	}
 	base, err := os.UserConfigDir()
 	if err != nil {
@@ -101,10 +102,11 @@ func (a *App) open(dir string, emit func(string, any)) (err error) {
 	if err := os.Chmod(agentDir, 0o700); err != nil {
 		return err
 	}
-	if a.store, err = notes.OpenStore(filepath.Join(dir, "fragile.db")); err != nil {
+	dbPath, logPath := filepath.Join(dir, "fragile.db"), filepath.Join(dir, "events.jsonl")
+	if a.store, err = notes.OpenStore(dbPath); err != nil {
 		return err
 	}
-	if a.log, err = notes.OpenEventLog(filepath.Join(dir, "events.jsonl")); err != nil {
+	if a.log, err = notes.OpenEventLog(logPath); err != nil {
 		a.store.Close()
 		return err
 	}
@@ -122,7 +124,7 @@ func (a *App) open(dir string, emit func(string, any)) (err error) {
 	a.log.OnEvent = a.push
 	go a.loop()
 
-	a.runner = notes.NewRunner(notes.Config{Addr: ln.Addr().String(), AgentDir: agentDir}, a.store, a.log)
+	a.runner = notes.NewRunner(notes.Config{Addr: ln.Addr().String(), AgentDir: agentDir, DBPath: dbPath, LogPath: logPath}, a.store, a.log)
 	a.runner.Interactive = true
 	a.runner.OnLine = a.onLine
 	srv := &notes.Server{Store: a.store, Log: a.log, Runner: a.runner, OnEscalation: a.onEscalation}

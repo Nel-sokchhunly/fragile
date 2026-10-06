@@ -1,6 +1,8 @@
 package notes
 
 import (
+	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"slices"
@@ -26,6 +28,7 @@ func newTestRunner(t *testing.T, script string) (*Runner, *Store, Session, strin
 	}
 	t.Cleanup(func() { ev.Close() })
 	r := NewRunner(Config{Addr: "127.0.0.1:1", AgentDir: dir, WorkDir: dir}, store, ev)
+	r.preflight = nil // tests must not depend on the host's sandbox tools
 	r.Command = writeFake(t, dir, script)
 	sess, err := store.CreateSession("test")
 	if err != nil {
@@ -150,7 +153,7 @@ func TestRunnerStopAllRecordsEverything(t *testing.T) {
 }
 
 func TestRunnerArgs(t *testing.T) {
-	r := NewRunner(Config{}, nil, nil)
+	r := NewRunner(Config{AgentDir: "/d/agents", DBPath: "/d/f.db", LogPath: "/d/events.jsonl"}, nil, nil)
 	args := r.args(Agent{Role: "subagent"}, "/x/agent-3.mcp.json", "do -it", "SYS")
 	for _, want := range [][]string{
 		{"--mcp-config", "/x/agent-3.mcp.json"}, {"--append-system-prompt", "SYS"},
@@ -160,6 +163,40 @@ func TestRunnerArgs(t *testing.T) {
 		if i := slices.Index(args, want[0]); i < 0 || args[i+1] != want[1] {
 			t.Errorf("args missing %v: %v", want, args)
 		}
+	}
+	var settings struct {
+		Sandbox struct {
+			Enabled, FailIfUnavailable, AllowUnsandboxedCommands bool
+			Filesystem                                           struct{ AllowWrite, DenyRead, DenyWrite []string }
+			Credentials                                          struct{ Files []struct{ Path, Mode string } }
+			Network                                              struct{ AllowedDomains []string }
+		}
+		Permissions struct{ Deny []string }
+	}
+	if i := slices.Index(args, "--settings"); i < 0 {
+		t.Fatalf("args missing --settings: %v", args)
+	} else if err := json.Unmarshal([]byte(args[i+1]), &settings); err != nil {
+		t.Fatalf("--settings is not JSON: %v", err)
+	}
+	sb := settings.Sandbox
+	if !sb.Enabled || !sb.FailIfUnavailable || sb.AllowUnsandboxedCommands || !slices.Contains(sb.Network.AllowedDomains, "github.com") {
+		t.Errorf("sandbox settings: %+v", sb)
+	}
+	if !slices.Contains(sb.Filesystem.AllowWrite, "~/go/pkg/mod") || !slices.Contains(sb.Credentials.Files, struct{ Path, Mode string }{"~/.ssh", "deny"}) {
+		t.Errorf("sandbox misses package caches or credential denies: %+v", sb)
+	}
+	for _, p := range []string{"/d/agents", "/d/f.db", "/d/f.db-wal", "/d/events.jsonl"} {
+		if !slices.Contains(sb.Filesystem.DenyRead, p) || !slices.Contains(sb.Filesystem.DenyWrite, p) {
+			t.Errorf("sandbox does not hide %s: %+v", p, sb.Filesystem)
+		}
+	}
+	for _, rule := range []string{"Read(//d/agents)", "Edit(//d/agents)", "Read(//d/f.db)", "Edit(//d/events.jsonl)"} {
+		if !slices.Contains(settings.Permissions.Deny, rule) {
+			t.Errorf("missing deny rule %s: %v", rule, settings.Permissions.Deny)
+		}
+	}
+	if slices.Contains(args, "--bare") {
+		t.Errorf("--bare would break subscription login: %v", args)
 	}
 	if slices.Contains(args, "--input-format") {
 		t.Errorf("one-shot args take input from stdin: %v", args)
@@ -174,6 +211,16 @@ func TestRunnerArgs(t *testing.T) {
 	}
 	if !slices.Contains(args, "--strict-mcp-config") || !slices.Contains(args, "--disable-slash-commands") || !slices.Contains(args, "--verbose") || slices.Contains(args, "--dangerously-skip-permissions") {
 		t.Errorf("args: %v", args)
+	}
+}
+
+// A missing sandbox prerequisite fails the launch with a readable error and starts nothing.
+func TestRunnerLaunchNeedsSandbox(t *testing.T) {
+	r, store, sess, _ := newTestRunner(t, `echo hi`)
+	r.preflight = func() error { return errors.New(`agent sandbox needs "bwrap"`) }
+	orch, _ := store.CreateAgent(sess.ID, "orchestrator", 0, 0)
+	if _, err := r.SpawnSubagent(sess.ID, orch.ID, "t"); err == nil || !strings.Contains(err.Error(), "bwrap") {
+		t.Fatalf("err = %v, want the sandbox error", err)
 	}
 }
 
