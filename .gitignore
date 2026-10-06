@@ -1,0 +1,4 @@
+/fragile
+.fragile/
+*.db
+*.db-*
