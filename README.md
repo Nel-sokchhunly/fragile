@@ -42,3 +42,15 @@ Run `./fragile -h` for all flags.
 - `escalate_to_user` prints a marked banner to stdout and logs it; there is no way to answer in Phase 0.
 - Known limit: all agents run as your OS user with Bash, so a sub-agent could read another agent's token from its `agent-<id>.mcp.json` in the agent dir (kept `0700`/`0600`) and impersonate it. Real isolation needs a sandbox (future phase).
 - Prompts live in [notes/prompts](notes/prompts).
+
+## Desktop app (Phase 1)
+
+The desktop app lives in [app/](app) (Wails v2, React + TypeScript + Tailwind/shadcn, pnpm). It is part of the same Go module. Requires the [Wails CLI](https://wails.io/docs/gettingstarted/installation) (`go install github.com/wailsapp/wails/v2/cmd/wails@v2.14.0`), Node, and pnpm.
+
+```bash
+cd app
+wails dev     # live-reload dev window
+wails build   # production build: app/build/bin/Fragile.app on macOS
+```
+
+Backend state reaches the UI as Wails events into Zustand stores (`app/frontend/src/lib/events.ts`, `app/frontend/src/store`); components never poll. `go build ./...` works without building the frontend.
