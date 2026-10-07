@@ -1,0 +1,107 @@
+# Session snapshot: remove escalation-history N+1 reads
+
+## Journey and boundaries
+
+Assumed priority (no usage telemetry): reopening an established session from the
+sidebar is frequent and should not repeatedly read escalation data. This change
+measures **only the backend boundary `App.GetSession` entry to complete returned
+`SessionSnapshot`**. Wails transport, JSON serialization, React rendering,
+provider response time and full native interaction latency are not measured.
+No UI, provider, database schema, network or dependency changes are involved.
+
+Invariants: preserve chat IDs/order/content, attachment metadata, answered
+questions in history, only open escalations in the badge list, session isolation,
+missing/malformed-reference handling and fresh answers on subsequent reads.
+Live events continue to resolve the current escalation directly from SQLite.
+
+## Existing-tooling preflight and bottleneck
+
+The existing Go benchmark/pprof framework and SQLite store were sufficient; no
+new profiler or caching library was needed. Before baseline collection, tests
+passed for `./app`, `./notes`, and `./cmd/fragile` on upstream main `27094f3374592e044b6b9e0f534709fd6b1e63e8`.
+
+`GetSession` already retrieves all session escalations, but its chat mapping
+then called `FindEscalation` separately for every escalation history row. A
+baseline CPU profile attributed 1.33 s of 3.19 s sampled CPU to that lookup and
+2.25 s to `GetSession`. Profiles include benchmark setup/teardown even though
+benchmark timing excludes them, so these are diagnostic samples, not exact
+request CPU shares. The read/lock overhead, rather than a hypothetical render
+bottleneck, motivated the small change.
+
+Snapshot mapping now reuses an invocation-local ID map from the already-loaded
+session-scoped list. Nothing is cached across calls. By source inspection (not
+an instrumented query counter), this removes one SQL query per escalation
+history row; seven fixed queries remain for these one-orchestrator fixtures.
+
+## Controlled measurements
+
+Local lab, 2026-10-08: Apple M4, macOS Darwin 27, ARM64, Go 1.26.0;
+`GOMAXPROCS=10` (host default). Synthetic temporary file-backed SQLite databases,
+WAL mode, one connection, no network or provider calls. Each row has a fixed
+240-character assistant text payload, except every fifth row in escalation fixtures.
+Escalations alternate answered/open. Fresh fixture per benchmark calibration,
+then one explicitly excluded complete-snapshot warmup. OS/SQLite warm-cache
+measurements; not cold-start measurements or real-user monitoring.
+
+The identical benchmark harness was compiled into separate baseline and
+candidate binaries. Twelve pairs ran sequentially, alternating which binary
+ran first, with Go's adaptive iteration count and `-test.benchtime 200ms`.
+Results below summarize per-run mean `ns/op` using median and min–max over the
+12 runs. They are **not individual-request p95 percentiles**. Nanosecond units
+are Go's output units, not a claim of nanosecond measurement precision. A short
+correctness test overlapped part of collection; reported ranges retain all
+samples. Absolute sub-millisecond values are local-lab results only.
+
+| Synthetic fixture | Baseline median (range), ms | Candidate median (range), ms | Median change |
+| --- | --- | --- | --- |
+| 200 rows, no escalations | 0.458 (0.445–0.460) | 0.456 (0.444–0.472) | Within noise; no speedup claim |
+| 200 rows, 40 escalations | 0.744 (0.741–0.762) | 0.456 (0.447–0.460) | −0.288 ms / −38.7% |
+| 1,000 rows, 200 escalations | 3.360 (3.315–3.388) | 1.927 (1.892–2.266) | −1.434 ms / −42.7% |
+
+For 1,000 rows, allocations fell from 24,810 to 17,813 per call (−28.2%), and
+allocated bytes from approximately 2,150,594 to 1,933,135 (−10.1%). Ordinary
+sessions retained 3,243 allocations per call. No timing ceiling is imposed on
+CI: noisy elapsed timings would make a brittle gate. Keep the benchmark for
+controlled regression investigation and the correctness tests in the fast suite.
+
+Exact comparison identities (SHA-256):
+
+- Baseline production source: upstream main `27094f3374592e044b6b9e0f534709fd6b1e63e8`.
+- Candidate `app/sessions.go`: `86a344395787aa4385ca64cf0737fdbfd4f4c8a337dd5a8aa5309a7b4789108a`.
+- Identical `app/session_benchmark_test.go`: `cf56821e5acf0936a36227c49ac5e4f9bfb617316b0dedd2bb567f24d2a660e1`.
+- Baseline benchmark binary: `7da03add5e145b20a822d376bb41738743cc90f2e5996a9fb897de76ccaf5b20`.
+- Candidate benchmark binary: `c2c303dfeb403e9015c8d63ede03be7b93a4fea6897878542b418f1077d378a1`.
+
+## Reproduce and protect correctness
+
+Use the same Go version and host for both versions, copying the unchanged
+benchmark file into a separate clean worktree at the baseline commit. Compile
+each version separately, then alternate binary invocations:
+
+```sh
+go test -c -o /tmp/fragile-baseline.test ./app
+# In the candidate checkout:
+go test -c -o /tmp/fragile-candidate.test ./app
+# Repeat >=10 times per binary, alternating baseline/candidate order:
+/tmp/fragile-baseline.test -test.run '^$' -test.bench '^BenchmarkSessionSnapshot$' -test.benchtime 200ms -test.benchmem
+/tmp/fragile-candidate.test -test.run '^$' -test.bench '^BenchmarkSessionSnapshot$' -test.benchtime 200ms -test.benchmem
+# Diagnostic profiles, separate from timing comparisons:
+/tmp/fragile-candidate.test -test.run '^$' -test.bench '^BenchmarkSessionSnapshot/escalations_1000$' -test.benchtime 2s -test.cpuprofile /tmp/fragile-candidate.cpu
+go tool pprof /tmp/fragile-candidate.test /tmp/fragile-candidate.cpu
+
+go test -race ./app ./notes ./cmd/fragile
+go vet ./app ./notes ./cmd/fragile
+cd app/frontend && npm ci && npm run build
+```
+
+Added targeted coverage checks open/answered/repeated escalation rows,
+missing/foreign/malformed references, independent row pointers, subsequent
+answer freshness, and an old snapshot remaining unchanged. Existing tests
+exercise live MCP escalation answers and failed delivery reopening.
+
+Candidate re-profiling removes `FindEscalation` from the snapshot path. The
+remaining work is event loading/mapping and SQLite read locking; no second
+optimization is included without another controlled experiment. This bounded
+win does not establish that escalation-heavy sessions represent typical user
+traffic or that native rendering is faster. Native UI timing and field latency
+remain unverified; local/reviewed/merged/deployed states must be tracked separately.
