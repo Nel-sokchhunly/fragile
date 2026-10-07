@@ -67,6 +67,15 @@ export function agentContext(a: Agent | undefined) {
   return {text: `${tokens(a.context_used)}/${tokens(a.context_window)} ${Math.round(frac * 100)}%`, cls: usageCls(frac)}
 }
 
+// "claude-opus-5-5" -> "Opus 5.5", "claude-haiku-4-5-20251001" -> "Haiku 4.5", "claude-opus-5-5[1m]" -> "Opus 5.5 1M";
+// anything else is shown as is.
+export function modelName(id: string) {
+  const long = id.endsWith('[1m]')
+  const m = /^claude-([a-z]+)-(\d+)(?:-(\d{1,2}))?(?:-\d{8})?$/.exec(long ? id.slice(0, -4) : id)
+  if (!m) return id
+  return `${m[1][0].toUpperCase()}${m[1].slice(1)} ${m[2]}${m[3] ? `.${m[3]}` : ''}${long ? ' 1M' : ''}`
+}
+
 // "2h13m", "5d", "45m": time until a unix-seconds reset.
 export function formatReset(resetsAt: number, now: number) {
   const m = Math.max(0, Math.floor((resetsAt * 1000 - now) / 60000))
@@ -74,3 +83,10 @@ export function formatReset(resetsAt: number, now: number) {
 }
 
 export const limitPct = (w: LimitWindow | null | undefined) => (w ? `${Math.round(w.utilization * 100)}%` : '\u2014')
+
+// "812 B", "14 KB", "2.3 MB" for a file size in bytes.
+export function formatBytes(n: number) {
+  if (n < 1024) return `${n} B`
+  if (n < 1024 * 1024) return `${Math.round(n / 1024)} KB`
+  return `${(n / (1024 * 1024)).toFixed(1)} MB`
+}

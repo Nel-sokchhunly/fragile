@@ -1,5 +1,37 @@
 export namespace main {
 	
+	export class Attachment {
+	    name: string;
+	    media_type: string;
+	    data: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new Attachment(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.name = source["name"];
+	        this.media_type = source["media_type"];
+	        this.data = source["data"];
+	    }
+	}
+	export class AttachmentInfo {
+	    name: string;
+	    media_type: string;
+	    size: number;
+	
+	    static createFrom(source: any = {}) {
+	        return new AttachmentInfo(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.name = source["name"];
+	        this.media_type = source["media_type"];
+	        this.size = source["size"];
+	    }
+	}
 	export class ChatItem {
 	    id: number;
 	    kind: string;
@@ -7,6 +39,7 @@ export namespace main {
 	    name?: string;
 	    summary?: string;
 	    escalation?: notes.Escalation;
+	    attachments?: AttachmentInfo[];
 	    at: string;
 	
 	    static createFrom(source: any = {}) {
@@ -21,6 +54,7 @@ export namespace main {
 	        this.name = source["name"];
 	        this.summary = source["summary"];
 	        this.escalation = this.convertValues(source["escalation"], notes.Escalation);
+	        this.attachments = this.convertValues(source["attachments"], AttachmentInfo);
 	        this.at = source["at"];
 	    }
 	
@@ -147,6 +181,7 @@ export namespace notes {
 	    exited_at?: string;
 	    context_used?: number;
 	    context_window?: number;
+	    model?: string;
 	
 	    static createFrom(source: any = {}) {
 	        return new Agent(source);
@@ -167,6 +202,7 @@ export namespace notes {
 	        this.exited_at = source["exited_at"];
 	        this.context_used = source["context_used"];
 	        this.context_window = source["context_window"];
+	        this.model = source["model"];
 	    }
 	}
 	export class AgentEvent {

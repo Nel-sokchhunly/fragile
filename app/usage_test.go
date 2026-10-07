@@ -54,6 +54,14 @@ func TestUsageTrackedAndPersisted(t *testing.T) {
 	if got.ContextUsed != 6 || got.ContextWindow != 1_000_000 {
 		t.Fatalf("agent context = %d/%d", got.ContextUsed, got.ContextWindow)
 	}
+	if got.Model != "m[1m]" {
+		t.Fatalf("agent model = %q", got.Model)
+	}
+	// A model change alone (same context) is stored too.
+	a.trackUsage(orch, []byte(`{"type":"system","subtype":"init","model":"claude-opus-5-5[1m]"}`))
+	if m := snapshot(t, a, se.ID).Agents[0].Model; m != "claude-opus-5-5[1m]" {
+		t.Fatalf("agent model after second init = %q", m)
+	}
 	if l := a.GetRateLimit(); l == nil || l.FiveHour == nil || l.FiveHour.Utilization != 0.5 || l.SevenDay != nil {
 		t.Fatalf("limit = %+v", l)
 	}
@@ -61,8 +69,8 @@ func TestUsageTrackedAndPersisted(t *testing.T) {
 	a.close()
 
 	b, _ := newTestApp(t, dir, "")
-	if s := snapshot(t, b, se.ID).Agents[0]; s.ContextUsed != 6 || s.ContextWindow != 1_000_000 {
-		t.Errorf("after restart: %d/%d", s.ContextUsed, s.ContextWindow)
+	if s := snapshot(t, b, se.ID).Agents[0]; s.ContextUsed != 6 || s.ContextWindow != 1_000_000 || s.Model != "claude-opus-5-5[1m]" {
+		t.Errorf("after restart: %d/%d %q", s.ContextUsed, s.ContextWindow, s.Model)
 	}
 	if l := b.GetRateLimit(); l == nil || l.FiveHour == nil || l.FiveHour.ResetsAt != 10 {
 		t.Errorf("limit after restart = %+v", l)

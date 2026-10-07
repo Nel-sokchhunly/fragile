@@ -13,9 +13,13 @@ export function DeleteSession(arg1:number):Promise<void>;
 
 export function GetAgentEvents(arg1:number,arg2:number,arg3:number):Promise<Array<notes.AgentEvent>>;
 
+export function GetAttachment(arg1:number,arg2:number,arg3:number):Promise<string>;
+
 export function GetRateLimit():Promise<main.RateLimit>;
 
 export function GetSession(arg1:number):Promise<main.SessionSnapshot>;
+
+export function InterruptSession(arg1:number):Promise<void>;
 
 export function ListSessions():Promise<Array<notes.Session>>;
 
@@ -23,7 +27,7 @@ export function PickDirectory():Promise<string>;
 
 export function ResumeSession(arg1:number):Promise<void>;
 
-export function SendMessage(arg1:number,arg2:string):Promise<void>;
+export function SendMessage(arg1:number,arg2:string,arg3:Array<main.Attachment>):Promise<void>;
 
 export function StopSession(arg1:number):Promise<void>;
 

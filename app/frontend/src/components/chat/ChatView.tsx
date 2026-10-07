@@ -1,4 +1,4 @@
-import {memo, useCallback, useMemo, useState} from 'react'
+import {memo, useCallback, useEffect, useMemo, useState} from 'react'
 import {useNow} from '@/hooks/use-now'
 import {Virtuoso} from 'react-virtuoso'
 import {ChevronRight, Play, Square, Wrench} from 'lucide-react'
@@ -7,10 +7,11 @@ import {Collapsible, CollapsibleContent, CollapsibleTrigger} from '@/components/
 import {Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger} from '@/components/ui/dialog'
 import {Textarea} from '@/components/ui/textarea'
 import {Tooltip, TooltipContent, TooltipTrigger} from '@/components/ui/tooltip'
+import {SentAttachments} from '@/components/chat/Attachments'
 import {Composer} from '@/components/chat/Composer'
 import {Markdown} from '@/components/Markdown'
 import {api} from '@/lib/api'
-import {agentContext, agentLabel, agentState, agentSummary, formatElapsed, formatExact, formatTime} from '@/lib/format'
+import {agentContext, agentLabel, agentState, agentSummary, formatElapsed, formatExact, formatTime, modelName} from '@/lib/format'
 import type {ChatItem, SessionStatus} from '@/lib/types'
 import {cn} from '@/lib/utils'
 import {NO_AGENTS, NO_CHAT, orchestratorRunning, useAppStore} from '@/store/app'
@@ -120,7 +121,10 @@ const Row = memo(function Row({sessionId, item, open, onToggle}: {sessionId: num
       {item.kind === 'user' && (
         <div className="group flex items-end justify-end gap-2">
           <time className="font-mono text-mini leading-5 text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100" dateTime={item.at} title={formatExact(item.at)}>{formatTime(item.at)}</time>
-          <div className="max-w-[80%] rounded-lg bg-surface-sunken px-3 py-1.5 whitespace-pre-wrap break-words">{item.text}</div>
+          <div className="grid max-w-[80%] min-w-0 justify-items-end gap-1">
+            {!!item.attachments?.length && <SentAttachments sessionId={sessionId} itemId={item.id} attachments={item.attachments}/>}
+            {item.text && <div className="max-w-full rounded-lg bg-surface-sunken px-3 py-1.5 whitespace-pre-wrap break-words">{item.text}</div>}
+          </div>
         </div>
       )}
       {item.kind === 'assistant' && <div className="font-serif text-assistant"><Markdown>{item.text}</Markdown></div>}
@@ -239,6 +243,17 @@ export function ChatView({sessionId}: {sessionId: number}) {
   const lead = agents.findLast((a) => a.role === 'orchestrator') // latest: earlier ones failed to launch
   const ctx = agentContext(lead)
   const st = session && STATUS_TEXT[session.status === 'done' && !session.agent_count ? 'new' : session.status]
+  // Esc interrupts the current turn (not inside a dialog) by clicking the composer's Interrupt button, so errors show there.
+  useEffect(() => {
+    if (!working) return
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape' || e.defaultPrevented || e.isComposing || document.querySelector('[role=dialog]')) return
+      const b = document.querySelector<HTMLButtonElement>('[data-interrupt]')
+      if (b && !b.disabled) { e.preventDefault(); b.click() }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [working])
 
   return (
     <div className="flex h-full min-h-0 min-w-0 flex-col">
@@ -250,7 +265,7 @@ export function ChatView({sessionId}: {sessionId: number}) {
           </div>
           <div className="flex min-w-0 items-baseline gap-2 font-mono text-xs leading-4 text-muted-foreground">
             <span className="min-w-0 truncate" title={lead ? `pid ${lead.pid ?? '-'} · started ${formatExact(lead.created_at)}` : undefined}>
-              orchestrator{lead ? ` ${lead.status === 'running' ? `pid ${lead.pid ?? '-'}` : agentState(lead)}` : ' not started'} · {ctx && <><span className={ctx.cls}>ctx {ctx.text}</span> · </>}{agentSummary(agents)}
+              orchestrator{lead ? ` ${lead.status === 'running' ? `pid ${lead.pid ?? '-'}` : agentState(lead)}` : ' not started'} · {lead?.model && <><span title={lead.model}>{modelName(lead.model)}</span> · </>}{ctx &&<><span className={ctx.cls}>ctx {ctx.text}</span> · </>}{agentSummary(agents)}
             </span>
           </div>
         </div>
@@ -267,7 +282,8 @@ export function ChatView({sessionId}: {sessionId: number}) {
         )}
       </div>
       <Composer
-        onSend={(t) => send(sessionId, t)} label="Message the orchestrator" placeholder="Message the orchestrator"
+        onSend={(t, atts) => send(sessionId, t, atts)} label="Message the orchestrator" placeholder="Message the orchestrator"
+        onInterrupt={working ? () => api.interruptSession(sessionId) : undefined}
         disabledReason={loaded && lead && !running ? <ResumeNotice key={sessionId} sessionId={sessionId}/> : undefined}
       />
     </div>

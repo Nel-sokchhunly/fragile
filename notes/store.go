@@ -274,14 +274,16 @@ type Agent struct {
 
 	ContextUsed   int `json:"context_used,omitempty"`   // tokens in the latest assistant message; 0 = unknown
 	ContextWindow int `json:"context_window,omitempty"` // the model's window; 0 = unknown
+
+	Model string `json:"model,omitempty"` // from the stream-json init line; "" = unknown
 }
 
 const agentCols = `id, session_id, COALESCE(parent_id,0), role, token, COALESCE(task_id,0), status,
-	COALESCE(pid,0), COALESCE(log_path,''), exit_code, created_at, COALESCE(exited_at,''), context_used, context_window`
+	COALESCE(pid,0), COALESCE(log_path,''), exit_code, created_at, COALESCE(exited_at,''), context_used, context_window, model`
 
 func scanAgent(r scanner) (a Agent, err error) {
 	err = r.Scan(&a.ID, &a.SessionID, &a.ParentID, &a.Role, &a.Token, &a.TaskID, &a.Status,
-		&a.PID, &a.LogPath, &a.ExitCode, &a.CreatedAt, &a.ExitedAt, &a.ContextUsed, &a.ContextWindow)
+		&a.PID, &a.LogPath, &a.ExitCode, &a.CreatedAt, &a.ExitedAt, &a.ContextUsed, &a.ContextWindow, &a.Model)
 	return a, one(err)
 }
 
@@ -385,6 +387,12 @@ func (s *Store) SetAgentProcess(sessionID, id int64, pid int, logPath string) er
 func (s *Store) SetAgentContext(sessionID, id int64, used, window int) error {
 	return affected(s.db.Exec(`UPDATE agent_instances SET context_used = ?, context_window = ? WHERE id = ? AND session_id = ?`,
 		used, window, id, sessionID))
+}
+
+// SetAgentModel records the model the agent runs on.
+func (s *Store) SetAgentModel(sessionID, id int64, model string) error {
+	return affected(s.db.Exec(`UPDATE agent_instances SET model = ? WHERE id = ? AND session_id = ?`,
+		model, id, sessionID))
 }
 
 // SetAgentStatus updates status; exited_at is stamped for any status but running.

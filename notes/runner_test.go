@@ -430,6 +430,64 @@ func TestRunnerInteractiveStdinAndOnLine(t *testing.T) {
 	}
 }
 
+// SendUserContent writes the content blocks as given, in one line however long.
+func TestRunnerSendUserContent(t *testing.T) {
+	r, _, sess, _ := newTestRunner(t, `cat`)
+	r.Interactive = true
+	got := make(chan []byte, 4)
+	r.OnLine = func(a Agent, l []byte) {
+		select {
+		case got <- append([]byte(nil), l...):
+		default:
+		}
+	}
+	a, err := r.StartOrchestrator(sess.ID, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer r.StopAll()
+	if err := r.SendUserContent(a.ID, nil); err == nil {
+		t.Error("empty content accepted")
+	}
+	data := strings.Repeat("A", 1<<20)
+	blocks := []map[string]any{
+		{"type": "text", "text": "look"},
+		{"type": "image", "source": map[string]any{"type": "base64", "media_type": "image/png", "data": data}},
+	}
+	if err := r.SendUserContent(a.ID, blocks); err != nil {
+		t.Fatal(err)
+	}
+	var line []byte
+	select {
+	case line = <-got:
+	case <-time.After(5 * time.Second):
+		t.Fatal("no output line")
+	}
+	var msg struct {
+		Type    string `json:"type"`
+		Message struct {
+			Role    string `json:"role"`
+			Content []struct {
+				Type   string `json:"type"`
+				Text   string `json:"text"`
+				Source struct {
+					Type      string `json:"type"`
+					MediaType string `json:"media_type"`
+					Data      string `json:"data"`
+				} `json:"source"`
+			} `json:"content"`
+		} `json:"message"`
+	}
+	if err := json.Unmarshal(line, &msg); err != nil {
+		t.Fatal(err)
+	}
+	c := msg.Message.Content
+	if msg.Type != "user" || msg.Message.Role != "user" || len(c) != 2 || c[0].Type != "text" || c[0].Text != "look" ||
+		c[1].Type != "image" || c[1].Source.Type != "base64" || c[1].Source.MediaType != "image/png" || c[1].Source.Data != data {
+		t.Fatalf("message = %.300s", line)
+	}
+}
+
 func TestLineWriter(t *testing.T) {
 	var lines []string
 	var out strings.Builder

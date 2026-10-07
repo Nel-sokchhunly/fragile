@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -12,6 +13,7 @@ import (
 	"strings"
 	"syscall"
 	"time"
+	"unicode/utf8"
 
 	"github.com/Nel-sokchhunly/fragile/notes"
 )
@@ -21,13 +23,209 @@ import (
 // tool calls, and escalations. IDs are the ids of the underlying agent_events
 // rows, so they are unique and ordered within a session.
 type ChatItem struct {
-	ID         int64             `json:"id"`
-	Kind       string            `json:"kind"` // user | assistant | tool | escalation
-	Text       string            `json:"text,omitempty"`
-	Name       string            `json:"name,omitempty"`    // tool
-	Summary    string            `json:"summary,omitempty"` // tool
-	Escalation *notes.Escalation `json:"escalation,omitempty"`
-	At         string            `json:"at"`
+	ID          int64             `json:"id"`
+	Kind        string            `json:"kind"` // user | assistant | tool | escalation
+	Text        string            `json:"text,omitempty"`
+	Name        string            `json:"name,omitempty"`        // tool
+	Summary     string            `json:"summary,omitempty"`     // tool
+	Escalation  *notes.Escalation `json:"escalation,omitempty"`  // escalation
+	Attachments []AttachmentInfo  `json:"attachments,omitempty"` // user; GetAttachment loads one by index
+	At          string            `json:"at"`
+}
+
+// Attachment is a file the user sends with a chat message. Data is the base64
+// of the file's bytes (no data: prefix).
+type Attachment struct {
+	Name      string `json:"name"`
+	MediaType string `json:"media_type"`
+	Data      string `json:"data"`
+}
+
+// AttachmentInfo describes a sent attachment; Size is in decoded bytes.
+type AttachmentInfo struct {
+	Name      string `json:"name"`
+	MediaType string `json:"media_type"`
+	Size      int64  `json:"size"`
+}
+
+// Attachment limits (sizes are of the decoded bytes).
+const (
+	maxAttachments     = 10
+	maxImageBytes      = 5 << 20
+	maxPDFBytes        = 10 << 20
+	maxTextBytes       = 256 << 10
+	maxAttachmentBytes = 20 << 20 // all of one message's attachments together
+)
+
+// userMessage is the payload of a user_message agent event.
+type userMessage struct {
+	Text        string           `json:"text"`
+	Attachments []AttachmentInfo `json:"attachments,omitempty"`
+}
+
+// attachment is a validated Attachment: what is stored and the content block sent.
+type attachment struct {
+	info  AttachmentInfo
+	data  []byte
+	block map[string]any
+}
+
+var imageTypes = map[string]bool{"image/png": true, "image/jpeg": true, "image/gif": true, "image/webp": true}
+
+// textTypes are the non-text/* media types accepted as text files.
+var textTypes = map[string]bool{
+	"application/json": true, "application/xml": true, "application/javascript": true,
+	"application/x-javascript": true, "application/typescript": true, "application/x-sh": true,
+	"application/x-yaml": true, "application/yaml": true, "application/toml": true, "application/sql": true,
+	"application/x-httpd-php": true, "application/x-python": true, "application/graphql": true,
+}
+
+// prepareAttachments validates the attachments and builds their content blocks.
+// Errors name the offending file.
+func prepareAttachments(in []Attachment) ([]attachment, error) {
+	if len(in) > maxAttachments {
+		return nil, fmt.Errorf("too many attachments: %d (at most %d)", len(in), maxAttachments)
+	}
+	out := make([]attachment, 0, len(in))
+	total := 0
+	for _, at := range in {
+		name := safeName(at.Name)
+		mt := strings.ToLower(strings.TrimSpace(at.MediaType))
+		if i := strings.IndexByte(mt, ';'); i >= 0 { // "text/plain; charset=utf-8"
+			mt = strings.TrimSpace(mt[:i])
+		}
+		var limit int
+		switch {
+		case imageTypes[mt]:
+			limit = maxImageBytes
+		case mt == "application/pdf":
+			limit = maxPDFBytes
+		case strings.HasPrefix(mt, "text/") || textTypes[mt]:
+			limit = maxTextBytes
+		default:
+			return nil, fmt.Errorf("%q: unsupported file type %q (images, PDFs and text files only)", name, at.MediaType)
+		}
+		if base64.StdEncoding.DecodedLen(len(at.Data)) > limit+3 { // before decoding something huge
+			return nil, fmt.Errorf("%q is too large (at most %s)", name, sizeString(limit))
+		}
+		data, err := base64.StdEncoding.DecodeString(at.Data)
+		if err != nil {
+			return nil, fmt.Errorf("%q: invalid base64 data", name)
+		}
+		switch {
+		case len(data) == 0:
+			return nil, fmt.Errorf("%q is empty", name)
+		case len(data) > limit:
+			return nil, fmt.Errorf("%q is too large (at most %s)", name, sizeString(limit))
+		}
+		if total += len(data); total > maxAttachmentBytes {
+			return nil, fmt.Errorf("attachments are too large together at %q (at most %s in total)", name, sizeString(maxAttachmentBytes))
+		}
+		var block map[string]any
+		switch {
+		case imageTypes[mt]:
+			block = map[string]any{"type": "image", "source": map[string]any{"type": "base64", "media_type": mt, "data": at.Data}}
+		case mt == "application/pdf":
+			block = map[string]any{"type": "document", "source": map[string]any{"type": "base64", "media_type": mt, "data": at.Data}}
+		default:
+			if !utf8.Valid(data) {
+				return nil, fmt.Errorf("%q is not valid UTF-8 text", name)
+			}
+			block = map[string]any{"type": "text", "text": "<file name=\"" + name + "\">\n" + string(data) + "\n</file>"}
+		}
+		out = append(out, attachment{info: AttachmentInfo{Name: name, MediaType: mt, Size: int64(len(data))}, data: data, block: block})
+	}
+	return out, nil
+}
+
+// safeName reduces a file name to a base name that is safe on disk and inside
+// the <file name="..."> tag: no path, no separators, quotes or control characters.
+func safeName(name string) string {
+	name = strings.ReplaceAll(name, `\`, "/")
+	if i := strings.LastIndexByte(name, '/'); i >= 0 {
+		name = name[i+1:]
+	}
+	name = strings.Map(func(r rune) rune {
+		if r < 0x20 || r == 0x7f || strings.ContainsRune(`/\:*?"<>|`, r) {
+			return '_'
+		}
+		return r
+	}, strings.ToValidUTF8(name, "_"))
+	name = strings.TrimSpace(name)
+	if rs := []rune(name); len(rs) > 100 {
+		name = string(rs[len(rs)-100:]) // keep the extension
+	}
+	if strings.Trim(name, ".") == "" {
+		return "file"
+	}
+	return name
+}
+
+func sizeString(n int) string {
+	if n >= 1<<20 {
+		return fmt.Sprintf("%d MB", n>>20)
+	}
+	return fmt.Sprintf("%d KB", n>>10)
+}
+
+// attachmentPath is where a user message's attachment is stored:
+// <dataDir>/attachments/<session>/<event>/<index>-<name>.
+func (a *App) attachmentPath(sessionID, eventID int64, index int, name string) string {
+	return filepath.Join(a.eventAttachDir(sessionID, eventID), fmt.Sprintf("%d-%s", index, safeName(name)))
+}
+
+func (a *App) eventAttachDir(sessionID, eventID int64) string {
+	return filepath.Join(a.attachDir, strconv.FormatInt(sessionID, 10), strconv.FormatInt(eventID, 10))
+}
+
+// saveAttachments writes a user message's attachments to disk; on error it removes what it wrote.
+func (a *App) saveAttachments(sessionID, eventID int64, atts []attachment) error {
+	if len(atts) == 0 {
+		return nil
+	}
+	dir := a.eventAttachDir(sessionID, eventID)
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return err
+	}
+	for i, at := range atts {
+		if err := os.WriteFile(a.attachmentPath(sessionID, eventID, i, at.info.Name), at.data, 0o600); err != nil {
+			os.RemoveAll(dir)
+			return fmt.Errorf("saving attachment %q: %w", at.info.Name, err)
+		}
+	}
+	return nil
+}
+
+// GetAttachment returns attachment index of the session's user chat message
+// chatItemID as a data URL ("data:<media_type>;base64,...").
+func (a *App) GetAttachment(sessionID, chatItemID int64, index int) (string, error) {
+	orchs, err := a.store.ListAgents(sessionID, "orchestrator")
+	if err != nil {
+		return "", err
+	}
+	for _, o := range orchs {
+		evs, err := a.store.ListAgentEvents(sessionID, o.ID, chatItemID-1, 1)
+		if err != nil {
+			return "", err
+		}
+		if len(evs) == 0 || evs[0].ID != chatItemID {
+			continue
+		}
+		var p userMessage
+		if evs[0].Type != evUserMessage || json.Unmarshal([]byte(evs[0].Payload), &p) != nil {
+			break
+		}
+		if index < 0 || index >= len(p.Attachments) {
+			return "", fmt.Errorf("message %d has no attachment %d", chatItemID, index)
+		}
+		info := p.Attachments[index]
+		b, err := os.ReadFile(a.attachmentPath(sessionID, chatItemID, index, info.Name))
+		if err != nil {
+			return "", fmt.Errorf("attachment %q: %w", info.Name, err)
+		}
+		return "data:" + info.MediaType + ";base64," + base64.StdEncoding.EncodeToString(b), nil
+	}
+	return "", fmt.Errorf("message %d not found in session %d", chatItemID, sessionID)
 }
 
 // SessionSnapshot is everything the UI shows for one session; live changes
@@ -82,10 +280,15 @@ func (a *App) CreateSession(name, workDir string) (notes.Session, error) {
 }
 
 // SendMessage sends a chat message to the session's orchestrator, starting it
-// first if the session has never had one.
-func (a *App) SendMessage(sessionID int64, text string) error {
-	if strings.TrimSpace(text) == "" {
+// first if the session has never had one. The text may be empty if there are
+// attachments (images, PDFs, text files; see prepareAttachments for the limits).
+func (a *App) SendMessage(sessionID int64, text string, attachments []Attachment) error {
+	if strings.TrimSpace(text) == "" && len(attachments) == 0 {
 		return errors.New("message must not be empty")
+	}
+	atts, err := prepareAttachments(attachments)
+	if err != nil {
+		return err
 	}
 	a.startMu.Lock()
 	orchs, err := a.store.ListAgents(sessionID, "orchestrator")
@@ -104,7 +307,7 @@ func (a *App) SendMessage(sessionID int64, text string) error {
 	if err != nil {
 		return err
 	}
-	return a.deliver(orch, text, true)
+	return a.deliver(orch, text, atts, true)
 }
 
 // neverStarted reports whether the session has no orchestrator that ever did
@@ -156,7 +359,7 @@ func (a *App) ResumeSession(sessionID int64) error {
 	if err != nil {
 		return err
 	}
-	return a.deliver(orch, resumeMessage, true)
+	return a.deliver(orch, resumeMessage, nil, true)
 }
 
 // claudeSessionID returns the Claude Code session id from the newest init line
@@ -193,7 +396,8 @@ func (a *App) StopSession(sessionID int64) error {
 }
 
 // DeleteSession stops the session's agents, then removes it and everything tied
-// to it from the database, plus the agents' MCP configs and output logs. The
+// to it from the database, plus the agents' MCP configs and output logs and the
+// chat attachments. The
 // session's working directory and events.jsonl are left alone.
 func (a *App) DeleteSession(sessionID int64) error {
 	if _, err := a.store.GetSession(sessionID); err != nil {
@@ -219,6 +423,9 @@ func (a *App) DeleteSession(sessionID int64) error {
 		for _, ext := range []string{".mcp.json", ".jsonl"} {
 			os.Remove(filepath.Join(a.agentDir, fmt.Sprintf("agent-%d%s", ag.ID, ext)))
 		}
+	}
+	if err := os.RemoveAll(filepath.Join(a.attachDir, strconv.FormatInt(sessionID, 10))); err != nil {
+		log.Printf("session %d: removing attachments: %v", sessionID, err)
 	}
 	a.log.Write(notes.EventSessionDeleted, sessionID, 0, nil)
 	return nil
@@ -308,7 +515,7 @@ func (a *App) AnswerEscalation(escalationID int64, answer string) error {
 	if e, err = a.store.AnswerEscalation(e.SessionID, e.ID, answer); err != nil {
 		return err
 	}
-	if err := a.deliver(orch, msg, false); err != nil { // the chat shows the answer on the escalation itself
+	if err := a.deliver(orch, msg, nil, false); err != nil { // the chat shows the answer on the escalation itself
 		if rerr := a.store.ReopenEscalation(e.SessionID, e.ID); rerr != nil {
 			log.Printf("escalation %d: reopening after failed delivery: %v", e.ID, rerr)
 		}
@@ -351,22 +558,41 @@ func (a *App) liveOrchestrator(sessionID int64) (notes.Agent, error) {
 // failed send leaves no phantom chat message. The row is reserved first (its id
 // then orders it before the orchestrator's reply, which can arrive at once) and
 // removed again if the write fails; it is published after the write. The
-// orchestrator is mid-turn from then on.
-func (a *App) deliver(orch notes.Agent, text string, persist bool) error {
+// orchestrator is mid-turn from then on. Attachments (persisted messages only)
+// are saved under the row's id once it exists and removed again with it.
+func (a *App) deliver(orch notes.Agent, text string, atts []attachment, persist bool) error {
 	a.sendMu.Lock()
 	defer a.sendMu.Unlock()
+	var blocks []map[string]any
+	if strings.TrimSpace(text) != "" {
+		blocks = append(blocks, map[string]any{"type": "text", "text": text})
+	}
+	msg := userMessage{Text: text}
+	for _, at := range atts {
+		blocks = append(blocks, at.block)
+		msg.Attachments = append(msg.Attachments, at.info)
+	}
 	var ev notes.AgentEvent
 	if persist {
-		b, _ := json.Marshal(map[string]string{"text": text})
+		b, _ := json.Marshal(msg)
 		var err error
 		if ev, err = a.store.AppendAgentEvent(orch.SessionID, orch.ID, evUserMessage, string(b)); err != nil {
 			return err
 		}
+		if err := a.saveAttachments(orch.SessionID, ev.ID, atts); err != nil {
+			a.store.DeleteAgentEvent(orch.SessionID, orch.ID, ev.ID)
+			a.setBusy(orch.SessionID, false) // a first message set it before starting the orchestrator
+			a.recompute(orch.SessionID)
+			return err
+		}
 	}
 	a.setBusy(orch.SessionID, true)
-	if err := a.runner.SendUser(orch.ID, text); err != nil {
+	if err := a.runner.SendUserContent(orch.ID, blocks); err != nil {
 		if persist {
 			a.store.DeleteAgentEvent(orch.SessionID, orch.ID, ev.ID)
+			if len(atts) > 0 {
+				os.RemoveAll(a.eventAttachDir(orch.SessionID, ev.ID))
+			}
 		}
 		a.setBusy(orch.SessionID, false)
 		a.recompute(orch.SessionID)
@@ -432,26 +658,32 @@ func (a *App) publish(ag notes.Agent, ev notes.AgentEvent) {
 func (a *App) chatItem(sessionID int64, ev notes.AgentEvent) (ChatItem, bool) {
 	item := ChatItem{ID: ev.ID, At: ev.CreatedAt}
 	var p struct {
-		Text         string          `json:"text"`
-		Name         string          `json:"name"`
-		Input        json.RawMessage `json:"input"`
-		EscalationID int64           `json:"escalation_id"`
-		IsError      bool            `json:"is_error"`
-		Result       string          `json:"result"`
+		Text         string           `json:"text"`
+		Name         string           `json:"name"`
+		Input        json.RawMessage  `json:"input"`
+		EscalationID int64            `json:"escalation_id"`
+		IsError      bool             `json:"is_error"`
+		Result       string           `json:"result"`
+		Subtype      string           `json:"subtype"`
+		Attachments  []AttachmentInfo `json:"attachments"`
 	}
 	if json.Unmarshal([]byte(ev.Payload), &p) != nil {
 		return item, false
 	}
 	switch ev.Type {
 	case evUserMessage:
-		item.Kind, item.Text = "user", p.Text
+		item.Kind, item.Text, item.Attachments = "user", p.Text, p.Attachments
 	case evAssistantText:
 		item.Kind, item.Text = "assistant", p.Text
 	case evResult:
-		if !p.IsError {
+		switch {
+		case !p.IsError:
 			return item, false
+		case p.Subtype == "error_during_execution" && p.Result == "": // how an interrupted turn ends
+			item.Kind, item.Text = "assistant", "Interrupted."
+		default:
+			item.Kind, item.Text = "assistant", "Error: "+p.Result
 		}
-		item.Kind, item.Text = "assistant", "Error: "+p.Result
 	case evToolUse:
 		item.Kind, item.Name, item.Summary = "tool", strings.TrimPrefix(p.Name, "mcp__fragile__"), toolSummary(p.Input)
 	case evEscalation:

@@ -1,5 +1,5 @@
 import {MessageSquare, Terminal} from 'lucide-react'
-import {agentContext, agentState, formatExact} from '@/lib/format'
+import {agentContext, agentState, formatExact, modelName} from '@/lib/format'
 import {cn} from '@/lib/utils'
 import type {Agent, Task} from '@/lib/types'
 
@@ -40,6 +40,7 @@ export function AgentCard({agent, task, latestLine, elapsed, selected, onSelect}
       <span className="flex w-full justify-between gap-2 leading-5">
         <span className="min-w-0 truncate font-semibold"><span className="font-mono text-xs font-normal text-muted-foreground">#{agent.id}</span> {title}</span>
         <span className="flex shrink-0 gap-2 font-mono text-xs">
+          {agent.model && <span className="text-muted-foreground" title={agent.model}>{modelName(agent.model)}</span>}
           {ctx && <span className={ctx.cls} title="context used / window">{ctx.text}</span>}
           <span className={STATE_CLS[agent.status]}>{agentState(agent)} {elapsed}</span>
         </span>
