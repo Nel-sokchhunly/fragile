@@ -276,6 +276,7 @@ export namespace notes {
 	    }
 	}
 	export class Session {
+	    provider: string;
 	    id: number;
 	    title: string;
 	    status: string;
@@ -293,6 +294,7 @@ export namespace notes {
 	        this.title = source["title"];
 	        this.status = source["status"];
 	        this.work_dir = source["work_dir"];
+	        this.provider = source["provider"];
 	        this.created_at = source["created_at"];
 	        this.agent_count = source["agent_count"];
 	    }

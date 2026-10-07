@@ -222,7 +222,8 @@ const (
 // One Runner serves every session of a store; sessions can be stopped
 // individually (StopSession) or together (StopAll).
 type Runner struct {
-	Command string // binary to run; "claude" unless a test substitutes a fake
+	CodexCommand string // Codex CLI binary; defaults to codex
+	Command      string // binary to run; "claude" unless a test substitutes a fake
 
 	// Interactive (set before use) makes the orchestrator a long-lived process
 	// that reads stream-json user messages from stdin (see SendUser) instead of
@@ -254,6 +255,7 @@ type proc struct {
 	sessionID int64
 	agentID   int64
 	exited    chan struct{}
+	codex     *codexClient
 	stdin     *stdinPipe // nil unless the agent takes messages on stdin
 	killed    bool       // the runner signalled it on purpose (stop); guarded by Runner.mu
 }
@@ -298,7 +300,7 @@ func (r *Runner) workDir(sessionID int64) string {
 }
 
 func NewRunner(cfg Config, store *Store, log *EventLog) *Runner {
-	r := &Runner{Command: "claude", cfg: cfg, store: store, log: log,
+	r := &Runner{Command: "claude", CodexCommand: "codex", cfg: cfg, store: store, log: log,
 		running: map[int]*proc{}, sessions: map[int64]*sessionRun{}}
 	r.Preflight = func() error { return checkPrereqs(r.Command) }
 	return r
@@ -339,7 +341,7 @@ func (r *Runner) StartOrchestrator(sessionID int64, task string) (Agent, error) 
 // session gets fresh run state, as stop() may still be returning from Wait on the old.
 func (r *Runner) ResumeOrchestrator(sessionID int64, claudeSessionID string) (Agent, error) {
 	if claudeSessionID == "" {
-		return Agent{}, errors.New("no Claude Code session to resume")
+		return Agent{}, errors.New("no provider conversation to resume")
 	}
 	r.mu.Lock()
 	sr := r.session(sessionID)
@@ -368,6 +370,11 @@ func (r *Runner) SpawnSubagent(sessionID, parentID int64, title, task, model str
 		return Agent{}, err
 	} else if p.Role != "orchestrator" {
 		return Agent{}, errors.New("only an orchestrator can spawn sub-agents")
+	}
+	if r.provider(sessionID) == ProviderCodex {
+		if err := validCodexModel(model); err != nil {
+			return Agent{}, err
+		}
 	}
 	if len(task) > maxTaskBytes {
 		return Agent{}, fmt.Errorf("task is %d bytes; the limit is %d", len(task), maxTaskBytes)
@@ -455,8 +462,12 @@ func (r *Runner) launch(a Agent, taskTitle, prompt, systemPrompt, resume, model 
 	mcpConfig := filepath.Join(r.cfg.AgentDir, "agent-"+id+".mcp.json")
 	logPath := filepath.Join(r.cfg.AgentDir, "agent-"+id+".jsonl")
 
-	if r.Preflight != nil {
-		if err := r.Preflight(); err != nil {
+	preflight := r.Preflight
+	if r.provider(a.SessionID) == ProviderCodex && preflight != nil {
+		preflight = func() error { return checkCodexPrereqs(r.CodexCommand) }
+	}
+	if preflight != nil {
+		if err := preflight(); err != nil {
 			r.finish(a, taskTitle, -1, err.Error(), false)
 			return Agent{}, fmt.Errorf("launch agent %d: %w", a.ID, err)
 		}
@@ -485,6 +496,9 @@ func (r *Runner) launch(a Agent, taskTitle, prompt, systemPrompt, resume, model 
 // start writes the MCP config and starts the process in its own process
 // group. The returned channel yields how it ended once the process is gone.
 func (r *Runner) start(a Agent, mcpConfig, logPath, prompt, systemPrompt, resume, model string) (int, <-chan exit, error) {
+	if r.provider(a.SessionID) == ProviderCodex {
+		return r.startCodex(a, mcpConfig, logPath, prompt, systemPrompt, resume, model)
+	}
 	// Refuse before any file is written; checked again under the lock below.
 	r.mu.Lock()
 	refused := r.refusing(a.SessionID)

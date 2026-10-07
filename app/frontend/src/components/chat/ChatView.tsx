@@ -305,6 +305,7 @@ export function ChatView({sessionId}: {sessionId: number}) {
         <div className="grid min-w-0 flex-1">
           <div className="flex min-w-0 items-baseline gap-2.5">
             <h1 className="min-w-0 truncate text-title font-semibold">{session?.title}</h1>
+            <span className="shrink-0 text-xs text-muted-foreground">{session?.provider === 'codex' ? 'Codex' : 'Claude'}</span>
             {st && <span className={cn('shrink-0 font-mono text-xs', st.cls)}>{st.label}</span>}
           </div>
           <div className="flex min-w-0 items-baseline gap-2 font-mono text-xs leading-4 text-muted-foreground">

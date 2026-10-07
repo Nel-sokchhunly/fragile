@@ -10,6 +10,7 @@ import (
 // compactBoundary is the part of Claude Code's system/compact_boundary line the app uses.
 type compactBoundary struct {
 	Subtype  string `json:"subtype"`
+	Provider string `json:"provider"`
 	Metadata struct {
 		Trigger    string `json:"trigger"` // manual | auto
 		PreTokens  int    `json:"pre_tokens"`
@@ -37,6 +38,9 @@ func (a *App) CompactSession(sessionID int64) error {
 
 // compactNotice is the chat text for a compaction: "Context compacted (manual): 25.4k → 4.7k tokens".
 func compactNotice(c compactBoundary) string {
+	if c.Provider == "codex" {
+		return "Context compacted."
+	}
 	trigger := c.Metadata.Trigger
 	if trigger == "" {
 		trigger = "auto"

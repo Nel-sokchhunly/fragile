@@ -12,12 +12,14 @@ const exact = (w: LimitWindow | null, now: number) =>
 export function LimitLine({compact}: {compact?: boolean}) {
   const limit = useAppStore((s) => s.limit)
   const now = useNow(60_000)
+  const isCodex = useAppStore((s) => s.sessions.find((x) => x.id === s.selectedSessionId)?.provider === 'codex')
   const five = limit?.five_hour ?? null
   const seven = limit?.seven_day ?? null
   const title = `5h: ${limitPct(five)}, ${exact(five, now)}\n7d: ${limitPct(seven)}, ${exact(seven, now)}`
   const part = (label: string, w: LimitWindow | null) => (
     <span className={usageCls(w?.utilization ?? 0)}>{label} {limitPct(w)}</span>
   )
+  if (isCodex) return <span title="Codex subscription limits are not reported here" className="px-3 font-mono text-xs text-muted-foreground">{compact ? '—' : 'Codex · limits unavailable'}</span>
   if (compact) return <span title={title} className={cn('font-mono text-mini', usageCls(five?.utilization ?? 0))}>{limitPct(five)}</span>
   return (
     <p title={title} className="truncate px-3 py-1.5 font-mono text-xs whitespace-nowrap text-muted-foreground">
