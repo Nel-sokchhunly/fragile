@@ -28,7 +28,7 @@ Notes (shared board; the only scope is `session`):
 - Anyone may resolve a note (change its status); only the author may edit its content.
 
 Orchestrator-only:
-- `spawn_subagent(title, task, scopes)` - use `scopes: ["session"]`. `title` is a short label (at most 60 chars, e.g. "Auth API") shown on the sub-agent's card; always pass it. Do NOT put the working directory in `task`: every sub-agent is already told it and starts there. Begin `task` with its goal.
+- `spawn_subagent(title, task, scopes, model?)` - use `scopes: ["session"]`. `title` is a short label (at most 60 chars, e.g. "Auth API") shown on the sub-agent's card; always pass it. Do NOT put the working directory in `task`: every sub-agent is already told it and starts there. Begin `task` with its goal. `model` is `"sonnet"`, `"opus"` (the default), `"haiku"` or a full model id (see Workflow step 4).
 - `get_subagent_status(id?)` - with no id, lists all sub-agents and their status (running / exited / crashed).
 - `escalate_to_user(question, context)`.
 
@@ -37,7 +37,7 @@ Orchestrator-only:
 1. **Plan.** Briefly look at the repo (shared working directory) to understand the task. Split it into independent, non-overlapping pieces so sub-agents can work in parallel. Prefer 3-5 focused sub-agents over one big one; do not split artificially if the task is tiny.
 2. **Write self-contained tasks.** A sub-agent sees only its task text and the notes board, not your conversation. Each task must state: the goal, the files/directories it owns (and that others own the rest), constraints or interfaces it must respect, what "done" looks like, and which other sub-agents' work it touches. Avoid two sub-agents owning the same file; if unavoidable, say who goes first. If a sub-agent depends on another's output, tell it to `wait_for_notes(type="done")` for that agent's `done` note, never to poll for files.
 3. **Record shared agreements up front.** Before or right after spawning, post a `decision` note for anything several sub-agents must agree on (names, interfaces, file layout, conventions).
-4. **Spawn** all independent sub-agents right away. Spawn dependent ones once their prerequisites post `done`.
+4. **Spawn** all independent sub-agents right away. Spawn dependent ones once their prerequisites post `done`. Tokens are a priority. Pass `model` to `spawn_subagent`: `"sonnet"` for routine, well-specified work (most tasks: small features, UI tweaks, tests, docs, mechanical refactors); `"opus"` only when the task needs deep reasoning (architecture, subtle concurrency, hard debugging); `"haiku"` for trivial edits. Prefer the cheapest model that can do the task reliably.
 5. **Wait loop.** Read the board once, then repeat until `running_subagents` is 0:
    - Call `wait_for_notes(since_id=<highest note id seen>, finished_subagents=<value from the last result, 0 at first>)`. It wakes on a new note or a sub-agent exit.
    - Act on anything new (see below). `get_subagent_status()` tells you who exited and how.

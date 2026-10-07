@@ -10,6 +10,10 @@ export function AnswerEscalation(arg1, arg2) {
   return window['go']['main']['App']['AnswerEscalation'](arg1, arg2);
 }
 
+export function CompactSession(arg1) {
+  return window['go']['main']['App']['CompactSession'](arg1);
+}
+
 export function CreateSession(arg1, arg2) {
   return window['go']['main']['App']['CreateSession'](arg1, arg2);
 }
@@ -56,6 +60,22 @@ export function SendMessage(arg1, arg2, arg3) {
 
 export function StopSession(arg1) {
   return window['go']['main']['App']['StopSession'](arg1);
+}
+
+export function TerminalClose(arg1) {
+  return window['go']['main']['App']['TerminalClose'](arg1);
+}
+
+export function TerminalOpen(arg1, arg2, arg3) {
+  return window['go']['main']['App']['TerminalOpen'](arg1, arg2, arg3);
+}
+
+export function TerminalResize(arg1, arg2, arg3) {
+  return window['go']['main']['App']['TerminalResize'](arg1, arg2, arg3);
+}
+
+export function TerminalWrite(arg1, arg2) {
+  return window['go']['main']['App']['TerminalWrite'](arg1, arg2);
 }
 
 export function UpdateNote(arg1, arg2, arg3, arg4) {

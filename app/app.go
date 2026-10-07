@@ -66,6 +66,8 @@ type App struct {
 	ansMu  sync.Mutex // one escalation answer at a time
 
 	startMu sync.Mutex // one orchestrator start/resume, or session create, at a time
+
+	terms terminals // session -> its terminal pane's shell (terminal.go)
 }
 
 func NewApp() *App { return &App{ready: make(chan struct{})} }
@@ -170,6 +172,7 @@ func (a *App) close() {
 		return
 	}
 	a.closed = true
+	a.closeTerminals()
 	a.runner.StopAll()
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()

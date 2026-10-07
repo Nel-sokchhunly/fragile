@@ -2,6 +2,7 @@ package notes
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"net/http/httptest"
@@ -147,8 +148,8 @@ func TestMCPSpawnSubagent(t *testing.T) {
 	sess, _ := s.Store.CreateSession("test")
 	dir := t.TempDir()
 	s.Runner = NewRunner(Config{Addr: strings.TrimPrefix(ts.URL, "http://"), AgentDir: dir, WorkDir: dir}, s.Store, s.Log)
-	s.Runner.Preflight = nil // tests must not depend on the host's sandbox tools
-	s.Runner.Command = writeFake(t, dir, `exit 0`)
+	s.Runner.Preflight = nil                                   // tests must not depend on the host's sandbox tools
+	s.Runner.Command = writeFake(t, dir, `printf '%s\n' "$@"`) // its log holds one argument per line
 	orch, _ := s.Store.CreateAgent(sess.ID, "orchestrator", 0, 0)
 	co := connect(t, ts, orch.Token)
 
@@ -176,6 +177,36 @@ func TestMCPSpawnSubagent(t *testing.T) {
 	}
 	if fi, _ := os.Stat(path); fi.Mode().Perm() != 0o600 {
 		t.Fatalf("mcp config mode = %v, want 0600", fi.Mode().Perm())
+	}
+	if log, _ := os.ReadFile(subs[0].LogPath); !strings.Contains(string(log), "--disallowedTools\n") || !strings.Contains(string(log), "--model\n"+defaultModel+"\n") {
+		t.Fatalf("no model given, so --model %s: %s", defaultModel, log)
+	}
+
+	// model: aliases map to full ids, a full "claude-" id passes as is, anything else is refused.
+	for _, bad := range []string{"gpt-5", "Sonnet", "claude-x --dangerously-skip-permissions"} {
+		if out, isErr := call(t, co, "spawn_subagent", map[string]any{"task": "t", "model": bad}); !isErr || !strings.Contains(out, `"sonnet", "opus", "haiku"`) {
+			t.Fatalf("spawn_subagent(model %q) = %s, want a tool error listing the options", bad, out)
+		}
+	}
+	for model, want := range map[string]string{
+		"sonnet": "claude-sonnet-5-5", "opus": "claude-opus-5-5", "haiku": "claude-haiku-4-5-20251001",
+		"claude-sonnet-5-5[1m]": "claude-sonnet-5-5[1m]",
+	} {
+		out, isErr := call(t, co, "spawn_subagent", map[string]any{"task": "t", "model": model})
+		if isErr {
+			t.Fatal(out)
+		}
+		var res struct {
+			AgentID int64 `json:"agent_id"`
+		}
+		if err := json.Unmarshal([]byte(out), &res); err != nil {
+			t.Fatal(err)
+		}
+		s.Runner.Wait(sess.ID)
+		sub, _ := s.Store.GetAgent(sess.ID, res.AgentID)
+		if log, _ := os.ReadFile(sub.LogPath); !strings.Contains(string(log), "--model\n"+want+"\n") {
+			t.Fatalf("model %q: args lack --model %s: %s", model, want, log)
+		}
 	}
 }
 

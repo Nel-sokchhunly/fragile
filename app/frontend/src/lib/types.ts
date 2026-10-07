@@ -92,3 +92,4 @@ export type ChatItem =
   | {id: number; kind: 'assistant'; text: string; at: string}
   | {id: number; kind: 'tool'; name: string; summary: string; at: string}
   | {id: number; kind: 'escalation'; escalation: Escalation; at: string}
+  | {id: number; kind: 'notice'; text: string; at: string} // a context compaction

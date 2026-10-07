@@ -324,7 +324,7 @@ func TestResumeSession(t *testing.T) {
 	if err := a.StopSession(se.ID); err != nil {
 		t.Fatal(err)
 	}
-	if err := a.SendMessage(se.ID, "hello?", nil); err == nil ||!strings.Contains(err.Error(), "resume") {
+	if err := a.SendMessage(se.ID, "hello?", nil); err == nil || !strings.Contains(err.Error(), "resume") {
 		t.Fatalf("message to a stopped session: err = %v", err)
 	}
 	if err := a.ResumeSession(se.ID); err != nil {

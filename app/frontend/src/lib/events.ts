@@ -54,6 +54,10 @@ export type EventMap = {
   // An escalation was raised (status open) or answered. The chat shows it via chat_item; session status
   // follows via session_status_changed.
   escalation: Envelope<Escalation>
+
+  // The session's terminal shell (not persisted; lib/terminal.ts handles them). data is base64 of raw pty bytes.
+  terminal_output: Envelope<{data: string}>
+  terminal_exit: Envelope<{code: number}>
 }
 
 // Subscribe to one event; returns its unsubscribe function.

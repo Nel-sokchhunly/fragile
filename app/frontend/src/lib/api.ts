@@ -1,6 +1,7 @@
 import {
-  AddNote, AnswerEscalation, CreateSession, DeleteSession, GetAgentEvents, GetAttachment, GetRateLimit, GetSession,
-  InterruptSession, ListSessions, PickDirectory, ResumeSession, SendMessage, StopSession, UpdateNote,
+  AddNote, AnswerEscalation, CompactSession, CreateSession, DeleteSession, GetAgentEvents, GetAttachment, GetRateLimit, GetSession,
+  InterruptSession, ListSessions, PickDirectory, ResumeSession, SendMessage, StopSession, TerminalClose, TerminalOpen,
+  TerminalResize, TerminalWrite, UpdateNote,
 } from '../../wailsjs/go/main/App'
 import type {Agent, AgentEvent, Attachment, ChatItem, Escalation, Note, NoteType, RateLimit, Session, Task} from './types'
 
@@ -38,6 +39,8 @@ export const api = {
   sendMessage: (sessionId: number, text: string, attachments: Attachment[] = []): Promise<void> => SendMessage(sessionId, text, attachments),
   /** Cancels the orchestrator's current turn (process, conversation and sub-agents stay); no-op if idle. */
   interruptSession: (sessionId: number): Promise<void> => InterruptSession(sessionId),
+  /** Sends /compact to the orchestrator; rejects if it is not running or mid-turn. The result shows as a notice chat item. */
+  compactSession: (sessionId: number): Promise<void> => CompactSession(sessionId),
   /** Data URL ("data:<type>;base64,...") of attachment `index` of the user chat item `chatItemId`. */
   getAttachment: (sessionId: number, chatItemId: number, index: number): Promise<string> => GetAttachment(sessionId, chatItemId, index),
   /** Answer an open escalation; also delivered to the orchestrator. The chat row updates via chat_item. */
@@ -53,4 +56,13 @@ export const api = {
   resumeSession: (sessionId: number): Promise<void> => ResumeSession(sessionId),
   /** Stops the session, then removes it and its chat, agents and notes from Fragile (never its files). */
   deleteSession: (sessionId: number): Promise<void> => DeleteSession(sessionId),
+
+  // The session's shell (one per session, in its work dir). Output arrives as terminal_output events.
+  /** Starts the shell if none is running (else resizes it); resolves with the base64 backlog of recent output. */
+  terminalOpen: (sessionId: number, cols: number, rows: number): Promise<string> => TerminalOpen(sessionId, cols, rows),
+  /** Input exactly as xterm's onData gives it. */
+  terminalWrite: (sessionId: number, data: string): Promise<void> => TerminalWrite(sessionId, data),
+  terminalResize: (sessionId: number, cols: number, rows: number): Promise<void> => TerminalResize(sessionId, cols, rows),
+  /** Kills the shell; idempotent. */
+  terminalClose: (sessionId: number): Promise<void> => TerminalClose(sessionId),
 }
