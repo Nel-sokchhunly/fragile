@@ -19,21 +19,24 @@ import (
 // the adapter emits the same stream-json envelopes the existing UI/store uses.
 // The orchestrator stays alive between turns; workers exit after one turn.
 type codexClient struct {
-	in           io.WriteCloser
-	emit         func(map[string]any)
-	stop         func()
-	mu           sync.Mutex
-	seq          int
-	pending      map[int]chan rpcReply
-	thread, turn string
-	mcpURL       string
-	lastText     string
-	turnDone     chan struct{}
-	success      bool
-	failed       bool
-	done         chan struct{}
-	once         sync.Once
-	inputs       chan []map[string]any
+	in               io.WriteCloser
+	emit             func(map[string]any)
+	stop             func()
+	mu               sync.Mutex
+	writeMu          sync.Mutex
+	compacting       bool
+	interruptPending bool
+	seq              int
+	pending          map[int]chan rpcReply
+	thread, turn     string
+	mcpURL           string
+	lastText         string
+	turnDone         chan struct{}
+	success          bool
+	failed           bool
+	done             chan struct{}
+	once             sync.Once
+	inputs           chan []map[string]any
 }
 type rpcReply struct {
 	result json.RawMessage
@@ -46,8 +49,8 @@ func (c *codexClient) write(v any) error {
 	if e != nil {
 		return e
 	}
-	c.mu.Lock()
-	defer c.mu.Unlock()
+	c.writeMu.Lock()
+	defer c.writeMu.Unlock()
 	_, e = c.in.Write(append(b, '\n'))
 	return e
 }
@@ -112,7 +115,7 @@ func (c *codexClient) run(a Agent, dir, prompt, systemPrompt, resume, model stri
 		return
 	}
 	// Disable inherited MCP servers explicitly: config table overlays can merge.
-	isolated, err := c.isolatedConfig()
+	isolated, err := c.isolatedConfig(dir)
 	if err != nil {
 		c.fail(err)
 		return
@@ -163,19 +166,24 @@ func (c *codexClient) run(a Agent, dir, prompt, systemPrompt, resume, model stri
 		case <-c.done:
 			return
 		}
-		if len(input) == 1 && input[0]["type"] == "text" && input[0]["text"] == "/compact" {
-			if _, err = c.call("thread/compact/start", map[string]any{"threadId": v.Thread.ID}); err != nil {
-				c.result(err)
-			}
-			continue
-		}
+		compact := len(input) == 1 && input[0]["type"] == "text" && input[0]["text"] == "/compact"
 		c.mu.Lock()
 		finished := make(chan struct{})
 		c.turnDone = finished
+		c.turn = ""
+		c.compacting = compact
 		c.lastText = ""
 		c.mu.Unlock()
-		raw, err = c.call("turn/start", map[string]any{"threadId": v.Thread.ID, "input": input})
+		if compact {
+			raw, err = c.call("thread/compact/start", map[string]any{"threadId": v.Thread.ID})
+		} else {
+			raw, err = c.call("turn/start", map[string]any{"threadId": v.Thread.ID, "input": input})
+		}
 		if err != nil {
+			c.mu.Lock()
+			c.turnDone = nil
+			c.compacting = false
+			c.mu.Unlock()
 			c.result(err)
 			if !interactive {
 				c.stop()
@@ -193,7 +201,9 @@ func (c *codexClient) run(a Agent, dir, prompt, systemPrompt, resume, model stri
 		select {
 		case <-finished:
 		default:
-			c.turn = started.Turn.ID
+			if started.Turn.ID != "" {
+				c.turn = started.Turn.ID
+			}
 		}
 		c.mu.Unlock()
 		select {
@@ -210,8 +220,8 @@ func (c *codexClient) run(a Agent, dir, prompt, systemPrompt, resume, model stri
 
 // config/read is local configuration only; never log its values (they may
 // contain private connector headers). Only names are used to disable servers.
-func (c *codexClient) isolatedConfig() (map[string]any, error) {
-	raw, err := c.call("config/read", map[string]any{"includeLayers": false})
+func (c *codexClient) isolatedConfig(dir string) (map[string]any, error) {
+	raw, err := c.call("config/read", map[string]any{"includeLayers": false, "cwd": dir})
 	if err != nil {
 		return nil, err
 	}
@@ -224,7 +234,7 @@ func (c *codexClient) isolatedConfig() (map[string]any, error) {
 	if err = json.Unmarshal(raw, &v); err != nil {
 		return nil, err
 	}
-	config := map[string]any{"mcp_servers.fragile.url": c.mcpURL, "mcp_servers.fragile.enabled": true, "mcp_servers.fragile.required": true, "model": v.Config.Model, "features.multi_agent": false, "features.plugins": false, "features.memories": false, "features.apps": false}
+	config := map[string]any{"mcp_servers.fragile.url": c.mcpURL, "mcp_servers.fragile.enabled": true, "mcp_servers.fragile.required": true, "model": v.Config.Model, "features.multi_agent": false, "features.plugins": false, "features.memories": false, "features.apps": false, "features.hooks": false, "web_search": "disabled"}
 	for name := range v.Config.MCP {
 		if name != "fragile" {
 			if strings.ContainsAny(name, ".\" \t\n") {
@@ -309,11 +319,12 @@ func (c *codexClient) Write(p []byte) (int, error) {
 		thread, turn := c.thread, c.turn
 		c.mu.Unlock()
 		if turn == "" {
-			return 0, errors.New("Codex has no active turn to interrupt")
-		}
-		_, e := c.call("turn/interrupt", map[string]any{"threadId": thread, "turnId": turn})
-		if e != nil {
-			return 0, e
+			c.mu.Lock()
+			c.interruptPending = true
+			c.mu.Unlock()
+		} else {
+			// Do not hold the caller's stdin mutex while waiting on an RPC reply.
+			go c.interrupt(thread, turn)
 		}
 		return len(p), nil
 	}
@@ -380,7 +391,10 @@ func (c *codexClient) line(line []byte) {
 			if v.Error != nil {
 				reply.err = errors.New(v.Error.Message)
 			}
-			ch <- reply
+			select {
+			case ch <- reply:
+			default:
+			}
 		}
 		return
 	}
@@ -408,28 +422,49 @@ func (c *codexClient) line(line []byte) {
 	switch v.Method {
 	case "turn/started":
 		c.mu.Lock()
+		if c.turnDone == nil || (c.turn != "" && c.turn != p.Turn.ID) {
+			c.mu.Unlock()
+			return
+		}
 		c.turn = p.Turn.ID
+		interrupt := c.interruptPending
+		c.interruptPending = false
+		thread := c.thread
 		c.mu.Unlock()
+		if interrupt {
+			go c.interrupt(thread, p.Turn.ID)
+		}
 	case "turn/completed":
-		var err error
-		if p.Turn.Status != "completed" {
-			err = errors.New("Codex turn " + p.Turn.Status)
-			if p.Turn.Error != nil {
-				err = errors.New(p.Turn.Error.Message)
-			}
-		}
-		c.result(err)
 		c.mu.Lock()
-		c.turn = ""
-		c.success = err == nil
-		if c.turnDone != nil {
-			select {
-			case <-c.turnDone:
-			default:
-				close(c.turnDone)
-			}
+		if c.turnDone == nil || c.turn == "" || c.turn != p.Turn.ID {
+			c.mu.Unlock()
+			return
 		}
+		finished := c.turnDone
+		c.turnDone = nil
+		c.turn = ""
+		c.compacting = false
 		c.mu.Unlock()
+		var err error
+		if p.Turn.Status == "interrupted" {
+			c.mu.Lock()
+			c.failed = false
+			c.success = true
+			c.mu.Unlock()
+			c.emit(map[string]any{"type": "result", "subtype": "error_during_execution", "is_error": false, "result": ""})
+		} else {
+			if p.Turn.Status != "completed" {
+				err = errors.New("Codex turn " + p.Turn.Status)
+				if p.Turn.Error != nil {
+					err = errors.New(p.Turn.Error.Message)
+				}
+			}
+			c.result(err)
+			c.mu.Lock()
+			c.success = err == nil
+			c.mu.Unlock()
+		}
+		close(finished)
 	case "item/started", "item/completed":
 		c.item(v.Method == "item/completed", p.Item)
 	case "thread/tokenUsage/updated":
@@ -446,8 +481,14 @@ func (c *codexClient) line(line []byte) {
 			c.emit(map[string]any{"type": "system", "subtype": "context_usage", "provider": "codex", "context_used": usage.TokenUsage.Last.Input + usage.TokenUsage.Last.Output, "context_window": usage.TokenUsage.ModelContextWindow})
 		}
 	case "thread/compacted":
-		c.emit(map[string]any{"type": "system", "subtype": "compact_boundary", "provider": "codex", "compact_metadata": map[string]any{"trigger": "manual"}})
-		c.result(nil)
+		c.mu.Lock()
+		manual := c.compacting
+		c.mu.Unlock()
+		trigger := "auto"
+		if manual {
+			trigger = "manual"
+		}
+		c.emit(map[string]any{"type": "system", "subtype": "compact_boundary", "provider": "codex", "compact_metadata": map[string]any{"trigger": trigger}})
 	}
 }
 func (c *codexClient) item(completed bool, item map[string]any) {
@@ -509,8 +550,7 @@ func (c *codexClient) item(completed bool, item map[string]any) {
 		content = item
 	}
 	failed := item["status"] == "failed" || item["error"] != nil
-	b, _ := json.Marshal(content)
-	result(string(b), failed)
+	result(codexToolText(content), failed)
 }
 
 func (r *Runner) startCodex(a Agent, mcpConfig, logPath, prompt, systemPrompt, resume, model string) (int, <-chan exit, error) {
@@ -590,22 +630,44 @@ func (r *Runner) startCodex(a Agent, mcpConfig, logPath, prompt, systemPrompt, r
 	readDone := make(chan struct{})
 	go func() {
 		defer close(readDone)
-		s := bufio.NewScanner(stdout)
-		s.Buffer(make([]byte, 64<<10), maxLine)
-		for s.Scan() {
-			c.line(s.Bytes())
-		}
-		if e := s.Err(); e != nil {
-			c.result(fmt.Errorf("Codex output: %w", e))
-			c.stop()
+		reader := bufio.NewReaderSize(stdout, 64<<10)
+		var line []byte
+		skipping := false
+		for {
+			fragment, err := reader.ReadSlice('\n')
+			if !skipping {
+				if len(line)+len(fragment) > maxLine {
+					line = nil
+					skipping = true
+				} else {
+					line = append(line, fragment...)
+				}
+			}
+			if err != bufio.ErrBufferFull {
+				if !skipping && len(line) > 0 {
+					c.line(line)
+				}
+				line = nil
+				skipping = false
+			}
+			if err == bufio.ErrBufferFull {
+				continue
+			}
+			if err != nil {
+				if err != io.EOF {
+					c.result(fmt.Errorf("Codex output: %w", err))
+					c.stop()
+				}
+				break
+			}
 		}
 		c.close()
 	}()
 	runDone := make(chan struct{})
 	go func() { defer close(runDone); c.run(a, dir, prompt, systemPrompt, resume, model, r.stdinAgent(a)) }()
 	go func() {
-		cmd.Wait()
 		<-readDone
+		cmd.Wait()
 		c.close()
 		<-runDone
 		in.Close()
@@ -648,4 +710,33 @@ func validCodexModel(model string) error {
 		return fmt.Errorf("%s is a Claude model; omit model for the Codex default or pass a Codex model id", strconv.Quote(model))
 	}
 	return nil
+}
+
+func (c *codexClient) interrupt(thread, turn string) {
+	if _, err := c.call("turn/interrupt", map[string]any{"threadId": thread, "turnId": turn}); err != nil && !errors.Is(err, ErrNotRunning) {
+		c.result(err)
+	}
+}
+
+func codexToolText(content any) string {
+	if text, ok := content.(string); ok {
+		return text
+	}
+	if result, ok := content.(map[string]any); ok {
+		if blocks, ok := result["content"].([]any); ok {
+			var text []string
+			for _, block := range blocks {
+				if b, ok := block.(map[string]any); ok {
+					if t, ok := b["text"].(string); ok {
+						text = append(text, t)
+					}
+				}
+			}
+			if len(text) > 0 {
+				return strings.Join(text, "\n")
+			}
+		}
+	}
+	b, _ := json.MarshalIndent(content, "", "  ")
+	return string(b)
 }

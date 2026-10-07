@@ -15,9 +15,10 @@ import {cn} from '@/lib/utils'
 // `onInterrupt` (set while the orchestrator works) adds an Interrupt button; data-interrupt lets ChatView's Esc click it.
 // `disabledReason` turns the box off and says why (may hold an action). data-composer lets the global shortcuts focus it.
 // `terminal` adds the terminal pane toggle left of the box (it stays usable while the box is off).
-export function Composer({onSend, onInterrupt, placeholder, label, disabledReason, terminal}: {
+export function Composer({onSend, onInterrupt, placeholder, label, disabledReason, terminal, allowPDF = true}: {
   onSend: (text: string, attachments: Attachment[]) => Promise<void>; onInterrupt?: () => Promise<void>
   placeholder: string; label: string; disabledReason?: ReactNode
+  allowPDF?: boolean
   terminal?: {open: boolean; onToggle: () => void}
 }) {
   const [text, setText] = useState('')
@@ -43,7 +44,7 @@ export function Composer({onSend, onInterrupt, placeholder, label, disabledReaso
     const errs: string[] = []
     const got: PendingAttachment[] = []
     for (const f of picked) {
-      try { got.push(await readAttachment(f)) } catch (e) { errs.push(String(e)) }
+      try { const attachment = await readAttachment(f); if (!allowPDF && attachment.media_type === "application/pdf") throw "Codex supports images and text, not PDFs; send extracted text instead"; got.push(attachment) } catch (e) { errs.push(String(e)) }
     }
     setReading((n) => n - 1)
     const next = [...filesRef.current]
@@ -108,7 +109,7 @@ export function Composer({onSend, onInterrupt, placeholder, label, disabledReaso
             </Button>
           )}
           <div className="relative min-w-0 flex-1">
-            <input ref={input} type="file" multiple hidden onChange={(e) => { void add(e.target.files); e.target.value = '' }}/>
+            <input ref={input} type="file" accept={allowPDF ? undefined : "image/png,image/jpeg,image/gif,image/webp,text/*,.txt,.md,.json,.csv,.log"} multiple hidden onChange={(e) => { void add(e.target.files); e.target.value = '' }}/>
             <Button
               variant="ghost" size="icon-xs" onClick={() => input.current?.click()} disabled={off} aria-label="Attach files" title="Attach files (or drop / paste them)"
               className="absolute bottom-2 left-2"

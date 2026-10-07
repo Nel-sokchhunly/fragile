@@ -332,6 +332,7 @@ export function ChatView({sessionId}: {sessionId: number}) {
       </div>
       {terminalOpen && <TerminalPane sessionId={sessionId}/>}
       <Composer
+        allowPDF={session?.provider !== 'codex'}
         onSend={(t, atts) => send(sessionId, t, atts)} label="Message the orchestrator" placeholder="Message the orchestrator"
         terminal={{open: terminalOpen, onToggle: toggleTerminal}}
         onInterrupt={working ? () => api.interruptSession(sessionId) : undefined}

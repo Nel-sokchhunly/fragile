@@ -82,11 +82,10 @@ func codexArgs(cfg Config, dir, marker string) []string {
 	if codexHome == "" {
 		codexHome = filepath.Join(home, ".codex")
 	}
-	// Do not hide the whole Codex home: standalone installs may put the CLI
-	// executable under its packages/ directory, which the sandbox helper needs.
-	for _, leaf := range []string{"auth.json", "config.toml", "sessions", "archived_sessions", "skills", "memories", "state_5.sqlite", "state_5.sqlite-wal", "state_5.sqlite-shm"} {
-		hidden = append(hidden, filepath.Join(codexHome, leaf))
-	}
+	// Deny the complete state tree, including future log/database names. Only
+	// installed executables may be read by the sandbox helper.
+	hidden = append(hidden, codexHome)
+	fs[expand(filepath.Join(codexHome, "packages"))] = "read"
 	for _, p := range hidden {
 		if p != "" {
 			fs[expand(p)] = "deny"
@@ -104,7 +103,7 @@ func codexArgs(cfg Config, dir, marker string) []string {
 	slices.Sort(keys)
 	var entries []string
 	for _, k := range keys {
-		entries = append(entries, strconv.Quote(k)+"="+strconv.Quote(fs[k]))
+		entries = append(entries, strconv.Quote(globEscape(k))+"="+strconv.Quote(fs[k]))
 	}
 	domains := []string{}
 	for _, d := range sandboxDomains {
@@ -116,16 +115,11 @@ func codexArgs(cfg Config, dir, marker string) []string {
 		"-c", `permissions.fragile.network.enabled=true`,
 		"-c", `permissions.fragile.network.mode="limited"`,
 		"-c", "permissions.fragile.network.domains={" + strings.Join(domains, ",") + "}",
-		"-c", `features.network_proxy=true`,
+		"-c", `features.network_proxy=true`, "-c", `features.hooks=false`, "-c", `web_search="disabled"`,
 		"-c", `features.multi_agent=false`, "-c", `features.plugins=false`, "-c", `features.apps=false`, "-c", `features.memories=false`,
 		"-c", `forced_login_method="chatgpt"`, "-c", `model_provider="openai"`,
 		"-c", `approval_policy="never"`, "-c", `shell_environment_policy.ignore_default_excludes=false`,
 		"-c", `mcp_servers={fragile={url="http://127.0.0.1",enabled=false,name=` + strconv.Quote(marker) + `,default_tools_approval_mode="approve",tool_timeout_sec=180}}`,
-	}
-	// Override inherited lifecycle hooks by event, rather than relying on an
-	// empty table (config layers may merge tables). Auth stays in the CLI.
-	for _, event := range []string{"SessionStart", "SessionEnd", "SubagentStart", "SubagentStop", "UserPromptSubmit", "PreToolUse", "PostToolUse", "PermissionRequest", "PreCompact", "PostCompact", "Stop", "Interrupt"} {
-		args = append(args, "-c", "hooks."+event+"=[]")
 	}
 	return args
 }

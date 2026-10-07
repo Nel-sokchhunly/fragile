@@ -64,6 +64,9 @@ func TestCodexHelper(t *testing.T) {
 			}
 			notify("item/completed", map[string]any{"item": map[string]string{"id": "message", "type": "agentMessage", "text": "hello from codex"}})
 			notify("turn/completed", map[string]any{"turn": map[string]string{"id": "test-turn", "status": "completed"}})
+			if mode == "clean-exit" {
+				os.Exit(0)
+			}
 			continue
 		case "turn/interrupt":
 			send(map[string]any{"id": v.ID, "result": result})
@@ -71,7 +74,9 @@ func TestCodexHelper(t *testing.T) {
 			continue
 		case "thread/compact/start":
 			send(map[string]any{"id": v.ID, "result": result})
+			notify("turn/started", map[string]any{"turn": map[string]string{"id": "compact-turn"}})
 			notify("thread/compacted", map[string]string{"threadId": "test-thread"})
+			notify("turn/completed", map[string]any{"turn": map[string]string{"id": "compact-turn", "status": "completed"}})
 			continue
 		}
 		send(map[string]any{"id": v.ID, "result": result})
@@ -166,7 +171,7 @@ func TestCodexRunnerTeamTurnsInterruptAndResume(t *testing.T) {
 	if e = r.Interrupt(a.ID); e != nil {
 		t.Fatal(e)
 	}
-	if line := nextCodex(t, ch, "result"); !strings.Contains(line, `"is_error":true`) {
+	if line := nextCodex(t, ch, "result"); !strings.Contains(line, `"subtype":"error_during_execution"`) {
 		t.Fatal(line)
 	}
 	if !r.Running(a.ID) {
@@ -265,7 +270,7 @@ func TestCodexArgumentsProtectSecretsAndSubscription(t *testing.T) {
 	if strings.Contains(args, "/mcp/") {
 		t.Fatal("secret MCP URL leaked into process arguments")
 	}
-	for _, want := range []string{`--strict-config`, `default_permissions="fragile"`, `features.multi_agent=false`, `forced_login_method="chatgpt"`, `hooks.SessionStart=[]`, `permissions.fragile.network.domains=`, `f.db-wal"="deny"`, `agents"="deny"`} {
+	for _, want := range []string{`--strict-config`, `default_permissions="fragile"`, `features.multi_agent=false`, `forced_login_method="chatgpt"`, `features.hooks=false`, `web_search="disabled"`, `permissions.fragile.network.domains=`, `f.db-wal"="deny"`, `agents"="deny"`} {
 		if !strings.Contains(args, want) {
 			t.Errorf("missing %s", want)
 		}
@@ -287,6 +292,23 @@ func TestCodexSandboxSmoke(t *testing.T) {
 		t.Skip("Codex CLI not installed")
 	}
 	dir := t.TempDir()
+	// A trusted project and an inherited MCP/hook canary prove isolation using
+	// the real CLI, without touching the operator's config or credentials.
+	codexHome := t.TempDir()
+	t.Setenv("CODEX_HOME", codexHome)
+	marker := filepath.Join(dir, "unsafe-started")
+	command := "echo unsafe > " + strconv.Quote(marker)
+	os.MkdirAll(filepath.Join(dir, ".codex"), 0700)
+	os.WriteFile(filepath.Join(codexHome, "config.toml"), []byte("[projects."+strconv.Quote(dir)+"]\ntrust_level = \"trusted\"\n"), 0600)
+	os.WriteFile(filepath.Join(dir, ".codex", "config.toml"), []byte("[mcp_servers.project_canary]\ncommand = \"/bin/sh\"\nargs = [\"-c\", "+strconv.Quote(command)+"]\n"), 0600)
+	hooks, _ := json.Marshal(map[string]any{"hooks": map[string]any{"SessionStart": []any{map[string]any{"hooks": []any{map[string]any{"type": "command", "command": command}}}}}})
+	os.WriteFile(filepath.Join(codexHome, "hooks.json"), hooks, 0600)
+	os.WriteFile(filepath.Join(dir, ".codex", "hooks.json"), hooks, 0600)
+	for _, name := range []string{"history.jsonl", "logs_99.sqlite", "state_999.sqlite"} {
+		os.WriteFile(filepath.Join(codexHome, name), []byte("FRAGILE_PRIVATE_TEST"), 0600)
+	}
+	os.MkdirAll(filepath.Join(codexHome, "packages"), 0700)
+	os.WriteFile(filepath.Join(codexHome, "packages", "public-marker"), []byte("public"), 0600)
 	secret := filepath.Join(dir, "secret.db")
 	os.WriteFile(secret, []byte("FRAGILE_PRIVATE_TEST"), 0600)
 	cfg := Config{DBPath: secret, AgentDir: filepath.Join(dir, "agents"), LogPath: filepath.Join(dir, "events")}
@@ -323,9 +345,12 @@ func TestCodexSandboxSmoke(t *testing.T) {
 		t.Fatal(e, diagnostics.String())
 	}
 	c.write(map[string]string{"method": "initialized"})
-	isolated, err := c.isolatedConfig()
+	isolated, err := c.isolatedConfig(dir)
 	if err != nil {
 		t.Fatal(err)
+	}
+	if isolated["mcp_servers.project_canary.enabled"] != false {
+		t.Fatal("project MCP config was not discovered and disabled")
 	}
 	thread, err := c.call("thread/start", map[string]any{"cwd": dir, "approvalPolicy": "never", "developerInstructions": "Use Fragile board tools only.", "config": isolated})
 	if err != nil {
@@ -338,6 +363,23 @@ func TestCodexSandboxSmoke(t *testing.T) {
 	}
 	if json.Unmarshal(thread, &started) != nil || started.Thread.ID == "" {
 		t.Fatal("real thread missing id")
+	}
+	if _, err := os.Stat(marker); !os.IsNotExist(err) {
+		t.Fatal("inherited project MCP or hooks ran unsandboxed")
+	}
+	for _, name := range []string{"history.jsonl", "logs_99.sqlite", "state_999.sqlite"} {
+		raw, err := c.call("command/exec", map[string]any{"command": []string{"/bin/cat", filepath.Join(codexHome, name)}, "cwd": dir})
+		var got struct {
+			ExitCode int    `json:"exitCode"`
+			Stdout   string `json:"stdout"`
+		}
+		if err != nil || json.Unmarshal(raw, &got) != nil || got.ExitCode == 0 || strings.Contains(got.Stdout, "FRAGILE_PRIVATE_TEST") {
+			t.Fatalf("CODEX_HOME %s read not denied (RPC error: %v)", name, err)
+		}
+	}
+	rawPackage, err := c.call("command/exec", map[string]any{"command": []string{"/bin/cat", filepath.Join(codexHome, "packages", "public-marker")}, "cwd": dir})
+	if err != nil || !strings.Contains(string(rawPackage), "public") {
+		t.Fatal("packages exception unreadable", err)
 	}
 	raw, e := c.call("command/exec", map[string]any{"command": []string{"/bin/cat", secret}, "cwd": dir})
 	if e != nil {
@@ -407,5 +449,94 @@ func TestCodexLiveMCP(t *testing.T) {
 	if !found {
 		data, _ := os.ReadFile(got.LogPath)
 		t.Fatalf("live CLI did not post the expected authenticated MCP note: %s", data)
+	}
+}
+
+func TestCodexApprovalDeclinesAndDuplicateReplies(t *testing.T) {
+	var input strings.Builder
+	c := &codexClient{in: nopWriteCloser{&input}, pending: map[int]chan rpcReply{1: make(chan rpcReply, 1)}}
+	c.line([]byte(`{"id":1,"result":{}}`))
+	done := make(chan struct{})
+	go func() { c.line([]byte(`{"id":1,"result":{}}`)); close(done) }()
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("duplicate reply blocked the reader")
+	}
+	for _, method := range []string{"item/commandExecution/requestApproval", "item/fileChange/requestApproval"} {
+		b, _ := json.Marshal(map[string]any{"id": "approval", "method": method, "params": map[string]any{}})
+		c.line(b)
+	}
+	if strings.Count(input.String(), `"decision":"decline"`) != 2 {
+		t.Fatal("approval requests were not declined:", input.String())
+	}
+}
+
+type nopWriteCloser struct{ *strings.Builder }
+
+func (nopWriteCloser) Close() error { return nil }
+
+func TestCodexCompactionAndTurnIdentity(t *testing.T) {
+	var events []map[string]any
+	c := &codexClient{turn: "current", turnDone: make(chan struct{}), lastText: "old text", emit: func(v map[string]any) { events = append(events, v) }}
+	c.line([]byte(`{"method":"thread/compacted","params":{"threadId":"thread"}}`))
+	if len(events) != 1 || events[0]["type"] != "system" {
+		t.Fatal("auto-compaction emitted terminal result", events)
+	}
+	c.line([]byte(`{"method":"turn/completed","params":{"turn":{"id":"stale","status":"completed"}}}`))
+	if len(events) != 1 {
+		t.Fatal("stale completion emitted result")
+	}
+	c.line([]byte(`{"method":"turn/completed","params":{"turn":{"id":"current","status":"completed"}}}`))
+	if len(events) != 2 {
+		t.Fatal("current turn did not complete")
+	}
+	c.line([]byte(`{"method":"turn/completed","params":{"turn":{"id":"current","status":"completed"}}}`))
+	if len(events) != 2 {
+		t.Fatal("duplicate completion emitted result")
+	}
+	c.turn = "manual"
+	c.turnDone = make(chan struct{})
+	c.compacting = true
+	c.lastText = ""
+	c.line([]byte(`{"method":"thread/compacted","params":{"threadId":"thread"}}`))
+	c.line([]byte(`{"method":"turn/completed","params":{"turn":{"id":"manual","status":"completed"}}}`))
+	if len(events) != 4 || events[3]["result"] != "" {
+		t.Fatal("manual compaction repeated stale result", events)
+	}
+	c.turn = "interrupt"
+	c.turnDone = make(chan struct{})
+	c.line([]byte(`{"method":"turn/completed","params":{"turn":{"id":"interrupt","status":"interrupted"}}}`))
+	if c.failed || events[4]["subtype"] != "error_during_execution" || events[4]["is_error"] != false {
+		t.Fatal("interrupt recorded as crash", events[4])
+	}
+}
+
+func TestCodexToolOutputReadable(t *testing.T) {
+	if got := codexToolText("line1\nline2"); got != "line1\nline2" {
+		t.Fatal(got)
+	}
+	if got := codexToolText(map[string]any{"content": []any{map[string]any{"type": "text", "text": "board result"}}}); got != "board result" {
+		t.Fatal(got)
+	}
+}
+
+func TestCodexNaturalExitDrainsFinalResult(t *testing.T) {
+	r, store, se, events := codexRunner(t, "clean-exit")
+	agent, err := r.StartOrchestrator(se.ID, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	nextCodex(t, events, "system")
+	if err := r.SendUser(agent.ID, "finish"); err != nil {
+		t.Fatal(err)
+	}
+	if result := nextCodex(t, events, "result"); !strings.Contains(result, `"is_error":false`) || !strings.Contains(result, "hello from codex") {
+		t.Fatal(result)
+	}
+	r.Wait(se.ID)
+	got, _ := store.GetAgent(se.ID, agent.ID)
+	if got.Status != "exited" {
+		t.Fatal("clean app-server exit recorded as crash", got.Status)
 	}
 }
