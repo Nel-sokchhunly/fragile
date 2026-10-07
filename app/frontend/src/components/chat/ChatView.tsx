@@ -115,6 +115,17 @@ function StopButton({sessionId}: {sessionId: number}) {
 
 // Module-level so Virtuoso doesn't remount them each render.
 const Pad = () => <div className="h-3"/>
+// Below the last row while the orchestrator is mid-turn, so a sent message never sits in silence.
+const Footer = ({context}: {context?: {working: boolean}}) => (
+  <div className="pb-3">
+    {context?.working && (
+      <div role="status" className="mx-auto flex max-w-[680px] items-center gap-2 px-6 py-[5px] font-mono text-xs text-muted-foreground">
+        <span className="size-1.5 rounded-full bg-status-working motion-safe:animate-pulse" aria-hidden/>
+        working
+      </div>
+    )}
+  </div>
+)
 
 export function ChatView({sessionId}: {sessionId: number}) {
   const session = useAppStore((s) => s.sessions.find((x) => x.id === sessionId))
@@ -122,7 +133,9 @@ export function ChatView({sessionId}: {sessionId: number}) {
   const chat = useAppStore((s) => s.data[sessionId]?.chat ?? NO_CHAT)
   const agents = useAppStore((s) => s.data[sessionId]?.agents ?? NO_AGENTS)
   const send = useAppStore((s) => s.sendMessage)
+  const busy = useAppStore((s) => !!s.busy[sessionId])
   const running = orchestratorRunning(agents)
+  const working = running && busy && session?.status !== 'needs_you' // an open escalation waits on the user, not the orchestrator
   const anyRunning = agents.some((a) => a.status === 'running') // sub-agents can outlive the orchestrator
   const lead = agents.findLast((a) => a.role === 'orchestrator') // latest: earlier ones failed to launch
   const ctx = agentContext(lead)
@@ -158,7 +171,8 @@ export function ChatView({sessionId}: {sessionId: number}) {
             initialTopMostItemIndex={{index: 'LAST', align: 'end'}}
             followOutput={(atBottom) => (atBottom ? 'smooth' : false)} // stop following once the user scrolls up
             itemContent={(_, item) => <Row sessionId={sessionId} item={item}/>}
-            components={{Header: Pad, Footer: Pad}}
+            context={{working}}
+            components={{Header: Pad, Footer}}
             className="absolute inset-0"
           />
         )}

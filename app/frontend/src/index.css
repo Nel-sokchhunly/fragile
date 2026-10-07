@@ -215,8 +215,12 @@
 .md ol { @apply list-decimal pl-5; }
 .md h1, .md h2, .md h3 { @apply font-semibold; }
 .md blockquote { @apply border-l-2 pl-3 text-muted-foreground; }
-.md table { @apply text-xs; }
-.md th, .md td { @apply border px-2 py-0.5; }
+.md table { @apply block max-w-full overflow-x-auto text-xs; } /* GFM tables can be wider than the column */
+.md th, .md td { @apply border px-2 py-0.5 text-left; }
+.md th { @apply font-semibold; }
+.md hr { @apply border-border-default; }
+.md li:has(> input[type=checkbox]) { @apply list-none; }
+.md li > input[type=checkbox] { @apply mr-1.5 align-middle; }
 .md a { @apply text-status-decision hover:text-foreground; }
 .code-block { @apply overflow-x-auto rounded-md border border-border-default bg-surface-sunken px-2.5 py-2 font-mono text-xs leading-[18px]; }
 .code-block pre { @apply m-0 bg-transparent! p-0; }
