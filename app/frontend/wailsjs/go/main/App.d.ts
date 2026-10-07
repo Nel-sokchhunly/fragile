@@ -7,6 +7,8 @@ export function AddNote(arg1:number,arg2:string,arg3:string):Promise<notes.Note>
 
 export function AnswerEscalation(arg1:number,arg2:string):Promise<void>;
 
+export function ClipboardImage():Promise<string>;
+
 export function CompactSession(arg1:number):Promise<void>;
 
 export function CreateSession(arg1:string,arg2:string):Promise<notes.Session>;

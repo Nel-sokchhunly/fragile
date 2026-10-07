@@ -10,6 +10,10 @@ export function AnswerEscalation(arg1, arg2) {
   return window['go']['main']['App']['AnswerEscalation'](arg1, arg2);
 }
 
+export function ClipboardImage() {
+  return window['go']['main']['App']['ClipboardImage']();
+}
+
 export function CompactSession(arg1) {
   return window['go']['main']['App']['CompactSession'](arg1);
 }
