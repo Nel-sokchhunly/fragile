@@ -213,6 +213,9 @@
 .md > * + * { @apply mt-1.5; }
 .md ul { @apply list-disc pl-5; }
 .md ol { @apply list-decimal pl-5; }
+/* Blocks inside list items (code blocks especially) need the same gap as top-level ones, or the next item's text
+   butts into the code block's horizontal scrollbar. */
+.md li > * + *, .md li + li { @apply mt-1.5; }
 .md h1, .md h2, .md h3 { @apply font-semibold; }
 .md blockquote { @apply border-l-2 pl-3 text-muted-foreground; }
 .md table { @apply block max-w-full overflow-x-auto text-xs; } /* GFM tables can be wider than the column */

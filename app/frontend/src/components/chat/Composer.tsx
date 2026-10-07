@@ -8,6 +8,20 @@ import {formatBytes} from '@/lib/format'
 import {focusComposer, MOD} from '@/lib/keys'
 import type {Attachment} from '@/lib/types'
 import {cn} from '@/lib/utils'
+import {ClipboardImage} from '../../../wailsjs/go/main/App'
+
+// The clipboard image a paste event didn't carry (WebKitGTK on Wayland leaves screenshots out of clipboardData):
+// the async Clipboard API first, then the backend's GTK read. Undefined when there is none.
+async function clipboardImage(): Promise<File | undefined> {
+  try {
+    for (const item of await navigator.clipboard.read()) {
+      const type = item.types.find((t) => t.startsWith('image/'))
+      if (type) return new File([await item.getType(type)], `screenshot.${type.slice(6)}`, {type})
+    }
+  } catch { /* API missing or refused */ }
+  const png = await ClipboardImage().catch(() => '')
+  return png ? new File([Uint8Array.from(atob(png), (c) => c.charCodeAt(0))], 'screenshot.png', {type: 'image/png'}) : undefined
+}
 
 // Enter sends, Shift+Enter newline (and Enter during IME composition is left alone).
 // onSend rejects with the backend's message, shown under the box (the text and attachments are kept).
@@ -95,7 +109,7 @@ export function Composer({onSend, onInterrupt, placeholder, label, disabledReaso
           <div className="mb-1.5 flex flex-wrap items-end gap-1.5">
             {files.map((f) => {
               const remove = () => update(filesRef.current.filter((x) => x.key !== f.key))
-              return f.preview ? <ImageChip key={f.key} src={f.preview} name={f.name} onRemove={remove}/> : <FileChip key={f.key} name={f.name} size={f.size} onRemove={remove}/>
+              return f.preview ? <ImageChip key={f.key} src={f.preview} name={f.name} onRemove={remove}/> : <FileChip key={f.key} name={f.name} size={f.size} mediaType={f.media_type} source={`data:${f.media_type};base64,${f.data}`} onRemove={remove}/>
             })}
           </div>
         )}
@@ -124,13 +138,14 @@ export function Composer({onSend, onInterrupt, placeholder, label, disabledReaso
               }}
               onPaste={(e) => {
                 // Pasted files (e.g. screenshots) are attached. WebKitGTK puts them in items, often not in files, so items
-                // come first. A clipboard that also has plain text still pastes the text; otherwise the default is stopped.
+                // come first. A clipboard that also has plain text still pastes the text; otherwise the default is stopped,
+                // and a paste carrying nothing usable falls back to reading the clipboard image directly.
                 const cd = e.clipboardData
-                let pasted = Array.from(cd.items).filter((i) => i.kind === 'file').map((i) => i.getAsFile()).filter((f): f is File => !!f)
+                let pasted = Array.from(cd.items).filter((i) => i.kind === 'file' || i.type.startsWith('image/')).map((i) => i.getAsFile()).filter((f): f is File => !!f)
                 if (!pasted.length) pasted = [...cd.files]
-                if (!pasted.length) return
-                if (!cd.types.includes('text/plain')) e.preventDefault()
-                void add(pasted)
+                if (cd.types.includes('text/plain')) { if (pasted.length) void add(pasted); return }
+                e.preventDefault()
+                void (pasted.length ? add(pasted) : clipboardImage().then((f) => add(f ? [f] : null)))
               }}
             />
             <div className="absolute right-2 bottom-2 flex gap-0.5">
