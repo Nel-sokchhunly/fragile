@@ -365,12 +365,12 @@ func (a *App) ResumeSession(sessionID int64) error {
 	case a.runner.Running(orchs[len(orchs)-1].ID):
 		err = errors.New("this session's orchestrator is already running")
 	default:
-		var claudeID string
-		if claudeID, err = a.claudeSessionID(sessionID, orchs); err != nil {
+		var providerID string
+		if providerID, err = a.providerSessionID(sessionID, orchs); err != nil {
 			break
 		}
 		a.setBusy(sessionID, true) // before the process exists, so the session never flickers to done
-		if orch, err = a.runner.ResumeOrchestrator(sessionID, claudeID); err != nil {
+		if orch, err = a.runner.ResumeOrchestrator(sessionID, providerID); err != nil {
 			a.setBusy(sessionID, false) // the runner recorded the crash; the session derives to done
 		}
 	}
@@ -381,9 +381,9 @@ func (a *App) ResumeSession(sessionID int64) error {
 	return a.deliver(orch, resumeMessage, nil, true)
 }
 
-// claudeSessionID returns the Claude Code session id from the newest init line
+// providerSessionID returns the provider session id from the newest init line
 // of the session's orchestrators, newest first (a resumed one logs its own).
-func (a *App) claudeSessionID(sessionID int64, orchs []notes.Agent) (string, error) {
+func (a *App) providerSessionID(sessionID int64, orchs []notes.Agent) (string, error) {
 	for i := len(orchs) - 1; i >= 0; i-- {
 		evs, err := a.store.ListAgentEventsOfType(sessionID, orchs[i].ID, evSystem)
 		if err != nil {

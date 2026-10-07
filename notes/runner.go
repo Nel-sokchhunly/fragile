@@ -335,12 +335,12 @@ func (r *Runner) StartOrchestrator(sessionID int64, task string) (Agent, error) 
 }
 
 // ResumeOrchestrator registers a new orchestrator for the session and launches
-// it resuming Claude Code session claudeSessionID (--resume); its arguments are
+// it resuming the provider session providerSessionID; its arguments are
 // otherwise those of StartOrchestrator. It lifts StopSession's refusal (not
 // StopAll's): once the stopped session's processes are all recorded, the
 // session gets fresh run state, as stop() may still be returning from Wait on the old.
-func (r *Runner) ResumeOrchestrator(sessionID int64, claudeSessionID string) (Agent, error) {
-	if claudeSessionID == "" {
+func (r *Runner) ResumeOrchestrator(sessionID int64, providerSessionID string) (Agent, error) {
+	if providerSessionID == "" {
 		return Agent{}, errors.New("no provider conversation to resume")
 	}
 	r.mu.Lock()
@@ -359,7 +359,7 @@ func (r *Runner) ResumeOrchestrator(sessionID int64, claudeSessionID string) (Ag
 	if err != nil {
 		return Agent{}, err
 	}
-	return r.launch(a, "", "", OrchestratorPrompt(r.workDir(sessionID), r.Interactive), claudeSessionID, "")
+	return r.launch(a, "", "", OrchestratorPrompt(r.workDir(sessionID), r.Interactive), providerSessionID, "")
 }
 
 // SpawnSubagent creates the task and sub-agent rows in the session and launches
