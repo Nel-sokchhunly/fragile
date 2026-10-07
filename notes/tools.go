@@ -205,7 +205,7 @@ type spawnIn struct {
 	Title  string   `json:"title,omitempty" jsonschema:"short title shown on the agent card, at most 60 chars"`
 	Task   string   `json:"task" jsonschema:"self-contained task: goal, files owned, constraints, what done looks like"`
 	Scopes []string `json:"scopes,omitempty" jsonschema:"note scopes the sub-agent gets; only [\"session\"] (default)"`
-	Model  string   `json:"model,omitempty" jsonschema:"model for this sub-agent: \"sonnet\" (claude-sonnet-5-5; default choice for routine, well-specified tasks), \"opus\" (claude-opus-5-5; complex design, tricky debugging, large refactors), \"haiku\" (claude-haiku-4-5-20251001; trivial mechanical edits), or a full model id. Omit to use the default (opus)."`
+	Model  string   `json:"model,omitempty" jsonschema:"optional model id for this session provider. Claude accepts sonnet, opus, haiku or a full claude- id; Codex accepts a full Codex model id. Omit to use the provider default."`
 }
 
 // modelAliases maps the spawn_subagent model aliases to full model ids.
@@ -237,12 +237,18 @@ func (s *Server) spawnSubagent(_ context.Context, a Agent, in spawnIn) (any, err
 			return nil, err
 		}
 	}
-	model, err := resolveModel(in.Model)
-	if err != nil {
-		return nil, err
-	}
 	if s.Runner == nil {
 		return nil, errors.New("sub-agent runner not configured")
+	}
+	model := strings.TrimSpace(in.Model)
+	var err error
+	if s.Runner.provider(a.SessionID) == ProviderClaude {
+		model, err = resolveModel(model)
+	} else {
+		err = validCodexModel(model)
+	}
+	if err != nil {
+		return nil, err
 	}
 	sub, err := s.Runner.SpawnSubagent(a.SessionID, a.ID, in.Title, in.Task, model)
 	if err != nil {

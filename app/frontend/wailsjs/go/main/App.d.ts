@@ -42,3 +42,5 @@ export function TerminalResize(arg1:number,arg2:number,arg3:number):Promise<void
 export function TerminalWrite(arg1:number,arg2:string):Promise<void>;
 
 export function UpdateNote(arg1:number,arg2:number,arg3:string,arg4:string):Promise<notes.Note>;
+
+export function CreateSessionWithProvider(arg1:string,arg2:string,arg3:string):Promise<notes.Session>;

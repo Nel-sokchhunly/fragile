@@ -27,10 +27,13 @@ type ctxInfo struct {
 // out of a result's modelUsage.
 func parseContext(line []byte, model string) (c ctxInfo) {
 	var l struct {
-		Type    string `json:"type"`
-		Subtype string `json:"subtype"`
-		Model   string `json:"model"`
-		Compact struct {
+		Type          string `json:"type"`
+		Subtype       string `json:"subtype"`
+		Provider      string `json:"provider"`
+		ContextUsed   int    `json:"context_used"`
+		ContextWindow int    `json:"context_window"`
+		Model         string `json:"model"`
+		Compact       struct {
 			PostTokens int `json:"post_tokens"`
 		} `json:"compact_metadata"`
 		Message struct {
@@ -52,9 +55,14 @@ func parseContext(line []byte, model string) (c ctxInfo) {
 		switch {
 		case l.Subtype == "init" && l.Model != "":
 			c.Model, c.Window = l.Model, defaultWindow
+			if l.Provider == notes.ProviderCodex {
+				c.Window = 0
+			}
 			if strings.HasSuffix(l.Model, "[1m]") {
 				c.Window = longContextWindow
 			}
+		case l.Subtype == "context_usage":
+			c.Used, c.Window = l.ContextUsed, l.ContextWindow
 		case l.Subtype == "compact_boundary": // no assistant message follows a /compact
 			c.Used = l.Compact.PostTokens
 		}
@@ -178,7 +186,9 @@ func (a *App) trackUsage(ag notes.Agent, line []byte) {
 		window = c.Window
 	}
 	if window == 0 {
-		window = defaultWindow
+		if se, err := a.store.GetSession(ag.SessionID); err == nil && se.Provider != notes.ProviderCodex {
+			window = defaultWindow
+		}
 	}
 	changed := false
 	if c.Model != "" && c.Model != cur.Model && a.store.SetAgentModel(ag.SessionID, ag.ID, c.Model) == nil {

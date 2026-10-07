@@ -12,6 +12,7 @@ export function NewSessionDialog({children, tip}: {children: ReactNode; tip?: st
   const createSession = useAppStore((s) => s.createSession)
   const [open, setOpen] = useState(false)
   const [name, setName] = useState('')
+  const [provider, setProvider] = useState<'claude' | 'codex'>('claude')
   const [dir, setDir] = useState('')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
@@ -30,7 +31,7 @@ export function NewSessionDialog({children, tip}: {children: ReactNode; tip?: st
     setBusy(true)
     setError('')
     try {
-      await createSession(name.trim(), dir)
+      await createSession(name.trim(), dir, provider)
       setName('')
       setOpen(false)
     } catch (e) {
@@ -58,6 +59,13 @@ export function NewSessionDialog({children, tip}: {children: ReactNode; tip?: st
             <Button type="button" variant="outline" size="sm" onClick={pick}><FolderOpen/> Directory</Button>
             <span className="min-w-0 flex-1 truncate font-mono text-xs text-muted-foreground" title={dir}>{dir || 'working dir required'}</span>
           </div>
+          <label className="flex items-center gap-2 text-xs">Provider
+            <select aria-label="Provider" value={provider} onChange={(e) => setProvider(e.target.value as 'claude' | 'codex')} className="rounded border bg-background px-2 py-1">
+              <option value="claude">Claude Code</option>
+              <option value="codex">Codex (ChatGPT)</option>
+            </select>
+          </label>
+          {provider === 'codex' && <p className="text-xs text-muted-foreground">Install Codex CLI 0.158+ and run <code>codex login</code> with ChatGPT. Your existing login is used; no API key needed. Text and image attachments supported.</p>}
           <Input autoFocus value={name} onChange={(e) => setName(e.target.value)} aria-label="Name" placeholder="name (default: directory name)"/>
           {error && <p role="alert" className="text-xs text-destructive">{error}</p>}
           <DialogFooter><Button type="submit" disabled={!ready}>{busy ? 'Starting...' : 'Create'}</Button></DialogFooter>

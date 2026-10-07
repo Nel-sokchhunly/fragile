@@ -243,6 +243,14 @@ type SessionSnapshot struct {
 // directory's base name). Its orchestrator starts with the first SendMessage.
 // A directory holds at most one session, live or past; deleting it frees the directory.
 func (a *App) CreateSession(name, workDir string) (notes.Session, error) {
+	return a.CreateSessionWithProvider(name, workDir, notes.ProviderClaude)
+}
+
+// CreateSessionWithProvider fixes the CLI provider for this conversation and its team.
+func (a *App) CreateSessionWithProvider(name, workDir, provider string) (notes.Session, error) {
+	if err := notes.CheckProvider(provider); err != nil {
+		return notes.Session{}, err
+	}
 	dir, err := filepath.Abs(workDir)
 	if err != nil {
 		return notes.Session{}, err
@@ -266,7 +274,7 @@ func (a *App) CreateSession(name, workDir string) (notes.Session, error) {
 			return notes.Session{}, fmt.Errorf("a session for this directory already exists: %q; open it from the sidebar instead", other.Title)
 		}
 	}
-	se, err := a.store.CreateSessionIn(name, dir)
+	se, err := a.store.CreateSessionWithProvider(name, dir, provider)
 	a.startMu.Unlock()
 	if err != nil {
 		return notes.Session{}, err
@@ -286,9 +294,20 @@ func (a *App) SendMessage(sessionID int64, text string, attachments []Attachment
 	if strings.TrimSpace(text) == "" && len(attachments) == 0 {
 		return errors.New("message must not be empty")
 	}
+	se, err := a.store.GetSession(sessionID)
+	if err != nil {
+		return err
+	}
 	atts, err := prepareAttachments(attachments)
 	if err != nil {
 		return err
+	}
+	if se.Provider == notes.ProviderCodex {
+		for _, at := range atts {
+			if at.info.MediaType == "application/pdf" {
+				return errors.New("Codex does not support PDF attachments; send extracted text or an image instead")
+			}
+		}
 	}
 	a.startMu.Lock()
 	orchs, err := a.store.ListAgents(sessionID, "orchestrator")
@@ -379,6 +398,10 @@ func (a *App) claudeSessionID(sessionID int64, orchs []notes.Agent) (string, err
 				return p.SessionID, nil
 			}
 		}
+	}
+	se, _ := a.store.GetSession(sessionID)
+	if se.Provider == notes.ProviderCodex {
+		return "", errors.New("no Codex thread id was recorded for this session, so it cannot be resumed")
 	}
 	return "", errors.New("no Claude Code session id was recorded for this session, so it cannot be resumed")
 }
@@ -875,7 +898,11 @@ func (a *App) killOrphan(ag notes.Agent) {
 		return
 	}
 	out, err := exec.Command("ps", "-p", strconv.Itoa(ag.PID), "-o", "command=").Output()
-	if err != nil || !strings.Contains(string(out), filepath.Join(a.agentDir, fmt.Sprintf("agent-%d.mcp.json", ag.ID))) {
+	if err != nil {
+		return
+	}
+	marker := filepath.Join(a.agentDir, fmt.Sprintf("agent-%d.mcp.json", ag.ID))
+	if !strings.Contains(string(out), marker) {
 		return
 	}
 	syscall.Kill(-ag.PID, syscall.SIGKILL) // agents run as their own process group leader

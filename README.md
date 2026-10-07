@@ -1,6 +1,6 @@
 # Fragile
 
-Agile, for agents. A desktop app where an orchestrator Claude Code agent splits your task across sub-agents that coordinate through a shared notes board. You are the product owner.
+Agile, for agents. A desktop app where an orchestrator Claude Code or Codex agent splits your task across sub-agents that coordinate through a shared notes board. You are the product owner.
 
 ![Fragile: sessions, orchestrator chat, agents and notes](docs/screenshots/main.png)
 
@@ -36,7 +36,7 @@ Download the latest `build-N` release from [Releases](https://github.com/Nel-sok
   ```
 - **Linux** (`fragile-linux-amd64.tar.gz`): needs `libgtk-3` and `libwebkit2gtk-4.1`. Agents need `bubblewrap` and `socat` (`apt install bubblewrap socat`); without them a session refuses to start.
 
-Requires the [`claude` CLI](https://docs.claude.com/en/docs/claude-code) on `PATH`, logged in. Agents run on your Claude subscription; no API key needed.
+Requires your selected provider's CLI on `PATH`, logged in: [`claude`](https://docs.claude.com/en/docs/claude-code) for Claude, or [Codex CLI](https://developers.openai.com/codex/cli) for Codex (setup below). Agents use your existing subscription login; no API key needed.
 
 ## Build from source
 
@@ -53,6 +53,24 @@ On Linux, add `-tags webkit2_41` (`wails build -tags webkit2_41`). `go build ./.
 
 Stack: Wails v2 (Go) + React, TypeScript, Tailwind/shadcn, Zustand, react-virtuoso. Backend state reaches the UI only as Wails events into Zustand stores; components never poll.
 
+## Codex with your ChatGPT login
+
+Choose **Codex (ChatGPT)** in the new-session dialog. Install [Codex CLI](https://developers.openai.com/codex/cli) **0.158.0 or later** on the same machine and run `codex login` to sign in with ChatGPT. Fragile uses that CLI's existing credential storage and refresh; it does not ask for an API key, copy login tokens, or implement its own OAuth flow. `CODEX_HOME`, when set, is respected. Missing CLI/login or an unsupported configuration produces a chat error; sign in/update, then retry.
+
+The one-shot notes CLI also accepts `fragile -provider codex -dir /path/to/project "your task"`.
+
+The session's provider is persisted and used by both its orchestrator and all workers. Existing sessions stay on Claude. Codex runs through the CLI's **stdio app-server**: persistent chat turns, Fragile notes/team MCP, escalation answers, text/image input, stop, interrupt, compaction and saved-thread resume. This is not a ChatGPT web-chat wrapper. Codex PDFs are rejected explicitly; send extracted text or images. Model selection is provider-specific: omit `model` for the Codex default, or supply a full Codex model id available to your account; Claude aliases do not cross providers.
+
+**Permissions:** Codex's orchestrator *and* workers are sandboxed, unlike the unsandboxed Claude orchestrator. Named permission profiles allow project/package-cache writes, deny common credentials and Fragile state (including SQLite sidecars), and proxy command networking through the existing registry/GitHub allowlist. Native delegation, plugins, apps, memory and configured lifecycle hooks are disabled; unrelated configured MCP servers are disabled for the thread. Fragile's role-scoped board/team tools are preapproved; other approval requests are declined, never bypassed. Escalate blocked operations to the user rather than working around the sandbox. Personal CLI configuration/auth remain CLI-owned; administrator requirements may impose further restrictions.
+
+The sidebar's subscription-limit figures currently come from Claude only, not Codex. Codex context usage is displayed when the CLI reports it; Codex cost/subscription-limit telemetry and mixed-provider teams are not implemented. T3 Code's [existing Codex login approach](https://github.com/pingdotgg/t3code/blob/main/docs/user/providers-codex.md) was researched for this integration; no T3 source was copied.
+
+Protocol/worker/lifecycle regression tests run in the normal Go suite. To prove actual OS sandbox enforcement with your installed CLI, without inference or login:
+
+```sh
+FRAGILE_CODEX_SMOKE=1 go test ./notes -run TestCodexSandboxSmoke -v
+```
+
 ## Keyboard shortcuts
 
 `⌘` is `Ctrl` on Linux.
@@ -68,6 +86,8 @@ Stack: Wails v2 (Go) + React, TypeScript, Tailwind/shadcn, Zustand, react-virtuo
 | `Enter` / `Shift+Enter` | Send / new line (message box, escalation answer) |
 
 ## How it works
+
+The details below describe the original Claude runner; the Codex runner's protocol and permission differences are described above.
 
 ```
 App (Go) ── notes MCP server, 127.0.0.1:<random port>, /mcp/<per-agent token>

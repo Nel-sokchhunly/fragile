@@ -81,3 +81,7 @@ export function TerminalWrite(arg1, arg2) {
 export function UpdateNote(arg1, arg2, arg3, arg4) {
   return window['go']['main']['App']['UpdateNote'](arg1, arg2, arg3, arg4);
 }
+
+export function CreateSessionWithProvider(arg1, arg2, arg3) {
+  return window['go']['main']['App']['CreateSessionWithProvider'](arg1, arg2, arg3);
+}

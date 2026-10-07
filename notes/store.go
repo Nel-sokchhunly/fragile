@@ -157,15 +157,16 @@ type Session struct {
 	ID        int64  `json:"id"`
 	Title     string `json:"title"`
 	Status    string `json:"status"`
+	Provider  string `json:"provider"` // claude (legacy/default) or codex
 	WorkDir   string `json:"work_dir"` // "" = none recorded; the runner's configured WorkDir applies
 	CreatedAt string `json:"created_at"`
 	Agents    int    `json:"agent_count"` // 0 = new: the orchestrator starts with the first message
 }
 
-const sessionCols = `id, title, status, work_dir, created_at, (SELECT COUNT(*) FROM agent_instances WHERE session_id = sessions.id)`
+const sessionCols = `id, title, status, provider, work_dir, created_at, (SELECT COUNT(*) FROM agent_instances WHERE session_id = sessions.id)`
 
 func scanSession(r scanner) (se Session, err error) {
-	err = r.Scan(&se.ID, &se.Title, &se.Status, &se.WorkDir, &se.CreatedAt, &se.Agents)
+	err = r.Scan(&se.ID, &se.Title, &se.Status, &se.Provider, &se.WorkDir, &se.CreatedAt, &se.Agents)
 	return se, one(err)
 }
 
@@ -175,12 +176,19 @@ func (s *Store) CreateSession(title string) (Session, error) { return s.CreateSe
 
 // CreateSessionIn is CreateSession with the working directory its agents run in.
 func (s *Store) CreateSessionIn(title, workDir string) (Session, error) {
+	return s.CreateSessionWithProvider(title, workDir, ProviderClaude)
+}
+
+func (s *Store) CreateSessionWithProvider(title, workDir, provider string) (Session, error) {
+	if err := CheckProvider(provider); err != nil {
+		return Session{}, err
+	}
 	tx, err := s.db.Begin()
 	if err != nil {
 		return Session{}, err
 	}
 	defer tx.Rollback()
-	se, err := scanSession(tx.QueryRow(`INSERT INTO sessions (title, work_dir) VALUES (?, ?) RETURNING id, title, status, work_dir, created_at, 0`, title, workDir))
+	se, err := scanSession(tx.QueryRow(`INSERT INTO sessions (title, work_dir, provider) VALUES (?, ?, ?) RETURNING id, title, status, provider, work_dir, created_at, 0`, title, workDir, provider))
 	if err != nil {
 		return Session{}, err
 	}

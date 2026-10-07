@@ -32,7 +32,7 @@ type AppState = {
   toggleTerminal: (sessionId: number) => void
   notify: (e: unknown) => void
   // Throw the backend's error string; the caller shows it inline.
-  createSession: (name: string, workDir: string) => Promise<void>
+  createSession: (name: string, workDir: string, provider?: 'claude' | 'codex') => Promise<void>
   sendMessage: (sessionId: number, text: string, attachments?: Attachment[]) => Promise<void>
   // Report failures as toasts.
   stopSession: (sessionId: number) => Promise<void>
@@ -133,8 +133,8 @@ export const useAppStore = create<AppState>((set, get) => {
       setTimeout(() => set((s) => ({toasts: s.toasts.filter((t) => t.id !== id)})), 6000)
     },
 
-    createSession: async (name, workDir) => {
-      const se = await api.createSession(name, workDir)
+    createSession: async (name, workDir, provider = 'claude') => {
+      const se = await api.createSession(name, workDir, provider)
       get().sessionCreated(se)
       select(se.id)
     },

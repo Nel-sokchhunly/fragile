@@ -24,6 +24,7 @@ import (
 
 func main() {
 	var cfg notes.Config
+	flag.StringVar(&cfg.Provider, "provider", notes.ProviderClaude, "agent CLI provider: claude or codex (ChatGPT login)")
 	flag.StringVar(&cfg.Addr, "addr", "127.0.0.1:7777", "listen address (keep it on localhost)")
 	flag.StringVar(&cfg.DBPath, "db", ".fragile/fragile.db", "SQLite database path")
 	flag.StringVar(&cfg.LogPath, "log", ".fragile/events.jsonl", "observation log path (tail -f it)")
@@ -54,6 +55,13 @@ func checkLoopback(addr string) error {
 }
 
 func run(cfg notes.Config, task string) error {
+	provider := cfg.Provider
+	if provider == "" {
+		provider = notes.ProviderClaude
+	}
+	if err := notes.CheckProvider(provider); err != nil {
+		return err
+	}
 	if err := checkLoopback(cfg.Addr); err != nil {
 		return err
 	}
@@ -93,7 +101,7 @@ func run(cfg notes.Config, task string) error {
 	if title == "" {
 		title = "phase0"
 	}
-	session, err := store.CreateSession(title)
+	session, err := store.CreateSessionWithProvider(title, cfg.WorkDir, provider)
 	if err != nil {
 		return err
 	}

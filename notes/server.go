@@ -16,6 +16,7 @@ import (
 
 // Config holds the paths and settings the server needs.
 type Config struct {
+	Provider string // one-shot CLI session provider; empty defaults to Claude
 	Addr     string // listen address, e.g. "127.0.0.1:7777"
 	DBPath   string // SQLite database file
 	LogPath  string // observation log (JSONL), meant for `tail -f`
