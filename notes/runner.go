@@ -277,7 +277,7 @@ type sessionRun struct {
 	// blocked, which is safe because the orchestrator stays counted for as long
 	// as it can spawn; once stopped is set, start never calls Add again.
 	wg      sync.WaitGroup
-	stopped bool // set by StopSession/StopAll; final for this session in this process
+	stopped bool // set by StopSession/StopAll; only ResumeOrchestrator lifts it (by replacing the sessionRun)
 }
 
 // FirstLine returns the first line of text, trimmed and cut to titleMax characters.
@@ -329,7 +329,35 @@ func (r *Runner) StartOrchestrator(sessionID int64, task string) (Agent, error) 
 	if err != nil {
 		return Agent{}, err
 	}
-	return r.launch(a, "", task, OrchestratorPrompt(r.workDir(sessionID), r.Interactive))
+	return r.launch(a, "", task, OrchestratorPrompt(r.workDir(sessionID), r.Interactive), "")
+}
+
+// ResumeOrchestrator registers a new orchestrator for the session and launches
+// it resuming Claude Code session claudeSessionID (--resume); its arguments are
+// otherwise those of StartOrchestrator. It lifts StopSession's refusal (not
+// StopAll's): once the stopped session's processes are all recorded, the
+// session gets fresh run state, as stop() may still be returning from Wait on the old.
+func (r *Runner) ResumeOrchestrator(sessionID int64, claudeSessionID string) (Agent, error) {
+	if claudeSessionID == "" {
+		return Agent{}, errors.New("no Claude Code session to resume")
+	}
+	r.mu.Lock()
+	sr := r.session(sessionID)
+	stopped := sr.stopped
+	r.mu.Unlock()
+	if stopped {
+		sr.wg.Wait() // every process was signalled and no new one can start: returns once they are recorded
+		r.mu.Lock()
+		if r.sessions[sessionID] == sr {
+			r.sessions[sessionID] = &sessionRun{}
+		}
+		r.mu.Unlock()
+	}
+	a, err := r.store.CreateAgent(sessionID, "orchestrator", 0, 0)
+	if err != nil {
+		return Agent{}, err
+	}
+	return r.launch(a, "", "", OrchestratorPrompt(r.workDir(sessionID), r.Interactive), claudeSessionID)
 }
 
 // SpawnSubagent creates the task and sub-agent rows in the session and launches
@@ -352,7 +380,7 @@ func (r *Runner) SpawnSubagent(sessionID, parentID int64, title, task string) (A
 	if err != nil {
 		return Agent{}, err
 	}
-	return r.launch(a, title, task, SubagentPrompt(a.ID, task, r.workDir(sessionID)))
+	return r.launch(a, title, task, SubagentPrompt(a.ID, task, r.workDir(sessionID)), "")
 }
 
 // createSubagent adds the task and sub-agent rows unless the session already
@@ -384,7 +412,8 @@ func (r *Runner) createSubagent(sessionID, parentID int64, title, task string) (
 
 // args builds the claude command line. The prompt goes after "--" so a task
 // starting with "-" is not parsed as a flag and the variadic flags stop there.
-func (r *Runner) args(a Agent, workDir, mcpConfig, prompt, systemPrompt string) []string {
+// A non-empty resume is the Claude Code session id to continue (--resume).
+func (r *Runner) args(a Agent, workDir, mcpConfig, prompt, systemPrompt, resume string) []string {
 	args := []string{"-p"}
 	if r.stdinAgent(a) { // messages arrive on stdin; the first one is the task
 		args = append(args, "--input-format", "stream-json")
@@ -400,6 +429,9 @@ func (r *Runner) args(a Agent, workDir, mcpConfig, prompt, systemPrompt string) 
 		args = append(args, isolationArgs...)
 		args = append(args, "--settings", sandboxSettings(r.cfg, workDir))
 	}
+	if resume != "" {
+		args = append(args, "--resume", resume)
+	}
 	if r.stdinAgent(a) {
 		return args
 	}
@@ -409,7 +441,7 @@ func (r *Runner) args(a Agent, workDir, mcpConfig, prompt, systemPrompt string) 
 // stdinAgent reports whether the agent is the long-lived orchestrator fed over stdin.
 func (r *Runner) stdinAgent(a Agent) bool { return r.Interactive && a.Role == roleOrchestrator }
 
-func (r *Runner) launch(a Agent, taskTitle, prompt, systemPrompt string) (Agent, error) {
+func (r *Runner) launch(a Agent, taskTitle, prompt, systemPrompt, resume string) (Agent, error) {
 	id := strconv.FormatInt(a.ID, 10)
 	mcpConfig := filepath.Join(r.cfg.AgentDir, "agent-"+id+".mcp.json")
 	logPath := filepath.Join(r.cfg.AgentDir, "agent-"+id+".jsonl")
@@ -420,7 +452,7 @@ func (r *Runner) launch(a Agent, taskTitle, prompt, systemPrompt string) (Agent,
 			return Agent{}, fmt.Errorf("launch agent %d: %w", a.ID, err)
 		}
 	}
-	pid, done, err := r.start(a, mcpConfig, logPath, prompt, systemPrompt)
+	pid, done, err := r.start(a, mcpConfig, logPath, prompt, systemPrompt, resume)
 	if err != nil {
 		r.finish(a, taskTitle, -1, err.Error(), false)
 		return Agent{}, fmt.Errorf("launch agent %d: %w", a.ID, err)
@@ -443,7 +475,7 @@ func (r *Runner) launch(a Agent, taskTitle, prompt, systemPrompt string) (Agent,
 
 // start writes the MCP config and starts the process in its own process
 // group. The returned channel yields how it ended once the process is gone.
-func (r *Runner) start(a Agent, mcpConfig, logPath, prompt, systemPrompt string) (int, <-chan exit, error) {
+func (r *Runner) start(a Agent, mcpConfig, logPath, prompt, systemPrompt, resume string) (int, <-chan exit, error) {
 	// Refuse before any file is written; checked again under the lock below.
 	r.mu.Lock()
 	refused := r.refusing(a.SessionID)
@@ -463,7 +495,7 @@ func (r *Runner) start(a Agent, mcpConfig, logPath, prompt, systemPrompt string)
 	// Deliberately not exec.CommandContext: spawn runs inside an MCP request
 	// and the process must outlive it.
 	workDir := r.workDir(a.SessionID)
-	cmd := exec.Command(r.Command, r.args(a, workDir, mcpConfig, prompt, systemPrompt)...)
+	cmd := exec.Command(r.Command, r.args(a, workDir, mcpConfig, prompt, systemPrompt, resume)...)
 	cmd.Dir = workDir
 	cmd.Env = agentEnv(os.Environ(), a.Role != roleOrchestrator)
 	cmd.Stdout, cmd.Stderr = out, out // the child writes straight to the file ...
@@ -578,8 +610,8 @@ func (r *Runner) Wait(sessionID int64) {
 	sr.wg.Wait()
 }
 
-// StopSession refuses further launches for the session (for good, in this
-// process), signals its processes as StopAll does, and returns once they have
+// StopSession refuses further launches for the session (until
+// ResumeOrchestrator), signals its processes as StopAll does, and returns once they have
 // all exited and their outcome is recorded in the store and log. Other
 // sessions are untouched.
 func (r *Runner) StopSession(sessionID int64) { r.stop(&sessionID) }

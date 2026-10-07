@@ -1,7 +1,7 @@
 import {memo, useCallback, useMemo, useState} from 'react'
 import {useNow} from '@/hooks/use-now'
 import {Virtuoso} from 'react-virtuoso'
-import {ChevronRight, Square, Wrench} from 'lucide-react'
+import {ChevronRight, Play, Square, Wrench} from 'lucide-react'
 import {Button} from '@/components/ui/button'
 import {Collapsible, CollapsibleContent, CollapsibleTrigger} from '@/components/ui/collapsible'
 import {Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger} from '@/components/ui/dialog'
@@ -9,6 +9,7 @@ import {Textarea} from '@/components/ui/textarea'
 import {Tooltip, TooltipContent, TooltipTrigger} from '@/components/ui/tooltip'
 import {Composer} from '@/components/chat/Composer'
 import {Markdown} from '@/components/Markdown'
+import {api} from '@/lib/api'
 import {agentContext, agentLabel, agentState, agentSummary, formatElapsed, formatExact, formatTime} from '@/lib/format'
 import type {ChatItem, SessionStatus} from '@/lib/types'
 import {cn} from '@/lib/utils'
@@ -145,7 +146,7 @@ function StopButton({sessionId}: {sessionId: number}) {
       <DialogContent className="sm:max-w-sm">
         <DialogHeader>
           <DialogTitle>Stop this session?</DialogTitle>
-          <DialogDescription>Kills the orchestrator and all sub-agents. A stopped session cannot be resumed.</DialogDescription>
+          <DialogDescription>Kills the orchestrator and all sub-agents. Resuming later starts a new orchestrator; sub-agents are not restarted.</DialogDescription>
         </DialogHeader>
         <DialogFooter>
           <Button variant="outline" onClick={() => setOpen(false)}>Cancel</Button>
@@ -153,6 +154,33 @@ function StopButton({sessionId}: {sessionId: number}) {
         </DialogFooter>
       </DialogContent>
     </Dialog>
+  )
+}
+
+// The composer's disabled reason once the orchestrator is gone. Resume starts a new one on the same Claude
+// conversation; it shows up via agent_updated, which flips orchestratorRunning and re-enables the composer.
+function ResumeNotice({sessionId}: {sessionId: number}) {
+  const [pending, setPending] = useState(false)
+  const [error, setError] = useState('')
+  const resume = async () => {
+    setPending(true)
+    setError('')
+    try {
+      await api.resumeSession(sessionId)
+    } catch (e) {
+      setError(String(e))
+    } finally {
+      setPending(false)
+    }
+  }
+  return (
+    <>
+      <div className="flex items-center gap-2">
+        <span className="min-w-0 flex-1">Orchestrator not running (stopped, finished, or the app restarted). Resume it to keep messaging; history stays viewable.</span>
+        <Button variant="outline" size="xs" className="shrink-0" onClick={resume} disabled={pending}><Play/>{pending ? 'Resuming...' : 'Resume'}</Button>
+      </div>
+      {error && <p role="alert" className="mt-1 text-[13px] text-destructive">{error}</p>}
+    </>
   )
 }
 
@@ -240,7 +268,7 @@ export function ChatView({sessionId}: {sessionId: number}) {
       </div>
       <Composer
         onSend={(t) => send(sessionId, t)} label="Message the orchestrator" placeholder="Message the orchestrator"
-        disabledReason={loaded && lead && !running ? "Orchestrator not running (stopped, finished, or the app restarted): can't take messages. History stays viewable." : undefined}
+        disabledReason={loaded && lead && !running ? <ResumeNotice key={sessionId} sessionId={sessionId}/> : undefined}
       />
     </div>
   )

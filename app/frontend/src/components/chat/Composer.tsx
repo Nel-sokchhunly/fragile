@@ -1,4 +1,4 @@
-import {useState} from 'react'
+import {type ReactNode, useState} from 'react'
 import {CornerDownLeft} from 'lucide-react'
 import {Button} from '@/components/ui/button'
 import {Textarea} from '@/components/ui/textarea'
@@ -6,8 +6,8 @@ import {cn} from '@/lib/utils'
 
 // Enter sends, Shift+Enter newline (and Enter during IME composition is left alone).
 // onSend rejects with the backend's message, shown under the box (the text is kept).
-// `disabledReason` turns the box off and says why. data-composer lets the global shortcuts focus it.
-export function Composer({onSend, placeholder, label, disabledReason}: {onSend: (text: string) => Promise<void>; placeholder: string; label: string; disabledReason?: string}) {
+// `disabledReason` turns the box off and says why (may hold an action). data-composer lets the global shortcuts focus it.
+export function Composer({onSend, placeholder, label, disabledReason}: {onSend: (text: string) => Promise<void>; placeholder: string; label: string; disabledReason?: ReactNode}) {
   const [text, setText] = useState('')
   const [error, setError] = useState('')
   const off = !!disabledReason
@@ -40,7 +40,7 @@ export function Composer({onSend, placeholder, label, disabledReason}: {onSend: 
             <CornerDownLeft/>
           </Button>
         </div>
-        {off && <p className="mt-1 text-[13px] text-muted-foreground">{disabledReason}</p>}
+        {off && <div className="mt-1 text-[13px] text-muted-foreground">{disabledReason}</div>}
         {error && <p role="alert" className="mt-1 text-[13px] text-destructive">{error}</p>}
       </div>
     </div>
