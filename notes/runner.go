@@ -329,7 +329,7 @@ func (r *Runner) StartOrchestrator(sessionID int64, task string) (Agent, error) 
 	if err != nil {
 		return Agent{}, err
 	}
-	return r.launch(a, "", task, OrchestratorPrompt(r.workDir(sessionID), r.Interactive), "")
+	return r.launch(a, "", task, OrchestratorPrompt(r.workDir(sessionID), r.Interactive), "", "")
 }
 
 // ResumeOrchestrator registers a new orchestrator for the session and launches
@@ -357,12 +357,13 @@ func (r *Runner) ResumeOrchestrator(sessionID int64, claudeSessionID string) (Ag
 	if err != nil {
 		return Agent{}, err
 	}
-	return r.launch(a, "", "", OrchestratorPrompt(r.workDir(sessionID), r.Interactive), claudeSessionID)
+	return r.launch(a, "", "", OrchestratorPrompt(r.workDir(sessionID), r.Interactive), claudeSessionID, "")
 }
 
 // SpawnSubagent creates the task and sub-agent rows in the session and launches
 // the process. title is the task title shown on the agent card (the task's first line if empty). parentID must be the session's orchestrator (one level deep only).
-func (r *Runner) SpawnSubagent(sessionID, parentID int64, title, task string) (Agent, error) {
+// model is the full model id it runs with (--model); empty uses the CLI's default.
+func (r *Runner) SpawnSubagent(sessionID, parentID int64, title, task, model string) (Agent, error) {
 	if p, err := r.store.GetAgent(sessionID, parentID); err != nil {
 		return Agent{}, err
 	} else if p.Role != "orchestrator" {
@@ -380,7 +381,7 @@ func (r *Runner) SpawnSubagent(sessionID, parentID int64, title, task string) (A
 	if err != nil {
 		return Agent{}, err
 	}
-	return r.launch(a, title, task, SubagentPrompt(a.ID, task, r.workDir(sessionID)), "")
+	return r.launch(a, title, task, SubagentPrompt(a.ID, task, r.workDir(sessionID)), "", model)
 }
 
 // createSubagent adds the task and sub-agent rows unless the session already
@@ -410,10 +411,14 @@ func (r *Runner) createSubagent(sessionID, parentID int64, title, task string) (
 	return a, r.store.SetTaskAgent(sessionID, t.ID, a.ID)
 }
 
+// defaultModel runs every agent that is not given a model: the orchestrator always.
+const defaultModel = "claude-opus-5-5"
+
 // args builds the claude command line. The prompt goes after "--" so a task
 // starting with "-" is not parsed as a flag and the variadic flags stop there.
-// A non-empty resume is the Claude Code session id to continue (--resume).
-func (r *Runner) args(a Agent, workDir, mcpConfig, prompt, systemPrompt, resume string) []string {
+// A non-empty resume is the Claude Code session id to continue (--resume); a
+// non-empty model is a sub-agent's model id (--model).
+func (r *Runner) args(a Agent, workDir, mcpConfig, prompt, systemPrompt, resume, model string) []string {
 	args := []string{"-p"}
 	if r.stdinAgent(a) { // messages arrive on stdin; the first one is the task
 		args = append(args, "--input-format", "stream-json")
@@ -429,6 +434,10 @@ func (r *Runner) args(a Agent, workDir, mcpConfig, prompt, systemPrompt, resume 
 		args = append(args, isolationArgs...)
 		args = append(args, "--settings", sandboxSettings(r.cfg, workDir))
 	}
+	if model == "" { // the orchestrator always, and sub-agents spawned without a model
+		model = defaultModel
+	}
+	args = append(args, "--model", model)
 	if resume != "" {
 		args = append(args, "--resume", resume)
 	}
@@ -441,7 +450,7 @@ func (r *Runner) args(a Agent, workDir, mcpConfig, prompt, systemPrompt, resume 
 // stdinAgent reports whether the agent is the long-lived orchestrator fed over stdin.
 func (r *Runner) stdinAgent(a Agent) bool { return r.Interactive && a.Role == roleOrchestrator }
 
-func (r *Runner) launch(a Agent, taskTitle, prompt, systemPrompt, resume string) (Agent, error) {
+func (r *Runner) launch(a Agent, taskTitle, prompt, systemPrompt, resume, model string) (Agent, error) {
 	id := strconv.FormatInt(a.ID, 10)
 	mcpConfig := filepath.Join(r.cfg.AgentDir, "agent-"+id+".mcp.json")
 	logPath := filepath.Join(r.cfg.AgentDir, "agent-"+id+".jsonl")
@@ -452,7 +461,7 @@ func (r *Runner) launch(a Agent, taskTitle, prompt, systemPrompt, resume string)
 			return Agent{}, fmt.Errorf("launch agent %d: %w", a.ID, err)
 		}
 	}
-	pid, done, err := r.start(a, mcpConfig, logPath, prompt, systemPrompt, resume)
+	pid, done, err := r.start(a, mcpConfig, logPath, prompt, systemPrompt, resume, model)
 	if err != nil {
 		r.finish(a, taskTitle, -1, err.Error(), false)
 		return Agent{}, fmt.Errorf("launch agent %d: %w", a.ID, err)
@@ -475,7 +484,7 @@ func (r *Runner) launch(a Agent, taskTitle, prompt, systemPrompt, resume string)
 
 // start writes the MCP config and starts the process in its own process
 // group. The returned channel yields how it ended once the process is gone.
-func (r *Runner) start(a Agent, mcpConfig, logPath, prompt, systemPrompt, resume string) (int, <-chan exit, error) {
+func (r *Runner) start(a Agent, mcpConfig, logPath, prompt, systemPrompt, resume, model string) (int, <-chan exit, error) {
 	// Refuse before any file is written; checked again under the lock below.
 	r.mu.Lock()
 	refused := r.refusing(a.SessionID)
@@ -495,7 +504,7 @@ func (r *Runner) start(a Agent, mcpConfig, logPath, prompt, systemPrompt, resume
 	// Deliberately not exec.CommandContext: spawn runs inside an MCP request
 	// and the process must outlive it.
 	workDir := r.workDir(a.SessionID)
-	cmd := exec.Command(r.Command, r.args(a, workDir, mcpConfig, prompt, systemPrompt, resume)...)
+	cmd := exec.Command(r.Command, r.args(a, workDir, mcpConfig, prompt, systemPrompt, resume, model)...)
 	cmd.Dir = workDir
 	cmd.Env = agentEnv(os.Environ(), a.Role != roleOrchestrator)
 	cmd.Stdout, cmd.Stderr = out, out // the child writes straight to the file ...

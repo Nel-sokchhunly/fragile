@@ -18,7 +18,7 @@ const (
 
 // ctxInfo is what one stream-json line says about an agent's context; zero fields say nothing.
 type ctxInfo struct {
-	Used   int    // input + cache tokens of an assistant message: the context as of that message
+	Used   int    // input + cache tokens of an assistant message (the context as of that message), or a compaction's post_tokens
 	Model  string // from the system init line
 	Window int    // from the model name's [1m] suffix, or a result's modelUsage
 }
@@ -30,6 +30,9 @@ func parseContext(line []byte, model string) (c ctxInfo) {
 		Type    string `json:"type"`
 		Subtype string `json:"subtype"`
 		Model   string `json:"model"`
+		Compact struct {
+			PostTokens int `json:"post_tokens"`
+		} `json:"compact_metadata"`
 		Message struct {
 			Usage struct {
 				Input   int `json:"input_tokens"`
@@ -46,11 +49,14 @@ func parseContext(line []byte, model string) (c ctxInfo) {
 	}
 	switch l.Type {
 	case "system":
-		if l.Subtype == "init" && l.Model != "" {
+		switch {
+		case l.Subtype == "init" && l.Model != "":
 			c.Model, c.Window = l.Model, defaultWindow
 			if strings.HasSuffix(l.Model, "[1m]") {
 				c.Window = longContextWindow
 			}
+		case l.Subtype == "compact_boundary": // no assistant message follows a /compact
+			c.Used = l.Compact.PostTokens
 		}
 	case "assistant":
 		u := l.Message.Usage

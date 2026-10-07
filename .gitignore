@@ -9,3 +9,5 @@ app/frontend/dist/*
 app/frontend/package.json.md5
 app/frontend/.vite/
 .claude/settings.local.json
+# created by local pnpm 10+; CI uses pnpm 9, which rejects it
+app/frontend/pnpm-workspace.yaml

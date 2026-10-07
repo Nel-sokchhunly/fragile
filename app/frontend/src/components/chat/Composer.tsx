@@ -1,11 +1,11 @@
 import {type DragEvent, type ReactNode, useEffect, useRef, useState} from 'react'
-import {CornerDownLeft, Paperclip, Square} from 'lucide-react'
+import {CornerDownLeft, Paperclip, Square, SquareTerminal} from 'lucide-react'
 import {Button} from '@/components/ui/button'
 import {Textarea} from '@/components/ui/textarea'
 import {FileChip, ImageChip} from '@/components/chat/Attachments'
 import {MAX_ATTACHMENTS, MAX_TOTAL, type PendingAttachment, readAttachment} from '@/lib/attachments'
 import {formatBytes} from '@/lib/format'
-import {focusComposer} from '@/lib/keys'
+import {focusComposer, MOD} from '@/lib/keys'
 import type {Attachment} from '@/lib/types'
 import {cn} from '@/lib/utils'
 
@@ -14,9 +14,11 @@ import {cn} from '@/lib/utils'
 // Files come from the paperclip, drag-and-drop onto the box, or paste; a message may be attachments only.
 // `onInterrupt` (set while the orchestrator works) adds an Interrupt button; data-interrupt lets ChatView's Esc click it.
 // `disabledReason` turns the box off and says why (may hold an action). data-composer lets the global shortcuts focus it.
-export function Composer({onSend, onInterrupt, placeholder, label, disabledReason}: {
+// `terminal` adds the terminal pane toggle left of the box (it stays usable while the box is off).
+export function Composer({onSend, onInterrupt, placeholder, label, disabledReason, terminal}: {
   onSend: (text: string, attachments: Attachment[]) => Promise<void>; onInterrupt?: () => Promise<void>
   placeholder: string; label: string; disabledReason?: ReactNode
+  terminal?: {open: boolean; onToggle: () => void}
 }) {
   const [text, setText] = useState('')
   const [files, setFiles] = useState<PendingAttachment[]>([])
@@ -29,10 +31,11 @@ export function Composer({onSend, onInterrupt, placeholder, label, disabledReaso
   const off = !!disabledReason
   const ready = !off && !reading && (!!text.trim() || files.length > 0)
   const update = (next: PendingAttachment[]) => { filesRef.current = next; setFiles(next) }
-  // Focus when shown (ChatView remounts per session) and when re-enabled (after Resume brings the orchestrator back).
-  useEffect(() => { if (!off) focusComposer() }, [off])
+  // Focus when shown (ChatView remounts per session) and when re-enabled (after Resume brings the orchestrator back),
+  // but leave an open terminal (which focuses itself first) alone.
+  useEffect(() => { if (!off && !document.activeElement?.closest('[data-terminal]')) focusComposer() }, [off])
 
-  const add = async (list: FileList | null) => {
+  const add = async (list: FileList | File[] | null) => {
     const picked = [...(list ?? [])]
     if (off || !picked.length) return
     setError('')
@@ -95,40 +98,56 @@ export function Composer({onSend, onInterrupt, placeholder, label, disabledReaso
             })}
           </div>
         )}
-        <div className="relative">
-          <input ref={input} type="file" multiple hidden onChange={(e) => { void add(e.target.files); e.target.value = '' }}/>
-          <Button
-            variant="ghost" size="icon-xs" onClick={() => input.current?.click()} disabled={off} aria-label="Attach files" title="Attach files (or drop / paste them)"
-            className="absolute bottom-2 left-2"
-          >
-            <Paperclip/>
-          </Button>
-          <Textarea
-            data-composer value={text} onChange={(e) => setText(e.target.value)} rows={1} aria-label={label} placeholder={placeholder} disabled={off}
-            className={cn('max-h-40 min-h-10 resize-none rounded-[10px] py-[9px] pl-9', onInterrupt ? 'pr-16' : 'pr-10', dragging && 'border-ring')}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) { e.preventDefault(); void send() }
-            }}
-            onPaste={(e) => {
-              // Files only when there is no plain text, so pasting text from apps that also offer an image still pastes text.
-              if (e.clipboardData.files.length && !e.clipboardData.types.includes('text/plain')) { e.preventDefault(); void add(e.clipboardData.files) }
-            }}
-          />
-          <div className="absolute right-2 bottom-2 flex gap-0.5">
-            {onInterrupt && (
-              <Button
-                data-interrupt variant="ghost" size="icon-xs" onClick={interrupt} disabled={interrupting} aria-label="Interrupt" title="Interrupt (Esc)"
-                className="text-foreground"
-              >
-                <Square className="fill-current"/>
-              </Button>
-            )}
+        <div className="flex items-end gap-1.5">
+          {terminal && (
             <Button
-              variant="ghost" size="icon-xs" onClick={send} disabled={!ready} aria-label="Send message" title="Send (Enter, Shift+Enter for newline)"
-              className={cn(ready && 'text-foreground')}
+              variant="ghost" size="icon-sm" onClick={terminal.onToggle} aria-pressed={terminal.open} aria-label="Terminal" title={`Terminal (${MOD}\`)`}
+              className={cn('mb-1 shrink-0', terminal.open && 'bg-accent text-foreground')}
             >
-              <CornerDownLeft/>
+              <SquareTerminal/>
             </Button>
+          )}
+          <div className="relative min-w-0 flex-1">
+            <input ref={input} type="file" multiple hidden onChange={(e) => { void add(e.target.files); e.target.value = '' }}/>
+            <Button
+              variant="ghost" size="icon-xs" onClick={() => input.current?.click()} disabled={off} aria-label="Attach files" title="Attach files (or drop / paste them)"
+              className="absolute bottom-2 left-2"
+            >
+              <Paperclip/>
+            </Button>
+            <Textarea
+              data-composer value={text} onChange={(e) => setText(e.target.value)} rows={1} aria-label={label} placeholder={placeholder} disabled={off}
+              className={cn('max-h-40 min-h-10 resize-none rounded-[10px] py-[9px] pl-9', onInterrupt ? 'pr-16' : 'pr-10', dragging && 'border-ring')}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) { e.preventDefault(); void send() }
+              }}
+              onPaste={(e) => {
+                // Pasted files (e.g. screenshots) are attached. WebKitGTK puts them in items, often not in files, so items
+                // come first. A clipboard that also has plain text still pastes the text; otherwise the default is stopped.
+                const cd = e.clipboardData
+                let pasted = Array.from(cd.items).filter((i) => i.kind === 'file').map((i) => i.getAsFile()).filter((f): f is File => !!f)
+                if (!pasted.length) pasted = [...cd.files]
+                if (!pasted.length) return
+                if (!cd.types.includes('text/plain')) e.preventDefault()
+                void add(pasted)
+              }}
+            />
+            <div className="absolute right-2 bottom-2 flex gap-0.5">
+              {onInterrupt && (
+                <Button
+                  data-interrupt variant="ghost" size="icon-xs" onClick={interrupt} disabled={interrupting} aria-label="Interrupt" title="Interrupt (Esc)"
+                  className="text-foreground"
+                >
+                  <Square className="fill-current"/>
+                </Button>
+              )}
+              <Button
+                variant="ghost" size="icon-xs" onClick={send} disabled={!ready} aria-label="Send message" title="Send (Enter, Shift+Enter for newline)"
+                className={cn(ready && 'text-foreground')}
+              >
+                <CornerDownLeft/>
+              </Button>
+            </div>
           </div>
         </div>
         {reading > 0 && <p className="mt-1 text-[13px] text-muted-foreground">Reading files...</p>}

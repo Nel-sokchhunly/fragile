@@ -9,9 +9,12 @@ import {Textarea} from '@/components/ui/textarea'
 import {Tooltip, TooltipContent, TooltipTrigger} from '@/components/ui/tooltip'
 import {SentAttachments} from '@/components/chat/Attachments'
 import {Composer} from '@/components/chat/Composer'
+import {TerminalPane} from '@/components/chat/TerminalPane'
 import {Markdown} from '@/components/Markdown'
 import {api} from '@/lib/api'
 import {agentContext, agentLabel, agentState, agentSummary, formatElapsed, formatExact, formatTime, modelName} from '@/lib/format'
+import {focusComposer} from '@/lib/keys'
+import {isToggleKey} from '@/lib/terminal'
 import type {ChatItem, SessionStatus} from '@/lib/types'
 import {cn} from '@/lib/utils'
 import {NO_AGENTS, NO_CHAT, orchestratorRunning, useAppStore} from '@/store/app'
@@ -131,6 +134,13 @@ const Row = memo(function Row({sessionId, item, open, onToggle}: {sessionId: num
       {item.kind === 'tool' && <ToolLine item={item}/>}
       {item.kind === 'tools' && <ToolGroup items={item.items} open={open} onOpenChange={(o) => onToggle(item.id, o)}/>}
       {item.kind === 'escalation' && <EscalationBlock sessionId={sessionId} item={item}/>}
+      {item.kind === 'notice' && (
+        <div role="note" className="flex items-center gap-3 text-xs text-muted-foreground" title={formatExact(item.at)}>
+          <span className="h-px flex-1 bg-border" aria-hidden/>
+          <span className="shrink-0">{item.text}</span>
+          <span className="h-px flex-1 bg-border" aria-hidden/>
+        </div>
+      )}
     </div>
   )
 })
@@ -243,17 +253,51 @@ export function ChatView({sessionId}: {sessionId: number}) {
   const lead = agents.findLast((a) => a.role === 'orchestrator') // latest: earlier ones failed to launch
   const ctx = agentContext(lead)
   const st = session && STATUS_TEXT[session.status === 'done' && !session.agent_count ? 'new' : session.status]
+  // Clicking the ctx figure compacts the orchestrator's context; the result arrives as a notice chat item.
+  const [compacting, setCompacting] = useState(false)
+  const [compactError, setCompactError] = useState('')
+  useEffect(() => setCompactError(''), [sessionId])
+  const compact = async () => {
+    setCompacting(true)
+    setCompactError('')
+    try {
+      await api.compactSession(sessionId)
+    } catch (e) {
+      setCompactError(String(e))
+    } finally {
+      setCompacting(false)
+    }
+  }
   // Esc interrupts the current turn (not inside a dialog) by clicking the composer's Interrupt button, so errors show there.
   useEffect(() => {
     if (!working) return
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== 'Escape' || e.defaultPrevented || e.isComposing || document.querySelector('[role=dialog]')) return
+      if (e.target instanceof Element && e.target.closest('[data-terminal]')) return // Esc in the terminal belongs to the shell
       const b = document.querySelector<HTMLButtonElement>('[data-interrupt]')
       if (b && !b.disabled) { e.preventDefault(); b.click() }
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
   }, [working])
+  // Closing the terminal hands focus back to the composer; opening focuses the terminal (TerminalPane).
+  const terminalOpen = useAppStore((s) => !!s.terminalOpen[sessionId])
+  const toggleTerminal = useCallback(() => {
+    const st = useAppStore.getState()
+    const wasOpen = !!st.terminalOpen[sessionId]
+    st.toggleTerminal(sessionId)
+    if (wasOpen) requestAnimationFrame(focusComposer)
+  }, [sessionId])
+  // Ctrl/Cmd+` toggles the terminal (xterm lets this key through, see lib/terminal.ts).
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (!isToggleKey(e) || document.querySelector('[role=dialog]')) return
+      e.preventDefault()
+      toggleTerminal()
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [toggleTerminal])
 
   return (
     <div className="flex h-full min-h-0 min-w-0 flex-col">
@@ -265,12 +309,16 @@ export function ChatView({sessionId}: {sessionId: number}) {
           </div>
           <div className="flex min-w-0 items-baseline gap-2 font-mono text-xs leading-4 text-muted-foreground">
             <span className="min-w-0 truncate" title={lead ? `pid ${lead.pid ?? '-'} · started ${formatExact(lead.created_at)}` : undefined}>
-              orchestrator{lead ? ` ${lead.status === 'running' ? `pid ${lead.pid ?? '-'}` : agentState(lead)}` : ' not started'} · {lead?.model && <><span title={lead.model}>{modelName(lead.model)}</span> · </>}{ctx &&<><span className={ctx.cls}>ctx {ctx.text}</span> · </>}{agentSummary(agents)}
+              orchestrator{lead ? ` ${lead.status === 'running' ? `pid ${lead.pid ?? '-'}` : agentState(lead)}` : ' not started'} · {lead?.model && <><span title={lead.model}>{modelName(lead.model)}</span> · </>}{ctx && <><button
+              type="button" className={cn(ctx.cls, 'enabled:cursor-pointer enabled:hover:underline')} title="Compact context (/compact)"
+              onClick={compact} disabled={!running || working || compacting}
+            >ctx {ctx.text}</button> · </>}{agentSummary(agents)}
             </span>
           </div>
         </div>
         {anyRunning && <StopButton sessionId={sessionId}/>}
       </header>
+      {compactError && <p role="alert" className="shrink-0 border-b px-6 py-1 text-[13px] text-destructive">{compactError}</p>}
       {/* Absolutely positioned list: its height never depends on percentage resolution inside flex. */}
       <div className="relative min-h-0 flex-1">
         {!loaded ? (
@@ -281,8 +329,10 @@ export function ChatView({sessionId}: {sessionId: number}) {
           <ChatList key={sessionId} sessionId={sessionId} chat={chat} since={working ? busySince : 0}/>
         )}
       </div>
+      {terminalOpen && <TerminalPane sessionId={sessionId}/>}
       <Composer
         onSend={(t, atts) => send(sessionId, t, atts)} label="Message the orchestrator" placeholder="Message the orchestrator"
+        terminal={{open: terminalOpen, onToggle: toggleTerminal}}
         onInterrupt={working ? () => api.interruptSession(sessionId) : undefined}
         disabledReason={loaded && lead && !running ? <ResumeNotice key={sessionId} sessionId={sessionId}/> : undefined}
       />

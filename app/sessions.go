@@ -24,7 +24,7 @@ import (
 // rows, so they are unique and ordered within a session.
 type ChatItem struct {
 	ID          int64             `json:"id"`
-	Kind        string            `json:"kind"` // user | assistant | tool | escalation
+	Kind        string            `json:"kind"` // user | assistant | tool | escalation | notice (a compaction)
 	Text        string            `json:"text,omitempty"`
 	Name        string            `json:"name,omitempty"`        // tool
 	Summary     string            `json:"summary,omitempty"`     // tool
@@ -403,6 +403,7 @@ func (a *App) DeleteSession(sessionID int64) error {
 	if _, err := a.store.GetSession(sessionID); err != nil {
 		return err
 	}
+	a.TerminalClose(sessionID)
 	a.runner.StopSession(sessionID) // returns once every process is gone and recorded
 	agents, err := a.store.ListAgents(sessionID, "")
 	if err != nil {
@@ -466,7 +467,7 @@ func (a *App) GetSession(sessionID int64) (SessionSnapshot, error) {
 		if ag.Role != "orchestrator" {
 			continue
 		}
-		evs, err := a.store.ListAgentEventsOfType(sessionID, ag.ID, evUserMessage, evAssistantText, evToolUse, evEscalation, evResult)
+		evs, err := a.store.ListAgentEventsOfType(sessionID, ag.ID, evUserMessage, evAssistantText, evToolUse, evEscalation, evResult, evSystem)
 		if err != nil {
 			return s, err
 		}
@@ -692,6 +693,12 @@ func (a *App) chatItem(sessionID int64, ev notes.AgentEvent) (ChatItem, bool) {
 			return item, false
 		}
 		item.Kind, item.Escalation = "escalation", &e
+	case evSystem: // only compactions; init, status etc. are not shown
+		var c compactBoundary
+		if p.Subtype != "compact_boundary" || json.Unmarshal([]byte(ev.Payload), &c) != nil {
+			return item, false
+		}
+		item.Kind, item.Text = "notice", compactNotice(c)
 	default:
 		return item, false
 	}

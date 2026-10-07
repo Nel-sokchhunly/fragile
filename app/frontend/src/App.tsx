@@ -17,7 +17,7 @@ import {useAppStore} from '@/store/app'
 // Panel sizing in one place. The chat column never drops below CENTER_MIN: the right column shrinks
 // toward RIGHT.min, and below SIDEBAR_COLLAPSE_BELOW the sidebar folds into its rail.
 const SIDEBAR = {rail: '52px', min: '200px', default: '240px', max: '400px'}
-const RIGHT = {min: '240px', default: '300px', max: '560px'}
+const RIGHT = {min: '240px', default: '300px'} // no max: it may grow until the chat hits CENTER_MIN
 const CENTER_MIN = '360px'
 const SIDEBAR_COLLAPSE_BELOW = 900 // px of window width
 
@@ -127,7 +127,7 @@ export default function App() {
             : <ChatView key={viewSessionId} sessionId={viewSessionId}/>}
         </ResizablePanel>
         <ResizableHandle/>
-        <ResizablePanel id="right" defaultSize={RIGHT.default} minSize={RIGHT.min} maxSize={RIGHT.max}>
+        <ResizablePanel id="right" defaultSize={RIGHT.default} minSize={RIGHT.min}>
           <ResizablePanelGroup id="fragile-right-v2" orientation="vertical" defaultLayout={right.defaultLayout} onLayoutChanged={right.onLayoutChanged}>
             <ResizablePanel id="agents" defaultSize="60%" minSize="20%"><AgentsPanel sessionId={sessionId}/></ResizablePanel>
             <ResizableHandle/>

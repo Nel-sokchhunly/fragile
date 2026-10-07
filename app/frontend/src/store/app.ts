@@ -21,6 +21,7 @@ type AppState = {
   toasts: Toast[]
   limit: RateLimit | null // subscription limits (account-wide)
   confirmDelete: number | null // session awaiting delete confirmation
+  terminalOpen: Record<number, boolean> // by session id: its terminal pane is shown (not persisted)
 
   init: () => Promise<void>
   selectSession: (id: number | null) => void
@@ -28,6 +29,7 @@ type AppState = {
   setLimit: (l: RateLimit) => void
   selectAgent: (id: number | null) => void
   setSidebarCollapsed: (c: boolean) => void
+  toggleTerminal: (sessionId: number) => void
   notify: (e: unknown) => void
   // Throw the backend's error string; the caller shows it inline.
   createSession: (name: string, workDir: string) => Promise<void>
@@ -105,6 +107,7 @@ export const useAppStore = create<AppState>((set, get) => {
     toasts: [],
     limit: null,
     confirmDelete: null,
+    terminalOpen: {},
 
     init: async () => {
       void api.getRateLimit().then((l) => l && get().setLimit(l), (e) => get().notify(e))
@@ -122,6 +125,7 @@ export const useAppStore = create<AppState>((set, get) => {
     setLimit: (limit) => set({limit}),
     selectAgent: (selectedAgentId) => set({selectedAgentId}),
     setSidebarCollapsed: (sidebarCollapsed) => set({sidebarCollapsed}),
+    toggleTerminal: (sid) => set((s) => ({terminalOpen: {...s.terminalOpen, [sid]: !s.terminalOpen[sid]}})),
 
     notify: (e) => {
       const id = ++toastId
@@ -195,11 +199,12 @@ export const useAppStore = create<AppState>((set, get) => {
       // SQLite reuses ids: drop every per-agent cache of the session so a new agent can't inherit its output.
       const {[sid]: gone, ...data} = get().data
       const {[sid]: _, ...busy} = get().busy
+      const {[sid]: __, ...terminalOpen} = get().terminalOpen
       // lastLine knows its session, so agents of a never-opened snapshot are found too.
       const ids = new Set([...(gone?.agents.map((a) => a.id) ?? []), ...Object.entries(get().lastLine).filter(([, l]) => l.sid === sid).map(([k]) => +k)])
       const drop = <T,>(m: Record<number, T>) => Object.fromEntries(Object.entries(m).filter(([k]) => !ids.has(+k))) as Record<number, T>
       set((s) => ({
-        sessions: rest, data, busy,
+        sessions: rest, data, busy, terminalOpen,
         agentEvents: drop(s.agentEvents), agentLoaded: drop(s.agentLoaded), lastLine: drop(s.lastLine),
         selectedAgentId: s.selectedAgentId != null && ids.has(s.selectedAgentId) ? null : s.selectedAgentId,
       }))

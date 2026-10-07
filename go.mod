@@ -3,6 +3,7 @@ module github.com/Nel-sokchhunly/fragile
 go 1.26.0
 
 require (
+	github.com/creack/pty v1.1.24
 	github.com/modelcontextprotocol/go-sdk v1.8.0
 	github.com/wailsapp/wails/v2 v2.14.0
 	modernc.org/sqlite v1.60.1

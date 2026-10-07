@@ -7,6 +7,8 @@ export function AddNote(arg1:number,arg2:string,arg3:string):Promise<notes.Note>
 
 export function AnswerEscalation(arg1:number,arg2:string):Promise<void>;
 
+export function CompactSession(arg1:number):Promise<void>;
+
 export function CreateSession(arg1:string,arg2:string):Promise<notes.Session>;
 
 export function DeleteSession(arg1:number):Promise<void>;
@@ -30,5 +32,13 @@ export function ResumeSession(arg1:number):Promise<void>;
 export function SendMessage(arg1:number,arg2:string,arg3:Array<main.Attachment>):Promise<void>;
 
 export function StopSession(arg1:number):Promise<void>;
+
+export function TerminalClose(arg1:number):Promise<void>;
+
+export function TerminalOpen(arg1:number,arg2:number,arg3:number):Promise<string>;
+
+export function TerminalResize(arg1:number,arg2:number,arg3:number):Promise<void>;
+
+export function TerminalWrite(arg1:number,arg2:string):Promise<void>;
 
 export function UpdateNote(arg1:number,arg2:number,arg3:string,arg4:string):Promise<notes.Note>;
