@@ -25,14 +25,27 @@ const errText = (e: unknown) => (typeof e === 'string' ? e : e instanceof Error 
 // Ctrl/Cmd+` toggles the pane (ChatView); xterm must let it bubble instead of sending it to the shell.
 export const isToggleKey = (e: KeyboardEvent) => (e.ctrlKey || e.metaKey) && !e.altKey && !e.shiftKey && e.code === 'Backquote'
 
+// JetBrains Mono has no Powerline / Nerd Font glyphs (private use area), and xterm's customGlyphs does not apply to
+// the DOM renderer, so fall back to whichever installed Nerd/Powerline font has them.
+const POWERLINE_FALLBACK = "'Symbols Nerd Font Mono', 'JetBrainsMono Nerd Font', 'MesloLGS NF', '0xProto Nerd Font Mono', 'Meslo LG M for Powerline', monospace"
+
+// The app is dark-only (no light theme exists), so one palette. Muted and warm; hues follow the status tokens in
+// index.css (green #34b233, amber #e39b0e, red #e5655a, blue #6ea8ef) toned down for the charcoal background.
+// "black" stays lighter than the background so agnoster-style dark text on coloured segments still reads.
+const THEME = {
+  background: '#1f1f1e', foreground: '#f2f1ec', cursor: '#f2f1ec', cursorAccent: '#1f1f1e', selectionBackground: 'rgba(242, 241, 236, 0.25)',
+  black: '#2b2b29', red: '#d9695f', green: '#7fb069', yellow: '#d9a441', blue: '#6f9fd8', magenta: '#b58bc4', cyan: '#6fb3a8', white: '#c9c7bf',
+  brightBlack: '#6b6a64', brightRed: '#e8857b', brightGreen: '#98c785', brightYellow: '#e8bc62', brightBlue: '#8bb6e8', brightMagenta: '#c9a4d6', brightCyan: '#8cc9be', brightWhite: '#f2f1ec',
+}
+
 function create(sid: number): Entry {
   const mono = getComputedStyle(document.documentElement).getPropertyValue('--font-mono').trim()
   const term = new Terminal({
-    fontFamily: mono || "'JetBrains Mono Variable', ui-monospace, Menlo, monospace",
+    fontFamily: `${mono || "'JetBrains Mono Variable', ui-monospace, Menlo"}, ${POWERLINE_FALLBACK}`,
     fontSize: 13,
     cursorBlink: true,
     scrollback: 5000,
-    theme: {background: '#1f1f1e', foreground: '#f2f1ec', cursor: '#f2f1ec', cursorAccent: '#1f1f1e', selectionBackground: 'rgba(242, 241, 236, 0.25)'},
+    theme: THEME,
   })
   const fit = new FitAddon()
   term.loadAddon(fit)

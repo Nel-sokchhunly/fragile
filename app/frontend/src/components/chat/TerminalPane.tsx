@@ -6,7 +6,7 @@ let savedPct = 40
 const MIN_PCT = 15
 const MAX_PCT = 80
 
-// The session's shell, between the transcript and the composer. The xterm instance outlives this component
+// The session's shell, below the composer. The xterm instance outlives this component
 // (lib/terminal.ts); mounting shows it and focuses it. data-terminal tells the chat's key handlers to keep out.
 export function TerminalPane({sessionId}: {sessionId: number}) {
   const box = useRef<HTMLDivElement>(null)
