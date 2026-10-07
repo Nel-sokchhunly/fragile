@@ -71,6 +71,14 @@ Protocol/worker/lifecycle regression tests run in the normal Go suite. To prove 
 FRAGILE_CODEX_SMOKE=1 go test ./notes -run TestCodexSandboxSmoke -v
 ```
 
+For an opt-in end-to-end run using your existing ChatGPT CLI login (and subscription usage), the desktop backend test starts a real sandboxed worker, verifies its file and board note, answers an escalation, interrupts a turn, and stops/resumes the persisted thread:
+
+```sh
+FRAGILE_CODEX_E2E=1 go test -tags e2e ./app -run '^TestCodexAppE2E$' -v -timeout 8m
+```
+
+This exercises the app API and emitted UI events, not desktop clicks. If `CODEX_HOME` is set, it must select the CLI home where you signed in with ChatGPT.
+
 ## Keyboard shortcuts
 
 `⌘` is `Ctrl` on Linux.
