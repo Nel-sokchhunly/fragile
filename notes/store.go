@@ -659,6 +659,36 @@ func (s *Store) ListAgentEvents(sessionID, agentID, sinceID int64, limit int) ([
 	return out, rows.Err()
 }
 
+// ListAgentEventTail returns at most limit newest events, in chronological order.
+// Unlike paged history retrieval, work is bounded by limit, not the agent's history.
+func (s *Store) ListAgentEventTail(sessionID, agentID int64, limit int) ([]AgentEvent, error) {
+	if limit <= 0 || limit > 2000 {
+		limit = 2000
+	}
+	rows, err := s.db.Query(`SELECT `+agentEventCols+` FROM agent_events
+		WHERE agent_id = ? AND agent_id IN (SELECT id FROM agent_instances WHERE session_id = ?)
+		ORDER BY id DESC LIMIT ?`, agentID, sessionID, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []AgentEvent
+	for rows.Next() {
+		e, err := scanAgentEvent(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, e)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	for i, j := 0, len(out)-1; i < j; i, j = i+1, j-1 {
+		out[i], out[j] = out[j], out[i]
+	}
+	return out, nil
+}
+
 // LastAgentEventOfType returns the newest event of the type across all agents (ErrNotFound if none).
 func (s *Store) LastAgentEventOfType(eventType string) (AgentEvent, error) {
 	return scanAgentEvent(s.db.QueryRow(`SELECT `+agentEventCols+` FROM agent_events WHERE event_type = ? ORDER BY id DESC LIMIT 1`, eventType))

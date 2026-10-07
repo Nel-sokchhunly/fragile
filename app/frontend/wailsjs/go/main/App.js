@@ -22,8 +22,16 @@ export function CreateSession(arg1, arg2) {
   return window['go']['main']['App']['CreateSession'](arg1, arg2);
 }
 
+export function CreateSessionWithProvider(arg1, arg2, arg3) {
+  return window['go']['main']['App']['CreateSessionWithProvider'](arg1, arg2, arg3);
+}
+
 export function DeleteSession(arg1) {
   return window['go']['main']['App']['DeleteSession'](arg1);
+}
+
+export function GetAgentEventTail(arg1, arg2) {
+  return window['go']['main']['App']['GetAgentEventTail'](arg1, arg2);
 }
 
 export function GetAgentEvents(arg1, arg2, arg3) {
@@ -84,8 +92,4 @@ export function TerminalWrite(arg1, arg2) {
 
 export function UpdateNote(arg1, arg2, arg3, arg4) {
   return window['go']['main']['App']['UpdateNote'](arg1, arg2, arg3, arg4);
-}
-
-export function CreateSessionWithProvider(arg1, arg2, arg3) {
-  return window['go']['main']['App']['CreateSessionWithProvider'](arg1, arg2, arg3);
 }

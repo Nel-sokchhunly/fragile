@@ -1,5 +1,5 @@
 import {
-  AddNote, AnswerEscalation, CompactSession, CreateSessionWithProvider, DeleteSession, GetAgentEvents, GetAttachment, GetRateLimit, GetSession,
+  AddNote, AnswerEscalation, CompactSession, CreateSessionWithProvider, DeleteSession, GetAgentEventTail, GetAgentEvents, GetAttachment, GetRateLimit, GetSession,
   InterruptSession, ListSessions, PickDirectory, ResumeSession, SendMessage, StopSession, TerminalClose, TerminalOpen,
   TerminalResize, TerminalWrite, UpdateNote,
 } from '../../wailsjs/go/main/App'
@@ -34,6 +34,8 @@ export const api = {
   getSession: (sessionId: number) => as<SessionSnapshot>(GetSession(sessionId)),
   /** Page an agent's output: events with id > sinceId, oldest first, at most `limit` (default and cap 1000). */
   getAgentEvents: (agentId: number, sinceId = 0, limit = 1000) => as<AgentEvent[]>(GetAgentEvents(agentId, sinceId, limit)),
+  /** Newest bounded output in chronological order (default and cap 2000). */
+  getAgentEventTail: (agentId: number, limit = 2000) => as<AgentEvent[]>(GetAgentEventTail(agentId, limit)),
   /** Chat message to the orchestrator; text may be '' if there are attachments. Rejects if its process is not
    *  running (stopped, exited, past session) or an attachment is invalid. */
   sendMessage: (sessionId: number, text: string, attachments: Attachment[] = []): Promise<void> => SendMessage(sessionId, text, attachments),

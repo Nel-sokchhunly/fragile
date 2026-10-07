@@ -974,3 +974,35 @@ func TestDeriveStatus(t *testing.T) {
 }
 
 func writeFile(path, content string) error { return os.WriteFile(path, []byte(content), 0o755) }
+
+func TestGetAgentEventTail(t *testing.T) {
+	a, _ := newTestApp(t, t.TempDir(), "")
+	sess, err := a.store.CreateSession("tail")
+	if err != nil {
+		t.Fatal(err)
+	}
+	ag, err := a.store.CreateAgent(sess.ID, "orchestrator", 0, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	empty, err := a.GetAgentEventTail(ag.ID, 2000)
+	if err != nil || empty == nil || len(empty) != 0 {
+		t.Fatalf("empty tail: %+v, %v", empty, err)
+	}
+	for i := 0; i < 5; i++ {
+		if _, err := a.store.AppendAgentEvent(sess.ID, ag.ID, "output", fmt.Sprint(i)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	tail, err := a.GetAgentEventTail(ag.ID, 2)
+	if err != nil || len(tail) != 2 || tail[0].Payload != "3" || tail[1].Payload != "4" {
+		t.Fatalf("tail: %+v, %v", tail, err)
+	}
+	page, err := a.GetAgentEvents(ag.ID, 0, 2)
+	if err != nil || len(page) != 2 || page[0].Payload != "0" {
+		t.Fatalf("old paging changed: %+v, %v", page, err)
+	}
+	if _, err := a.GetAgentEventTail(99999, 2000); !errors.Is(err, notes.ErrNotFound) {
+		t.Fatalf("missing agent: %v", err)
+	}
+}
