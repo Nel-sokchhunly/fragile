@@ -23,7 +23,7 @@ func TestE2E(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := a.SendMessage(se.ID, "Spawn one sub-agent that writes hello.txt containing hi, then finish"); err != nil {
+	if err := a.SendMessage(se.ID, "Spawn one sub-agent that writes hello.txt containing hi, then finish", nil); err != nil {
 		t.Fatal(err)
 	}
 	status := func() string { return snapshot(t, a, se.ID).Session.Status }
@@ -45,7 +45,7 @@ func TestE2E(t *testing.T) {
 	}
 
 	before := len(s.Chat)
-	if err := a.SendMessage(se.ID, "Reply with the word OK"); err != nil {
+	if err := a.SendMessage(se.ID, "Reply with the word OK", nil); err != nil {
 		t.Fatal(err)
 	}
 	waitFor(t, "follow-up reply", func() bool {

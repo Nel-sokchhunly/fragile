@@ -22,12 +22,20 @@ export function GetAgentEvents(arg1, arg2, arg3) {
   return window['go']['main']['App']['GetAgentEvents'](arg1, arg2, arg3);
 }
 
+export function GetAttachment(arg1, arg2, arg3) {
+  return window['go']['main']['App']['GetAttachment'](arg1, arg2, arg3);
+}
+
 export function GetRateLimit() {
   return window['go']['main']['App']['GetRateLimit']();
 }
 
 export function GetSession(arg1) {
   return window['go']['main']['App']['GetSession'](arg1);
+}
+
+export function InterruptSession(arg1) {
+  return window['go']['main']['App']['InterruptSession'](arg1);
 }
 
 export function ListSessions() {
@@ -42,8 +50,8 @@ export function ResumeSession(arg1) {
   return window['go']['main']['App']['ResumeSession'](arg1);
 }
 
-export function SendMessage(arg1, arg2) {
-  return window['go']['main']['App']['SendMessage'](arg1, arg2);
+export function SendMessage(arg1, arg2, arg3) {
+  return window['go']['main']['App']['SendMessage'](arg1, arg2, arg3);
 }
 
 export function StopSession(arg1) {

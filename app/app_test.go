@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -133,7 +134,7 @@ func startSession(t *testing.T, a *App, task string) notes.Session {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := a.SendMessage(se.ID, task); err != nil {
+	if err := a.SendMessage(se.ID, task, nil); err != nil {
 		t.Fatal(err)
 	}
 	return se
@@ -152,13 +153,13 @@ func TestSessionChatAndStatus(t *testing.T) {
 	if named, _ := a.CreateSession("my name\nmore", t.TempDir()); named.Title != "my name" {
 		t.Fatalf("named session = %+v", named)
 	}
-	if err := a.SendMessage(se.ID, "Write the thing\nwith details"); err != nil {
+	if err := a.SendMessage(se.ID, "Write the thing\nwith details", nil); err != nil {
 		t.Fatal(err)
 	}
 	waitFor(t, "first reply and done", func() bool {
 		return hasChat(a, se.ID, "assistant: echo: ") && snapshot(t, a, se.ID).Session.Status == "done"
 	})
-	if err := a.SendMessage(se.ID, "second message"); err != nil {
+	if err := a.SendMessage(se.ID, "second message", nil); err != nil {
 		t.Fatal(err)
 	}
 	waitFor(t, "second reply", func() bool {
@@ -195,7 +196,7 @@ func TestSessionChatAndStatus(t *testing.T) {
 		t.Fatalf("missing events: created=%d agent_event=%d chat_item=%d",
 			len(ev.named(notes.EventSessionCreated)), len(ev.named(eventAgentEvent)), len(ev.named(eventChatItem)))
 	}
-	if err := a.SendMessage(se.ID, " "); err == nil {
+	if err := a.SendMessage(se.ID, " ", nil); err == nil {
 		t.Error("empty message accepted")
 	}
 	if _, err := a.CreateSession("x", "/definitely/not/here"); err == nil {
@@ -271,7 +272,7 @@ func TestFirstMessageStartsOrchestrator(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			if err := a.SendMessage(se.ID, m); err != nil {
+			if err := a.SendMessage(se.ID, m, nil); err != nil {
 				t.Error(err)
 			}
 		}()
@@ -293,7 +294,7 @@ func TestStopSession(t *testing.T) {
 	if s.Session.Status != "done" || s.Agents[0].Status != "stopped" { // killed on purpose, not "crashed"
 		t.Fatalf("after stop: %+v / %+v", s.Session, s.Agents[0])
 	}
-	if err := a.SendMessage(se.ID, "hello?"); err == nil {
+	if err := a.SendMessage(se.ID, "hello?", nil); err == nil {
 		t.Error("message to a stopped session accepted")
 	}
 }
@@ -313,7 +314,7 @@ func TestResumeSession(t *testing.T) {
 	if err := a.ResumeSession(se.ID); err == nil || !strings.Contains(err.Error(), "not started") {
 		t.Fatalf("resume of a never-started session: err = %v", err)
 	}
-	if err := a.SendMessage(se.ID, "task"); err != nil {
+	if err := a.SendMessage(se.ID, "task", nil); err != nil {
 		t.Fatal(err)
 	}
 	waitFor(t, "first reply", func() bool { return hasChat(a, se.ID, "echo: ") && snapshot(t, a, se.ID).Session.Status == "done" })
@@ -323,7 +324,7 @@ func TestResumeSession(t *testing.T) {
 	if err := a.StopSession(se.ID); err != nil {
 		t.Fatal(err)
 	}
-	if err := a.SendMessage(se.ID, "hello?"); err == nil || !strings.Contains(err.Error(), "resume") {
+	if err := a.SendMessage(se.ID, "hello?", nil); err == nil ||!strings.Contains(err.Error(), "resume") {
 		t.Fatalf("message to a stopped session: err = %v", err)
 	}
 	if err := a.ResumeSession(se.ID); err != nil {
@@ -340,7 +341,7 @@ func TestResumeSession(t *testing.T) {
 	if !hasChat(a, se.ID, "user: This session was resumed") {
 		t.Fatalf("resume message not in chat: %v", chatTexts(s))
 	}
-	if err := a.SendMessage(se.ID, "after resume"); err != nil {
+	if err := a.SendMessage(se.ID, "after resume", nil); err != nil {
 		t.Fatal(err)
 	}
 	waitFor(t, "reply after resume", func() bool { return hasChat(a, se.ID, `"text":"after resume`) })
@@ -367,7 +368,7 @@ func TestDeleteSession(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := a.SendMessage(gone.ID, "delete me"); err != nil {
+	if err := a.SendMessage(gone.ID, "delete me", []Attachment{{Name: "a.txt", MediaType: "text/plain", Data: b64("doomed")}}); err != nil {
 		t.Fatal(err)
 	}
 	waitFor(t, "replies", func() bool { return hasChat(a, keep.ID, "echo: ") && hasChat(a, gone.ID, "echo: ") })
@@ -388,6 +389,10 @@ func TestDeleteSession(t *testing.T) {
 	if m, _ := filepath.Glob(files); len(m) != 2 {
 		t.Fatalf("agent files before delete = %v", m)
 	}
+	goneAtts := filepath.Join(a.attachDir, fmt.Sprint(gone.ID))
+	if m, _ := filepath.Glob(filepath.Join(goneAtts, "*", "0-a.txt")); len(m) != 1 {
+		t.Fatalf("attachment files before delete = %v", m)
+	}
 
 	if err := a.DeleteSession(gone.ID); err != nil {
 		t.Fatal(err)
@@ -400,6 +405,9 @@ func TestDeleteSession(t *testing.T) {
 	}
 	if m, _ := filepath.Glob(files); len(m) != 0 {
 		t.Errorf("agent files left = %v", m)
+	}
+	if _, err := os.Stat(goneAtts); !os.IsNotExist(err) {
+		t.Errorf("attachments dir left: %v", err)
 	}
 	if _, err := os.Stat(work + "/mine.txt"); err != nil {
 		t.Errorf("work dir touched: %v", err)
@@ -435,7 +443,7 @@ func TestCreateAfterDeleteReusesIDAndStarts(t *testing.T) {
 	if se.ID != old.ID {
 		t.Fatalf("new session id = %d, want the reused %d (the test needs the reuse)", se.ID, old.ID)
 	}
-	if err := a.SendMessage(se.ID, "second"); err != nil {
+	if err := a.SendMessage(se.ID, "second", nil); err != nil {
 		t.Fatal(err)
 	}
 	waitFor(t, "reply", func() bool { return hasChat(a, se.ID, "assistant: echo: ") })
@@ -454,7 +462,7 @@ func TestFailedFirstStartCanBeRetried(t *testing.T) {
 		t.Fatal(err)
 	}
 	for i := 0; i < 2; i++ { // failing twice must not matter either
-		if err := a.SendMessage(se.ID, "hello"); err == nil || !strings.Contains(err.Error(), "not found") {
+		if err := a.SendMessage(se.ID, "hello", nil); err == nil || !strings.Contains(err.Error(), "not found") {
 			t.Fatalf("send %d: err = %v, want the launch error", i, err)
 		}
 	}
@@ -466,7 +474,7 @@ func TestFailedFirstStartCanBeRetried(t *testing.T) {
 	}
 	waitFor(t, "status done", func() bool { return snapshot(t, a, se.ID).Session.Status == "done" })
 	a.runner.Preflight = nil
-	if err := a.SendMessage(se.ID, "hello again"); err != nil {
+	if err := a.SendMessage(se.ID, "hello again", nil); err != nil {
 		t.Fatal(err)
 	}
 	waitFor(t, "reply", func() bool { return hasChat(a, se.ID, "assistant: echo: ") })
@@ -485,7 +493,7 @@ exit 1`)
 		return len(s.Agents) == 1 && s.Agents[0].Status == "crashed" && hasChat(a, se.ID, "Please run /login")
 	})
 	a.runner.Command = writeScript(t, echoOrchestrator) // logged in now
-	if err := a.SendMessage(se.ID, "hello again"); err != nil {
+	if err := a.SendMessage(se.ID, "hello again", nil); err != nil {
 		t.Fatal(err)
 	}
 	waitFor(t, "reply", func() bool { return hasChat(a, se.ID, "assistant: echo: ") })
@@ -501,11 +509,203 @@ func TestFailedSendLeavesNoChatMessage(t *testing.T) {
 	waitFor(t, "reply", func() bool { return hasChat(a, se.ID, "assistant: echo: ") })
 	orch := snapshot(t, a, se.ID).Agents[0]
 	a.runner.StopAll()
-	if err := a.deliver(orch, "ghost", true); err == nil {
+	atts, err := prepareAttachments([]Attachment{{Name: "g.txt", MediaType: "text/plain", Data: b64("boo")}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := a.deliver(orch, "ghost", atts, true); err == nil {
 		t.Fatal("deliver to a dead orchestrator succeeded")
 	}
 	if hasChat(a, se.ID, "ghost") {
 		t.Fatal("phantom user message in the chat")
+	}
+	if m, _ := filepath.Glob(filepath.Join(a.attachDir, fmt.Sprint(se.ID), "*", "*")); len(m) != 0 {
+		t.Fatalf("attachment files left after a failed send: %v", m)
+	}
+}
+
+// Result lines show in the chat only as errors; an interrupted turn says so.
+func TestChatItemResult(t *testing.T) {
+	a := NewApp()
+	for _, c := range []struct {
+		payload string
+		ok      bool
+		text    string
+	}{
+		{`{"type":"result","subtype":"success","is_error":false,"result":"ok"}`, false, ""},
+		{`{"type":"result","subtype":"success","is_error":true,"result":"Invalid API key"}`, true, "Error: Invalid API key"},
+		{`{"type":"result","subtype":"error_during_execution","is_error":true,"result":null}`, true, "Interrupted."},
+		{`{"type":"result","subtype":"error_during_execution","is_error":true,"result":"boom"}`, true, "Error: boom"},
+	} {
+		item, ok := a.chatItem(1, notes.AgentEvent{ID: 5, Type: evResult, Payload: c.payload})
+		if ok != c.ok || (ok && (item.Kind != "assistant" || item.Text != c.text)) {
+			t.Errorf("%s: item = %+v, ok = %v; want %q, %v", c.payload, item, ok, c.text, c.ok)
+		}
+	}
+}
+
+func b64(s string) string { return base64.StdEncoding.EncodeToString([]byte(s)) }
+
+// stdinLines returns the lines a recordingOrchestrator wrote to path.
+func stdinLines(path string) []string {
+	b, _ := os.ReadFile(path)
+	return strings.Split(strings.TrimSuffix(string(b), "\n"), "\n")[:strings.Count(string(b), "\n")]
+}
+
+// recordingOrchestrator appends every stdin line to path and ends each turn with a result.
+func recordingOrchestrator(path string) string {
+	return `while IFS= read -r line; do
+  printf '%s\n' "$line" >> '` + path + `'
+  printf '{"type":"result","subtype":"success","is_error":false,"result":"ok"}\n'
+done`
+}
+
+// Attachments go to the orchestrator as content blocks after the text, are
+// stored on disk, show in the chat, and load back as data URLs.
+func TestSendMessageWithAttachments(t *testing.T) {
+	in := filepath.Join(t.TempDir(), "stdin.jsonl")
+	a, _ := newTestApp(t, t.TempDir(), recordingOrchestrator(in))
+	se, err := a.CreateSession("", t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	png, pdf := "\x89PNG\r\n\x1a\nfake", "%PDF-1.4 fake"
+	err = a.SendMessage(se.ID, "look at these", []Attachment{
+		{Name: "../../shot.png", MediaType: "image/png", Data: b64(png)},
+		{Name: `dir\notes "v2".md`, MediaType: "text/plain", Data: b64("# hi\nthere")},
+		{Name: "doc.pdf", MediaType: "application/pdf", Data: b64(pdf)},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, "stdin line", func() bool { return len(stdinLines(in)) == 1 })
+	var msg struct {
+		Type    string `json:"type"`
+		Message struct {
+			Role    string           `json:"role"`
+			Content []map[string]any `json:"content"`
+		} `json:"message"`
+	}
+	if err := json.Unmarshal([]byte(stdinLines(in)[0]), &msg); err != nil {
+		t.Fatal(err)
+	}
+	want := []map[string]any{
+		{"type": "text", "text": "look at these"},
+		{"type": "image", "source": map[string]any{"type": "base64", "media_type": "image/png", "data": b64(png)}},
+		{"type": "text", "text": "<file name=\"notes _v2_.md\">\n# hi\nthere\n</file>"},
+		{"type": "document", "source": map[string]any{"type": "base64", "media_type": "application/pdf", "data": b64(pdf)}},
+	}
+	if got, _ := json.Marshal(msg.Message.Content); msg.Type != "user" || msg.Message.Role != "user" || string(got) != mustJSON(t, want) {
+		t.Fatalf("stdin message = %s\nwant content %s", stdinLines(in)[0], mustJSON(t, want))
+	}
+
+	var item ChatItem
+	for _, c := range snapshot(t, a, se.ID).Chat {
+		if c.Kind == "user" {
+			item = c
+		}
+	}
+	wantInfo := []AttachmentInfo{
+		{Name: "shot.png", MediaType: "image/png", Size: int64(len(png))},
+		{Name: "notes _v2_.md", MediaType: "text/plain", Size: 10},
+		{Name: "doc.pdf", MediaType: "application/pdf", Size: int64(len(pdf))},
+	}
+	if item.Text != "look at these" || mustJSON(t, item.Attachments) != mustJSON(t, wantInfo) {
+		t.Fatalf("chat item = %+v", item)
+	}
+	if b, err := os.ReadFile(filepath.Join(a.attachDir, fmt.Sprint(se.ID), fmt.Sprint(item.ID), "0-shot.png")); err != nil || string(b) != png {
+		t.Fatalf("stored image = %q, %v", b, err)
+	}
+	if m, _ := filepath.Glob(filepath.Join(a.attachDir, fmt.Sprint(se.ID), fmt.Sprint(item.ID), "*")); len(m) != 3 {
+		t.Fatalf("stored files = %v", m)
+	}
+
+	if url, err := a.GetAttachment(se.ID, item.ID, 0); err != nil || url != "data:image/png;base64,"+b64(png) {
+		t.Fatalf("GetAttachment = %.80q, %v", url, err)
+	}
+	if url, err := a.GetAttachment(se.ID, item.ID, 2); err != nil || url != "data:application/pdf;base64,"+b64(pdf) {
+		t.Fatalf("GetAttachment pdf = %.80q, %v", url, err)
+	}
+	for _, idx := range []int{-1, 3} {
+		if _, err := a.GetAttachment(se.ID, item.ID, idx); err == nil {
+			t.Errorf("GetAttachment index %d accepted", idx)
+		}
+	}
+	other, err := a.CreateSession("", t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := a.GetAttachment(other.ID, item.ID, 0); err == nil {
+		t.Error("GetAttachment read another session's message")
+	}
+	if _, err := a.GetAttachment(se.ID, item.ID+1, 0); err == nil { // the result row after it
+		t.Error("GetAttachment read a non-user_message row")
+	}
+
+	// Attachments without text: only the file blocks go out.
+	if err := a.SendMessage(se.ID, "", []Attachment{{Name: "only.txt", MediaType: "text/plain; charset=utf-8", Data: b64("x")}}); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, "second stdin line", func() bool { return len(stdinLines(in)) == 2 })
+	if !strings.Contains(stdinLines(in)[1], `"content":[{"text":"\u003cfile name=\"only.txt\"\u003e\nx\n\u003c/file\u003e","type":"text"}]`) {
+		t.Fatalf("attachment-only message = %s", stdinLines(in)[1])
+	}
+}
+
+func mustJSON(t *testing.T, v any) string {
+	t.Helper()
+	b, err := json.Marshal(v)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(b)
+}
+
+// Invalid attachments are rejected before anything is sent, naming the file.
+func TestSendMessageAttachmentValidation(t *testing.T) {
+	in := filepath.Join(t.TempDir(), "stdin.jsonl")
+	a, _ := newTestApp(t, t.TempDir(), recordingOrchestrator(in))
+	se, err := a.CreateSession("", t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	txt := func(name, s string) Attachment { return Attachment{Name: name, MediaType: "text/plain", Data: b64(s)} }
+	many := make([]Attachment, maxAttachments+1)
+	for i := range many {
+		many[i] = txt(fmt.Sprintf("f%d.txt", i), "x")
+	}
+	bigPDF := b64(strings.Repeat("p", 8<<20))
+	for _, c := range []struct {
+		name string
+		text string
+		atts []Attachment
+		want string
+	}{
+		{"empty", " ", nil, "must not be empty"},
+		{"bad type", "x", []Attachment{{Name: "a.exe", MediaType: "application/octet-stream", Data: b64("MZ")}}, `"a.exe": unsupported file type`},
+		{"big image", "x", []Attachment{{Name: "big.png", MediaType: "image/png", Data: b64(strings.Repeat("i", maxImageBytes+1))}}, `"big.png" is too large`},
+		{"big text", "x", []Attachment{txt("big.txt", strings.Repeat("t", maxTextBytes+1))}, `"big.txt" is too large`},
+		{"too many", "x", many, "too many attachments"},
+		{"total", "x", []Attachment{
+			{Name: "1.pdf", MediaType: "application/pdf", Data: bigPDF},
+			{Name: "2.pdf", MediaType: "application/pdf", Data: bigPDF},
+			{Name: "3.pdf", MediaType: "application/pdf", Data: bigPDF},
+		}, `"3.pdf" (at most 20 MB in total)`},
+		{"bad base64", "x", []Attachment{{Name: "b.png", MediaType: "image/png", Data: "!!not base64!!"}}, `"b.png": invalid base64`},
+		{"bad utf8", "x", []Attachment{{Name: "bin.txt", MediaType: "text/plain", Data: base64.StdEncoding.EncodeToString([]byte{0xff, 0xfe, 0x00})}}, `"bin.txt" is not valid UTF-8`},
+		{"empty file", "x", []Attachment{txt("e.txt", "")}, `"e.txt" is empty`},
+		{"path in name", "x", []Attachment{{Name: "../../etc/x.exe", MediaType: "application/x-msdownload", Data: b64("MZ")}}, `"x.exe": unsupported`},
+	} {
+		err := a.SendMessage(se.ID, c.text, c.atts)
+		if err == nil || !strings.Contains(err.Error(), c.want) {
+			t.Errorf("%s: err = %v, want %q", c.name, err, c.want)
+		}
+	}
+	if s := snapshot(t, a, se.ID); len(s.Agents) != 0 || len(s.Chat) != 0 {
+		t.Fatalf("rejected messages started or reached the orchestrator: %+v", s)
+	}
+	if _, err := os.Stat(a.attachDir); !os.IsNotExist(err) {
+		t.Fatalf("attachments dir created by rejected messages: %v", err)
 	}
 }
 
@@ -721,7 +921,7 @@ func TestStartupRecovery(t *testing.T) {
 	if list, _ := b.ListSessions(); len(list) != 1 || list[0].ID != se.ID {
 		t.Fatalf("sessions = %+v", list)
 	}
-	if err := b.SendMessage(se.ID, "hi"); err == nil {
+	if err := b.SendMessage(se.ID, "hi", nil); err == nil {
 		t.Error("message to a past session accepted")
 	}
 }

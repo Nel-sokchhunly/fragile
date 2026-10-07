@@ -32,6 +32,7 @@ export type Agent = {
   exited_at?: string
   context_used?: number // tokens in the agent's latest message; absent = unknown
   context_window?: number
+  model?: string // e.g. "claude-opus-5-5", from the agent's init line; absent = unknown
 }
 
 // Account-wide subscription limits; utilization 0..1, resets_at unix seconds. null window = not reported yet.
@@ -79,10 +80,15 @@ export type AgentEvent = {
   created_at: string
 }
 
+// A file sent with a chat message (Go: Attachment). data is base64 of the bytes, no data: prefix.
+export type Attachment = {name: string; media_type: string; data: string}
+// What the chat keeps of a sent attachment (Go: AttachmentInfo); size in bytes. Fetch it with api.getAttachment.
+export type AttachmentInfo = {name: string; media_type: string; size: number}
+
 // One row of the orchestrator chat (Go: ChatItem in app/sessions.go). id is the underlying agent_events id,
 // so it is unique and ordered within a session.
 export type ChatItem =
-  | {id: number; kind: 'user'; text: string; at: string}
+  | {id: number; kind: 'user'; text: string; attachments?: AttachmentInfo[]; at: string}
   | {id: number; kind: 'assistant'; text: string; at: string}
   | {id: number; kind: 'tool'; name: string; summary: string; at: string}
   | {id: number; kind: 'escalation'; escalation: Escalation; at: string}

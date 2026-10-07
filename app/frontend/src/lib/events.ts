@@ -41,7 +41,7 @@ export type EventMap = {
   task_updated: Envelope<Task>
 
   // New row of an agent's output (assistant_text {text}, tool_use {id,name,input}, tool_result {tool_use_id,content,is_error},
-  // user_message {text}, escalation {escalation_id}, plus raw system / result). Append to agentEvents[agent_id].
+  // user_message {text, attachments?: [{name, media_type, size}]}, escalation {escalation_id}, plus raw system / result). Append to agentEvents[agent_id].
   // May arrive just before that agent's agent_spawned.
   agent_event: Envelope<AgentEvent>
   // Upsert by `id` into the session's orchestrator chat (an answered escalation re-arrives with the same id).

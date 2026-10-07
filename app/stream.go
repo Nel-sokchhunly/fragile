@@ -13,7 +13,7 @@ const (
 	evToolResult    = "tool_result"    // {tool_use_id, content, is_error}
 	evResult        = "result"         // the raw result line (turn finished; carries cost)
 	evSystem        = "system"         // the raw system line (init, ...)
-	evUserMessage   = "user_message"   // {text}: a chat message from the user, written by the app
+	evUserMessage   = "user_message"   // {text, attachments?}: a chat message from the user, written by the app
 	evEscalation    = "escalation"     // {escalation_id}: the orchestrator escalated (orchestrator only)
 )
 

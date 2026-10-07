@@ -692,6 +692,16 @@ func (r *Runner) Running(agentID int64) bool {
 // SendUser writes text to the agent's stdin as a stream-json user message
 // (one JSON object per line), the way Claude Code takes further chat turns.
 func (r *Runner) SendUser(agentID int64, text string) error {
+	return r.SendUserContent(agentID, []map[string]any{{"type": "text", "text": text}})
+}
+
+// SendUserContent is SendUser with the message's content blocks given as is
+// (text, image, document). Stdin lines have no size cap; a message with large
+// attachments is one long line.
+func (r *Runner) SendUserContent(agentID int64, blocks []map[string]any) error {
+	if len(blocks) == 0 {
+		return errors.New("message has no content")
+	}
 	r.mu.Lock()
 	var in *stdinPipe
 	for _, p := range r.running {
@@ -704,7 +714,7 @@ func (r *Runner) SendUser(agentID int64, text string) error {
 		return ErrNotRunning
 	}
 	line, err := json.Marshal(map[string]any{"type": "user", "message": map[string]any{
-		"role": "user", "content": []map[string]string{{"type": "text", "text": text}}}})
+		"role": "user", "content": blocks}})
 	if err != nil {
 		return err
 	}

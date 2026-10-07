@@ -38,14 +38,15 @@ type App struct {
 	ready chan struct{}               // closed once ctx is set
 	emit  func(name string, data any) // runtime.EventsEmit once started; tests substitute their own
 
-	store    *notes.Store
-	log      *notes.EventLog
-	runner   *notes.Runner
-	httpSrv  *http.Server
-	addr     string   // the notes server's loopback address
-	agentDir string   // per-agent MCP configs and output logs
-	lock     *os.File // holds the data dir's flock for the process lifetime
-	closed   bool
+	store     *notes.Store
+	log       *notes.EventLog
+	runner    *notes.Runner
+	httpSrv   *http.Server
+	addr      string   // the notes server's loopback address
+	agentDir  string   // per-agent MCP configs and output logs
+	attachDir string   // chat attachments: <session>/<user_message event>/<index>-<name>
+	lock      *os.File // holds the data dir's flock for the process lifetime
+	closed    bool
 
 	// Events flow OnEvent/push -> queue -> loop -> emit. The queue is unbounded
 	// on purpose: OnEvent runs under the log's lock and the loop itself writes to
@@ -114,6 +115,7 @@ func (a *App) open(dir string, emit func(string, any)) (err error) {
 	a.emit = emit
 	agentDir := filepath.Join(dir, "agents")
 	a.agentDir = agentDir
+	a.attachDir = filepath.Join(dir, "attachments") // created on the first attachment
 	// The agent dir holds the MCP configs, which contain the agents' secret URLs.
 	if err := os.MkdirAll(agentDir, 0o700); err != nil {
 		return err

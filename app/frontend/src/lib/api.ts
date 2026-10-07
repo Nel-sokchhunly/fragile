@@ -1,8 +1,8 @@
 import {
-  AddNote, AnswerEscalation, CreateSession, DeleteSession, GetAgentEvents, GetRateLimit, GetSession, ListSessions,
-  PickDirectory, ResumeSession, SendMessage, StopSession, UpdateNote,
+  AddNote, AnswerEscalation, CreateSession, DeleteSession, GetAgentEvents, GetAttachment, GetRateLimit, GetSession,
+  InterruptSession, ListSessions, PickDirectory, ResumeSession, SendMessage, StopSession, UpdateNote,
 } from '../../wailsjs/go/main/App'
-import type {Agent, AgentEvent, ChatItem, Escalation, Note, NoteType, RateLimit, Session, Task} from './types'
+import type {Agent, AgentEvent, Attachment, ChatItem, Escalation, Note, NoteType, RateLimit, Session, Task} from './types'
 
 // Typed wrappers around the generated Wails bindings (wailsjs/go, regenerate with `wails generate module`
 // from app/). The generated typings use classes and plain `string` for enums; the values are plain JSON
@@ -33,8 +33,13 @@ export const api = {
   getSession: (sessionId: number) => as<SessionSnapshot>(GetSession(sessionId)),
   /** Page an agent's output: events with id > sinceId, oldest first, at most `limit` (default and cap 1000). */
   getAgentEvents: (agentId: number, sinceId = 0, limit = 1000) => as<AgentEvent[]>(GetAgentEvents(agentId, sinceId, limit)),
-  /** Chat message to the orchestrator. Rejects if its process is not running (stopped, exited, past session). */
-  sendMessage: (sessionId: number, text: string): Promise<void> => SendMessage(sessionId, text),
+  /** Chat message to the orchestrator; text may be '' if there are attachments. Rejects if its process is not
+   *  running (stopped, exited, past session) or an attachment is invalid. */
+  sendMessage: (sessionId: number, text: string, attachments: Attachment[] = []): Promise<void> => SendMessage(sessionId, text, attachments),
+  /** Cancels the orchestrator's current turn (process, conversation and sub-agents stay); no-op if idle. */
+  interruptSession: (sessionId: number): Promise<void> => InterruptSession(sessionId),
+  /** Data URL ("data:<type>;base64,...") of attachment `index` of the user chat item `chatItemId`. */
+  getAttachment: (sessionId: number, chatItemId: number, index: number): Promise<string> => GetAttachment(sessionId, chatItemId, index),
   /** Answer an open escalation; also delivered to the orchestrator. The chat row updates via chat_item. */
   answerEscalation: (escalationId: number, answer: string): Promise<void> => AnswerEscalation(escalationId, answer),
   /** Post a note as the user (author_agent_id 0). */

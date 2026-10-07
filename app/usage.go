@@ -125,7 +125,7 @@ func (a *App) loadRateLimit() {
 	}
 }
 
-// trackUsage (called for every output line) keeps the agent's context usage and the global limits current.
+// trackUsage (called for every output line) keeps the agent's model, context usage and the global limits current.
 func (a *App) trackUsage(ag notes.Agent, line []byte) {
 	if r, ok := parseRateLimit(line); ok {
 		a.mu.Lock()
@@ -174,11 +174,14 @@ func (a *App) trackUsage(ag notes.Agent, line []byte) {
 	if window == 0 {
 		window = defaultWindow
 	}
-	if used == cur.ContextUsed && window == cur.ContextWindow {
-		return
+	changed := false
+	if c.Model != "" && c.Model != cur.Model && a.store.SetAgentModel(ag.SessionID, ag.ID, c.Model) == nil {
+		cur.Model, changed = c.Model, true
 	}
-	if a.store.SetAgentContext(ag.SessionID, ag.ID, used, window) == nil {
-		cur.ContextUsed, cur.ContextWindow = used, window
+	if (used != cur.ContextUsed || window != cur.ContextWindow) && a.store.SetAgentContext(ag.SessionID, ag.ID, used, window) == nil {
+		cur.ContextUsed, cur.ContextWindow, changed = used, window, true
+	}
+	if changed {
 		a.pushEvent(eventAgentUpdated, ag.SessionID, ag.ID, cur)
 	}
 }

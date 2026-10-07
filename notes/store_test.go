@@ -237,8 +237,8 @@ func TestMigratePhase0Database(t *testing.T) {
 
 	var v int
 	s.db.QueryRow(`PRAGMA user_version`).Scan(&v)
-	if v != 5 {
-		t.Fatalf("user_version = %d, want 5", v)
+	if v != 6 {
+		t.Fatalf("user_version = %d, want 6", v)
 	}
 	sess, err := s.GetSession(1)
 	if err != nil || sess.Title != "old" || sess.Status != SessionDone {
@@ -249,8 +249,17 @@ func TestMigratePhase0Database(t *testing.T) {
 	if err != nil || len(notes) != 1 || notes[0].Content != "keep me" || notes[0].AuthorID != 1 {
 		t.Fatalf("migrated notes = %+v, err %v", notes, err)
 	}
-	if a, err := s.GetAgentByToken("tok"); err != nil || a.ID != 1 || a.SessionID != 1 {
+	if a, err := s.GetAgentByToken("tok"); err != nil || a.ID != 1 || a.SessionID != 1 || a.Model != "" {
 		t.Fatalf("migrated agent = %+v, err %v", a, err)
+	}
+	if err := s.SetAgentModel(1, 1, "claude-opus-5-5"); err != nil {
+		t.Fatal(err)
+	}
+	if a, _ := s.FindAgent(1); a.Model != "claude-opus-5-5" {
+		t.Fatalf("model after SetAgentModel = %q", a.Model)
+	}
+	if err := s.SetAgentModel(99, 1, "x"); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("SetAgentModel in another session: %v", err)
 	}
 	for _, table := range []string{"board_members", "agent_events", "escalations"} {
 		if _, err := s.db.Exec(`SELECT 1 FROM ` + table + ` LIMIT 0`); err != nil {

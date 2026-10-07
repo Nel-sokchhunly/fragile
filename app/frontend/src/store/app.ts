@@ -1,6 +1,6 @@
 import {create} from 'zustand'
 import {api} from '@/lib/api'
-import type {Agent, AgentEvent, ChatItem, Note, NoteType, RateLimit, Session, SessionStatus, Task} from '@/lib/types'
+import type {Agent, AgentEvent, Attachment, ChatItem,Note, NoteType, RateLimit, Session, SessionStatus, Task} from '@/lib/types'
 
 // Zustand store fed by the backend: snapshots (lib/api.ts) on first view of a session, then Wails events
 // (lib/events.ts) routed here by session_id. Components only read it via selectors.
@@ -31,7 +31,7 @@ type AppState = {
   notify: (e: unknown) => void
   // Throw the backend's error string; the caller shows it inline.
   createSession: (name: string, workDir: string) => Promise<void>
-  sendMessage: (sessionId: number, text: string) => Promise<void>
+  sendMessage: (sessionId: number, text: string, attachments?: Attachment[]) => Promise<void>
   // Report failures as toasts.
   stopSession: (sessionId: number) => Promise<void>
   deleteSession: (sessionId: number) => Promise<void> // the session_deleted event removes it
@@ -136,10 +136,10 @@ export const useAppStore = create<AppState>((set, get) => {
     },
     // The backend's chat_item event shows the message. Busy from the send, not the first output, so the chat
     // isn't silent while the orchestrator starts up or thinks.
-    sendMessage: async (sid, text) => {
+    sendMessage: async (sid, text, attachments = []) => {
       set((s) => ({busy: {...s.busy, [sid]: Date.now()}}))
       try {
-        await api.sendMessage(sid, text)
+        await api.sendMessage(sid, text, attachments)
       } catch (e) {
         set((s) => ({busy: {...s.busy, [sid]: 0}}))
         throw e
