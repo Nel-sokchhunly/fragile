@@ -218,8 +218,22 @@ func TestRunnerArgs(t *testing.T) {
 	}
 	r.Interactive = true
 	iargs := r.args(Agent{Role: "orchestrator"}, "/w/dir", "/x/agent-3.mcp.json", "", "SYS")
-	if i := slices.Index(iargs, "--input-format"); i < 0 || iargs[i+1] != "stream-json" || slices.Contains(iargs, "--") || !slices.Contains(iargs, "--setting-sources") {
+	if i := slices.Index(iargs, "--input-format"); i < 0 || iargs[i+1] != "stream-json" || slices.Contains(iargs, "--") {
 		t.Errorf("interactive orchestrator args: %v", iargs)
+	}
+	// The orchestrator runs like the user's CLI: auto mode, user setup, no sandbox; only fragile tools pre-approved.
+	for _, want := range [][]string{{"--permission-mode", "auto"}, {"--allowedTools", "mcp__fragile"}, {"--disallowedTools", "Task,Agent,Workflow"}} {
+		if i := slices.Index(iargs, want[0]); i < 0 || iargs[i+1] != want[1] {
+			t.Errorf("orchestrator args missing %v: %v", want, iargs)
+		}
+	}
+	for _, flag := range []string{"--settings", "--setting-sources", "--disable-slash-commands", "--dangerously-skip-permissions"} {
+		if slices.Contains(iargs, flag) {
+			t.Errorf("orchestrator args must not have %s: %v", flag, iargs)
+		}
+	}
+	if slices.Contains(args, "--permission-mode") {
+		t.Errorf("sub-agents keep the sandbox, not auto mode: %v", args)
 	}
 	if sub := r.args(Agent{Role: "subagent"}, "/w/dir", "/x", "p", "SYS"); slices.Contains(sub, "--input-format") {
 		t.Errorf("sub-agents stay one-shot: %v", sub)
@@ -412,10 +426,13 @@ func TestOrchestratorPromptModes(t *testing.T) {
 func TestAgentEnv(t *testing.T) {
 	in := []string{"PATH=/bin", "ANTHROPIC_API_KEY=k", "ANTHROPIC_AUTH_TOKEN=t", "ANTHROPIC_BASE_URL=u",
 		"CLAUDE_CODE_USE_BEDROCK=1", "CLAUDE_CODE_USE_VERTEX=1", "CLAUDE_CODE_OAUTH_TOKEN=o", "ANTHROPIC_MODEL=haiku"}
-	got := agentEnv(in)
+	got := agentEnv(in, true)
 	want := []string{"PATH=/bin", "CLAUDE_CODE_OAUTH_TOKEN=o", "ANTHROPIC_MODEL=haiku", isolationEnv}
 	if !slices.Equal(got, want) {
 		t.Fatalf("agentEnv = %v, want %v", got, want)
+	}
+	if got := agentEnv(in, false); !slices.Equal(got, want[:3]) { // the orchestrator keeps auto-memory
+		t.Fatalf("agentEnv(orchestrator) = %v, want %v", got, want[:3])
 	}
 	// End to end: the child process sees none of them.
 	t.Setenv("ANTHROPIC_API_KEY", "sk-leak")
