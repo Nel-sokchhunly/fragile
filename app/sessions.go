@@ -492,7 +492,10 @@ func (a *App) GetSession(sessionID int64) (SessionSnapshot, error) {
 	lookupEscalation := func(id int64) (notes.Escalation, error) {
 		e, ok := escalations[id]
 		if !ok {
-			return notes.Escalation{}, notes.ErrNotFound
+			// History is read after the escalation list; a new escalation can
+			// arrive between them. Resolve misses as live events do, with the
+			// session check below still preventing foreign references.
+			return a.store.FindEscalation(id)
 		}
 		return e, nil
 	}

@@ -29,9 +29,11 @@ request CPU shares. The read/lock overhead, rather than a hypothetical render
 bottleneck, motivated the small change.
 
 Snapshot mapping now reuses an invocation-local ID map from the already-loaded
-session-scoped list. Nothing is cached across calls. By source inspection (not
+session-scoped list. Nothing is cached across calls. An ID absent from this list falls back to the
+existing store lookup: an escalation may be created between the list read and
+the later event-history read. The existing session-access check still applies. By source inspection (not
 an instrumented query counter), this removes one SQL query per escalation
-history row; seven fixed queries remain for these one-orchestrator fixtures.
+history row present in that list; miss-only fallback retains concurrent visibility; seven fixed queries remain for these one-orchestrator fixtures.
 
 ## Controlled measurements
 
@@ -48,18 +50,18 @@ candidate binaries. Twelve pairs ran sequentially, alternating which binary
 ran first, with Go's adaptive iteration count and `-test.benchtime 200ms`.
 Results below summarize per-run mean `ns/op` using median and min–max over the
 12 runs. They are **not individual-request p95 percentiles**. Nanosecond units
-are Go's output units, not a claim of nanosecond measurement precision. A short
-correctness test overlapped part of collection; reported ranges retain all
-samples. Absolute sub-millisecond values are local-lab results only.
+are Go's output units, not a claim of nanosecond measurement precision. An authenticated E2E process was active on the same host during final
+collection, so host background work is not fully isolated; alternating pairs
+control drift and reported ranges retain all samples. Absolute sub-millisecond values are local-lab results only.
 
 | Synthetic fixture | Baseline median (range), ms | Candidate median (range), ms | Median change |
 | --- | --- | --- | --- |
-| 200 rows, no escalations | 0.458 (0.445–0.460) | 0.456 (0.444–0.472) | Within noise; no speedup claim |
-| 200 rows, 40 escalations | 0.744 (0.741–0.762) | 0.456 (0.447–0.460) | −0.288 ms / −38.7% |
-| 1,000 rows, 200 escalations | 3.360 (3.315–3.388) | 1.927 (1.892–2.266) | −1.434 ms / −42.7% |
+| 200 rows, no escalations | 0.458 (0.455–0.468) | 0.459 (0.443–0.489) | Within noise; no speedup claim |
+| 200 rows, 40 escalations | 0.742 (0.733–0.784) | 0.460 (0.447–0.477) | −0.282 ms / −38.0% |
+| 1,000 rows, 200 escalations | 3.357 (3.337–3.607) | 1.929 (1.890–2.032) | −1.428 ms / −42.5% |
 
 For 1,000 rows, allocations fell from 24,810 to 17,813 per call (−28.2%), and
-allocated bytes from approximately 2,150,594 to 1,933,135 (−10.1%). Ordinary
+allocated bytes from approximately 2,150,601 to 1,933,110 (−10.1%). Ordinary
 sessions retained 3,243 allocations per call. No timing ceiling is imposed on
 CI: noisy elapsed timings would make a brittle gate. Keep the benchmark for
 controlled regression investigation and the correctness tests in the fast suite.
@@ -67,10 +69,10 @@ controlled regression investigation and the correctness tests in the fast suite.
 Exact comparison identities (SHA-256):
 
 - Baseline production source: upstream main `27094f3374592e044b6b9e0f534709fd6b1e63e8`.
-- Candidate `app/sessions.go`: `86a344395787aa4385ca64cf0737fdbfd4f4c8a337dd5a8aa5309a7b4789108a`.
+- Candidate `app/sessions.go`: `8d29796341f5dcf5efbb02b0e8f3b7a48da8fec900442dff2360c4347de30dde`.
 - Identical `app/session_benchmark_test.go`: `cf56821e5acf0936a36227c49ac5e4f9bfb617316b0dedd2bb567f24d2a660e1`.
 - Baseline benchmark binary: `7da03add5e145b20a822d376bb41738743cc90f2e5996a9fb897de76ccaf5b20`.
-- Candidate benchmark binary: `c2c303dfeb403e9015c8d63ede03be7b93a4fea6897878542b418f1077d378a1`.
+- Candidate benchmark binary: `6a85c2a32e090c9d58ad3f53960026c24fc47c5c1d81bffb73a766a2c084f564`.
 
 ## Reproduce and protect correctness
 
@@ -99,7 +101,13 @@ missing/foreign/malformed references, independent row pointers, subsequent
 answer freshness, and an old snapshot remaining unchanged. Existing tests
 exercise live MCP escalation answers and failed delivery reopening.
 
-Candidate re-profiling removes `FindEscalation` from the snapshot path. The
+Local final-source checks passed: Go race suite (`app`, `notes`, `cmd/fragile`),
+Go vet, diff checks and frontend production build. Installed-Codex sandbox smoke
+also passed. The separately opted-in authenticated backend E2E timed out before
+worker/MCP activity because Codex reported it was not signed in with ChatGPT;
+this is a disclosed environment blocker, not a passing authenticated E2E.
+
+Candidate re-profiling removes `FindEscalation` from the measured map-hit snapshot path. The
 remaining work is event loading/mapping and SQLite read locking; no second
 optimization is included without another controlled experiment. This bounded
 win does not establish that escalation-heavy sessions represent typical user
