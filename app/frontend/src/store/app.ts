@@ -14,7 +14,7 @@ type AppState = {
   data: Record<number, SessionData> // by session id; present = snapshot loaded
   agentEvents: Record<number, AgentEvent[]> // by agent id; present = history load started (live events then append)
   agentLoaded: Record<number, boolean> // history fully paged in
-  lastLine: Record<number, {text: string; at: string}> // newest assistant_text / tool_use per agent, from live events
+  lastLine: Record<number, {text: string; at: string; sid: number}> // newest assistant_text / tool_use per agent, from live events
   busy: Record<number, number> // by session id: when the orchestrator's turn started (ms; set on send, 0 again on its result event)
   selectedAgentId: number | null // null = show the orchestrator chat
   sidebarCollapsed: boolean // mirror of the sidebar panel's collapsed state
@@ -57,7 +57,10 @@ export function upsert<T extends {id: number}>(list: T[], item: T): T[] {
   return [...list.slice(0, i), item, ...list.slice(i)]
 }
 
-const errText = (e: unknown) => (typeof e === 'string' ? e : e instanceof Error ? e.message : String(e))
+// Newest events kept per agent in agentEvents (memory cap; older ones stay in the backend).
+const MAX_AGENT_EVENTS = 2000
+
+const errText =(e: unknown) => (typeof e === 'string' ? e : e instanceof Error ? e.message : String(e))
 
 // Events for a session whose snapshot is in flight wait here and replay on top of it (idempotent upserts),
 // so nothing is lost between "snapshot read" and "snapshot arrived". Events for sessions never opened are
@@ -167,7 +170,7 @@ export const useAppStore = create<AppState>((set, get) => {
         }
         set((s) => {
           const seen = new Set(hist.map((e) => e.id))
-          const merged = hist.concat(s.agentEvents[agentId].filter((e) => !seen.has(e.id))).sort((a, b) => a.id - b.id)
+          const merged = hist.concat(s.agentEvents[agentId].filter((e) => !seen.has(e.id))).sort((a, b) => a.id - b.id).slice(-MAX_AGENT_EVENTS)
           return {agentEvents: {...s.agentEvents, [agentId]: merged}, agentLoaded: {...s.agentLoaded, [agentId]: true}}
         })
       } catch (e) {
@@ -192,7 +195,8 @@ export const useAppStore = create<AppState>((set, get) => {
       // SQLite reuses ids: drop every per-agent cache of the session so a new agent can't inherit its output.
       const {[sid]: gone, ...data} = get().data
       const {[sid]: _, ...busy} = get().busy
-      const ids = new Set(gone?.agents.map((a) => a.id))
+      // lastLine knows its session, so agents of a never-opened snapshot are found too.
+      const ids = new Set([...(gone?.agents.map((a) => a.id) ?? []), ...Object.entries(get().lastLine).filter(([, l]) => l.sid === sid).map(([k]) => +k)])
       const drop = <T,>(m: Record<number, T>) => Object.fromEntries(Object.entries(m).filter(([k]) => !ids.has(+k))) as Record<number, T>
       set((s) => ({
         sessions: rest, data, busy,
@@ -218,8 +222,8 @@ export const useAppStore = create<AppState>((set, get) => {
       const busy = !orch ? undefined : ev.event_type === 'result' ? 0 : ['assistant_text', 'tool_use', 'tool_result'].includes(ev.event_type) ? since || Date.now() : undefined
       set((s) => ({
         busy: busy === undefined || s.busy[sid] === busy ? s.busy : {...s.busy, [sid]: busy},
-        lastLine: text ? {...s.lastLine, [ev.agent_id]: {text, at: ev.created_at}} : s.lastLine,
-        agentEvents: s.agentEvents[ev.agent_id] ? {...s.agentEvents, [ev.agent_id]: upsert(s.agentEvents[ev.agent_id], ev)} : s.agentEvents,
+        lastLine: text ? {...s.lastLine, [ev.agent_id]: {text, at: ev.created_at, sid}} : s.lastLine,
+        agentEvents: s.agentEvents[ev.agent_id] ? {...s.agentEvents, [ev.agent_id]: upsert(s.agentEvents[ev.agent_id], ev).slice(-MAX_AGENT_EVENTS)} : s.agentEvents,
       }))
     },
   }
@@ -242,7 +246,7 @@ export function latestLine(s: AppState, sessionId: number, agentId: number): str
   const notes = d?.notes ?? NO_NOTES
   let note: Note | undefined
   for (let i = notes.length - 1; i >= 0 && !note; i--) if (notes[i].author_agent_id === agentId) note = notes[i]
-  let ev = s.lastLine[agentId]
+  let ev: {text: string; at: string} | undefined = s.lastLine[agentId]
   if (!ev && d?.agents.find((a) => a.id === agentId)?.role === 'orchestrator') { // past session: no live events, use the chat
     for (let i = d.chat.length - 1; i >= 0 && !ev; i--) {
       const c = d.chat[i]

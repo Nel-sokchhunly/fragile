@@ -134,21 +134,51 @@ func TestRunnerStopAllRecordsEverything(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	finished, err := r.SpawnSubagent(sess.ID, orch.ID, "", "already done")
+	if err != nil {
+		t.Fatal(err)
+	}
+	store.SetTaskStatus(sess.ID, finished.TaskID, "done")
 
-	r.StopAll() // no Wait: StopAll itself must leave state and log final
-	for _, id := range []int64{orch.ID, sub.ID} {
+	r.StopAll()                                                                    // no Wait: StopAll itself must leave state and log final
+	if task, _ := store.GetTask(sess.ID, finished.TaskID); task.Status != "done" { // stopping does not undo a done task
+		t.Fatalf("done task status after StopAll = %q", task.Status)
+	}
+	for _, id := range []int64{orch.ID, sub.ID, finished.ID} {
 		if got, _ := store.GetAgent(sess.ID, id); got.Status != "stopped" { // killed on purpose, not a crash
 			t.Fatalf("agent %d status after StopAll = %q", id, got.Status)
 		}
 	}
-	if task, _ := store.GetTask(sess.ID, sub.TaskID); task.Status != "working" { // a deliberate stop does not block the task
+	if task, _ := store.GetTask(sess.ID, sub.TaskID); task.Status != "blocked" { // a stopped sub-agent leaves its task unfinished
 		t.Fatalf("task status = %q", task.Status)
 	}
-	if ev, _ := os.ReadFile(evPath); strings.Count(string(ev), `"event":"agent_status_changed"`) != 2 {
-		t.Fatalf("want 2 agent_status_changed events:\n%s", ev)
+	if ev, _ := os.ReadFile(evPath); strings.Count(string(ev), `"event":"agent_status_changed"`) != 3 {
+		t.Fatalf("want 3 agent_status_changed events:\n%s", ev)
 	}
 	if _, err := r.SpawnSubagent(sess.ID, orch.ID, "", "too late"); err == nil {
 		t.Fatal("SpawnSubagent after StopAll succeeded")
+	}
+}
+
+// Glob characters in a path must not widen (or break) the Read/Edit permission rules built from it.
+func TestSandboxSettingsEscapesPaths(t *testing.T) {
+	var settings struct {
+		Permissions struct{ Allow, Deny []string }
+	}
+	cfg := Config{AgentDir: "/d[x]/a*", DBPath: "/d[x]/f?.db"}
+	if err := json.Unmarshal([]byte(sandboxSettings(cfg, `/w/[x]/*dir`)), &settings); err != nil {
+		t.Fatal(err)
+	}
+	if want := []string{`Edit(//w/\[x\]/\*dir/**)`}; !slices.Equal(settings.Permissions.Allow, want) {
+		t.Errorf("allow rules = %v, want %v", settings.Permissions.Allow, want)
+	}
+	for _, rule := range []string{`Read(//d\[x\]/a\*)`, `Edit(//d\[x\]/a\*)`, `Read(//d\[x\]/f\?.db)`, `Edit(//d\[x\]/f\?.db-wal)`} {
+		if !slices.Contains(settings.Permissions.Deny, rule) {
+			t.Errorf("missing deny rule %s: %v", rule, settings.Permissions.Deny)
+		}
+	}
+	if got := globEscape(`a\b{c}`); got != `a\\b{c}` {
+		t.Errorf("globEscape = %q", got)
 	}
 }
 

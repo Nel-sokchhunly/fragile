@@ -119,14 +119,13 @@ func sandboxSettings(cfg Config, workDir string) string {
 	}
 	for _, p := range hidden {
 		for _, tool := range []string{"Read", "Edit"} { // Edit also covers Write
-			rules = append(rules, tool+"(/"+p+")") // "//abs" = absolute path; a dir covers what is under it
+			rules = append(rules, tool+"(/"+globEscape(p)+")") // "//abs" = absolute path; a dir covers what is under it
 		}
 	}
 	for _, f := range sandboxSecretFiles {
 		rules = append(rules, "Read("+f+")", "Edit("+f+")")
 	}
-	// ponytail: a workDir containing gitignore pattern characters ([ ] *) would need escaping.
-	allow := []string{"Edit(/" + realPath(workDir) + "/**)"}
+	allow := []string{"Edit(/" + globEscape(realPath(workDir)) + "/**)"}
 	writable := sandboxCaches
 	if d, err := os.UserCacheDir(); err == nil {
 		writable = append([]string{d}, sandboxCaches...)
@@ -156,6 +155,15 @@ func sandboxSettings(cfg Config, workDir string) string {
 	})
 	return string(b)
 }
+
+// globEscape backslash-escapes the characters a Read/Edit permission rule
+// (gitignore syntax) would read as a pattern, so a real path matches only itself.
+// Braces are not special in gitignore syntax and are left as they are.
+func globEscape(p string) string {
+	return globMeta.Replace(p)
+}
+
+var globMeta = strings.NewReplacer(`\`, `\\`, `*`, `\*`, `?`, `\?`, `[`, `\[`, `]`, `\]`)
 
 // realPath returns p absolute with symlinks resolved. A path that does not
 // exist yet (e.g. SQLite's -wal file) is resolved through its directory.
@@ -515,14 +523,18 @@ func (r *Runner) refusing(sessionID int64) bool {
 
 // finish records the outcome of an agent process (or of a failed launch, code
 // -1). A process the runner killed on purpose (stopped) is recorded as
-// "stopped" and its task is left alone; one that exited 0 anyway is just "exited".
+// "stopped" and its unfinished task becomes "blocked", as after a crash (a
+// task already done stays done); one that exited 0 anyway is just "exited".
 func (r *Runner) finish(a Agent, taskTitle string, code int, launchErr string, stopped bool) {
 	status, taskStatus := "crashed", "blocked"
 	switch {
 	case code == 0:
 		status, taskStatus = "exited", "done"
 	case stopped:
-		status, taskStatus = "stopped", ""
+		status = "stopped"
+		if t, err := r.store.GetTask(a.SessionID, a.TaskID); err == nil && t.Status == "done" {
+			taskStatus = ""
+		}
 	}
 	payload := map[string]any{"role": a.Role, "status": status, "exit_code": code}
 	if launchErr != "" {

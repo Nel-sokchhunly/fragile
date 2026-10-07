@@ -1,8 +1,8 @@
 // Package notes implements the Fragile notes MCP server: a shared notes board
 // that an orchestrator agent and its sub-agents use to coordinate.
 //
-// It is a library so the Phase 1 desktop app can embed it unchanged; the
-// Phase 0 binary in cmd/fragile is a thin wrapper around it.
+// It is a library so the desktop app can embed it unchanged; the command-line
+// binary in cmd/fragile is a thin wrapper around it.
 package notes
 
 import (

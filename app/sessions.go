@@ -94,11 +94,12 @@ func (a *App) SendMessage(sessionID int64, text string) error {
 }
 
 // neverStarted reports whether the session has no orchestrator that ever did
-// anything: none at all, or only ones that crashed (e.g. a failed launch)
-// without a single event. Such a session may start a fresh orchestrator.
+// any work: none at all, or only ones that crashed (e.g. a failed launch, or
+// `claude` not logged in: just an error result) without replying or calling a
+// tool. Such a session may start a fresh orchestrator.
 func (a *App) neverStarted(sessionID int64, orchs []notes.Agent) bool {
 	for _, o := range orchs {
-		evs, err := a.store.ListAgentEvents(sessionID, o.ID, 0, 1)
+		evs, err := a.store.ListAgentEventsOfType(sessionID, o.ID, evAssistantText, evToolUse)
 		if o.Status != "crashed" || err != nil || len(evs) > 0 {
 			return false
 		}
@@ -210,6 +211,8 @@ func (a *App) GetSession(sessionID int64) (SessionSnapshot, error) {
 
 // AnswerEscalation stores the user's answer, delivers it to the orchestrator as
 // a user message that restates the question, and recomputes the session status.
+// The answer is stored first and the escalation reopened if delivery fails, so
+// the orchestrator never gets an answer the database does not have.
 func (a *App) AnswerEscalation(escalationID int64, answer string) error {
 	if strings.TrimSpace(answer) == "" {
 		return errors.New("answer must not be empty")
@@ -229,11 +232,14 @@ func (a *App) AnswerEscalation(escalationID int64, answer string) error {
 	}
 	msg := fmt.Sprintf("Answer to your escalation #%d.\nYour question: %s\nContext you gave: %s\nThe user's answer: %s",
 		e.ID, e.Question, e.Context, answer)
-	if err := a.deliver(orch, msg, false); err != nil { // the chat shows the answer on the escalation itself
+	if e, err = a.store.AnswerEscalation(e.SessionID, e.ID, answer); err != nil {
 		return err
 	}
-	e, err = a.store.AnswerEscalation(e.SessionID, e.ID, answer)
-	if err != nil {
+	if err := a.deliver(orch, msg, false); err != nil { // the chat shows the answer on the escalation itself
+		if rerr := a.store.ReopenEscalation(e.SessionID, e.ID); rerr != nil {
+			log.Printf("escalation %d: reopening after failed delivery: %v", e.ID, rerr)
+		}
+		a.recompute(e.SessionID) // deliver recomputed while it was answered
 		return err
 	}
 	a.log.Write(notes.EventEscalation, e.SessionID, e.AgentID, e) // react() recomputes the status

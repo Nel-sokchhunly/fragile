@@ -1,7 +1,8 @@
 import {memo, useEffect, useState} from 'react'
 import ReactMarkdown, {type Components} from 'react-markdown'
 import remarkGfm from 'remark-gfm'
-import {BrowserOpenURL} from '../../wailsjs/runtime/runtime'
+import {Check, Copy} from 'lucide-react'
+import {BrowserOpenURL, ClipboardSetText} from '../../wailsjs/runtime/runtime'
 import {highlight} from '@/lib/shiki'
 
 function CodeBlock({code, lang}: {code: string; lang: string}) {
@@ -13,10 +14,26 @@ function CodeBlock({code, lang}: {code: string; lang: string}) {
       live = false
     }
   }, [code, lang])
-  return html ? (
-    <div className="code-block" dangerouslySetInnerHTML={{__html: html}}/>
-  ) : (
-    <pre className="code-block"><code>{code}</code></pre>
+  const [copied, setCopied] = useState(false)
+  const copy = () => ClipboardSetText(code).then((ok) => {
+    if (!ok) return
+    setCopied(true)
+    setTimeout(() => setCopied(false), 1500)
+  }, () => {})
+  return (
+    <div className="group relative">
+      {html ? (
+        <div className="code-block" dangerouslySetInnerHTML={{__html: html}}/>
+      ) : (
+        <pre className="code-block"><code>{code}</code></pre>
+      )}
+      <button
+        type="button" onClick={copy} aria-label={copied ? 'Copied' : 'Copy code'} title={copied ? 'Copied' : 'Copy'}
+        className="absolute top-1.5 right-1.5 rounded-sm border border-border-default bg-surface-sunken p-1 text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100 hover:text-foreground focus-visible:opacity-100"
+      >
+        {copied ? <Check className="size-3"/> : <Copy className="size-3"/>}
+      </button>
+    </div>
   )
 }
 

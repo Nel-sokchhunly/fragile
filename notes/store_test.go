@@ -369,3 +369,35 @@ func TestMarkRunningAgentsCrashed(t *testing.T) {
 		t.Errorf("second run marked %+v", again)
 	}
 }
+
+func TestReopenEscalation(t *testing.T) {
+	s, err := OpenStore(filepath.Join(t.TempDir(), "e.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	sess, _ := s.CreateSession("t")
+	orch, _ := s.CreateAgent(sess.ID, "orchestrator", 0, 0)
+	e, err := s.CreateEscalation(sess.ID, orch.ID, "q", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.ReopenEscalation(sess.ID, e.ID); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("reopen of an open escalation = %v, want ErrNotFound", err)
+	}
+	if _, err := s.AnswerEscalation(sess.ID, e.ID, "a"); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.ReopenEscalation(sess.ID+1, e.ID); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("reopen from another session = %v, want ErrNotFound", err)
+	}
+	if err := s.ReopenEscalation(sess.ID, e.ID); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := s.FindEscalation(e.ID); got.Status != "open" || got.Answer != "" {
+		t.Fatalf("after reopen: %+v", got)
+	}
+	if _, err := s.AnswerEscalation(sess.ID, e.ID, "again"); err != nil { // can be answered again
+		t.Fatal(err)
+	}
+}

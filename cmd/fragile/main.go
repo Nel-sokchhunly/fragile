@@ -1,4 +1,4 @@
-// Command fragile runs the Fragile notes MCP server (Phase 0). Given a task,
+// Command fragile runs the Fragile notes MCP server from the command line. Given a task,
 // it also launches an orchestrator agent to work on it and exits when the
 // orchestrator and all its sub-agents are done.
 package main
