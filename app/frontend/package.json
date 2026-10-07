@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "test:agent-output": "node scripts/test-agent-output.cjs",
     "build": "tsc && vite build",
     "preview": "vite preview"
   },

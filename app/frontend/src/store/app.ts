@@ -13,7 +13,7 @@ type AppState = {
   selectedSessionId: number | null
   data: Record<number, SessionData> // by session id; present = snapshot loaded
   agentEvents: Record<number, AgentEvent[]> // by agent id; present = history load started (live events then append)
-  agentLoaded: Record<number, boolean> // history fully paged in
+  agentLoaded: Record<number, boolean> // bounded history snapshot loaded
   lastLine: Record<number, {text: string; at: string; sid: number}> // newest assistant_text / tool_use per agent, from live events
   busy: Record<number, number> // by session id: when the orchestrator's turn started (ms; set on send, 0 again on its result event)
   selectedAgentId: number | null // null = show the orchestrator chat
@@ -71,6 +71,7 @@ const loading = new Map<number, ((d: SessionData) => SessionData)[]>()
 let toastId = 0
 
 export const useAppStore = create<AppState>((set, get) => {
+  const agentLoads = new Map<number, symbol>()
   const loadSession = async (id: number) => {
     if (get().data[id] || loading.has(id)) return
     loading.set(id, [])
@@ -164,25 +165,26 @@ export const useAppStore = create<AppState>((set, get) => {
 
     loadAgentEvents: async (agentId) => {
       if (get().agentEvents[agentId]) return
+      const token = Symbol()
+      agentLoads.set(agentId, token)
       set((s) => ({agentEvents: {...s.agentEvents, [agentId]: []}})) // live events append from now on
       try {
-        let hist: AgentEvent[] = []
-        for (;;) {
-          const page = await api.getAgentEvents(agentId, hist.length ? hist[hist.length - 1].id : 0, 1000)
-          hist = hist.concat(page)
-          if (page.length < 1000) break
-        }
+        const hist = await api.getAgentEventTail(agentId, MAX_AGENT_EVENTS)
+        if (agentLoads.get(agentId) !== token) return // deleted/reused while awaiting the snapshot
         set((s) => {
           const seen = new Set(hist.map((e) => e.id))
           const merged = hist.concat(s.agentEvents[agentId].filter((e) => !seen.has(e.id))).sort((a, b) => a.id - b.id).slice(-MAX_AGENT_EVENTS)
           return {agentEvents: {...s.agentEvents, [agentId]: merged}, agentLoaded: {...s.agentLoaded, [agentId]: true}}
         })
       } catch (e) {
+        if (agentLoads.get(agentId) !== token) return
         set((s) => {
           const {[agentId]: _, ...rest} = s.agentEvents
           return {agentEvents: rest}
         })
         get().notify(e)
+      } finally {
+        if (agentLoads.get(agentId) === token) agentLoads.delete(agentId)
       }
     },
 
@@ -202,6 +204,7 @@ export const useAppStore = create<AppState>((set, get) => {
       const {[sid]: __, ...terminalOpen} = get().terminalOpen
       // lastLine knows its session, so agents of a never-opened snapshot are found too.
       const ids = new Set([...(gone?.agents.map((a) => a.id) ?? []), ...Object.entries(get().lastLine).filter(([, l]) => l.sid === sid).map(([k]) => +k)])
+      for (const id of ids) agentLoads.delete(id)
       const drop = <T,>(m: Record<number, T>) => Object.fromEntries(Object.entries(m).filter(([k]) => !ids.has(+k))) as Record<number, T>
       set((s) => ({
         sessions: rest, data, busy, terminalOpen,

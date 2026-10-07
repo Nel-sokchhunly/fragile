@@ -237,6 +237,20 @@ func (a *App) GetAgentEvents(agentID, sinceID int64, limit int) ([]notes.AgentEv
 	return evs, err
 }
 
+// GetAgentEventTail returns the newest output, oldest first (default and cap 2000).
+// The paged GetAgentEvents API remains available for consumers needing full history.
+func (a *App) GetAgentEventTail(agentID int64, limit int) ([]notes.AgentEvent, error) {
+	ag, err := a.store.FindAgent(agentID)
+	if err != nil {
+		return nil, err
+	}
+	evs, err := a.store.ListAgentEventTail(ag.SessionID, agentID, limit)
+	if evs == nil {
+		evs = []notes.AgentEvent{}
+	}
+	return evs, err
+}
+
 // AddNote posts a note to the session's board as the user (author_agent_id 0).
 func (a *App) AddNote(sessionID int64, noteType, content string) (notes.Note, error) {
 	if err := notes.CheckNoteType(noteType); err != nil {
