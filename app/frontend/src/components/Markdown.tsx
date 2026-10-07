@@ -1,5 +1,6 @@
 import {memo, useEffect, useState} from 'react'
 import ReactMarkdown, {type Components} from 'react-markdown'
+import remarkGfm from 'remark-gfm'
 import {BrowserOpenURL} from '../../wailsjs/runtime/runtime'
 import {highlight} from '@/lib/shiki'
 
@@ -35,5 +36,5 @@ const components: Components = {
 }
 
 export const Markdown = memo(function Markdown({children}: {children: string}) {
-  return <div className="md"><ReactMarkdown components={components}>{children}</ReactMarkdown></div>
+  return <div className="md"><ReactMarkdown remarkPlugins={[remarkGfm]} components={components}>{children}</ReactMarkdown></div>
 })

@@ -81,7 +81,7 @@ export function subscribeEvents() {
     on('note_updated', patch((d, n: Note) => ({...d, notes: upsert(d.notes, n)}))),
     // The chat shows escalations through chat_item; this only keeps a displayed one in step.
     on('escalation', patch((d, x: Escalation) => ({...d, chat: d.chat.map((c) => (c.kind === 'escalation' && c.escalation.id === x.id ? {...c, escalation: x} : c))}))),
-    on('agent_event', (e) => st().agentEvent(e.payload)),
+    on('agent_event', (e) => st().agentEvent(e.session_id, e.payload)),
   ]
   return () => offs.forEach((off) => off())
 }

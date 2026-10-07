@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024">
+  <!-- Design tokens: background #1f1f1e, border-default #3a3a37, foreground #f2f1ec. -->
+  <rect x="64" y="64" width="896" height="896" rx="200" fill="#1f1f1e" stroke="#3a3a37" stroke-width="8"/>
+  <!-- "F" from the wordmark font: Instrument Sans, weight 600. -->
+  <path transform="translate(522 512) scale(0.6 -0.6) translate(-307.5 -360)" fill="#f2f1ec"
+        d="M62 0L62 720L192 720L192 0ZM124 289L124 392L529 392L529 289ZM124 617L124 720L553 720L553 617Z"/>
+</svg>

@@ -15,6 +15,7 @@ type AppState = {
   agentEvents: Record<number, AgentEvent[]> // by agent id; present = history load started (live events then append)
   agentLoaded: Record<number, boolean> // history fully paged in
   lastLine: Record<number, {text: string; at: string}> // newest assistant_text / tool_use per agent, from live events
+  busy: Record<number, boolean> // by session id: orchestrator mid-turn (set on send, cleared by its result event)
   selectedAgentId: number | null // null = show the orchestrator chat
   sidebarCollapsed: boolean // mirror of the sidebar panel's collapsed state
   toasts: Toast[]
@@ -45,7 +46,7 @@ type AppState = {
   agentSeen: (sessionId: number) => void
   sessionDeleted: (sessionId: number) => void
   patchSession: (sessionId: number, f: (d: SessionData) => SessionData) => void
-  agentEvent: (ev: AgentEvent) => void
+  agentEvent: (sessionId: number, ev: AgentEvent) => void
 }
 
 // Insert or replace by id in an id-ordered list (appends and replaces of recent rows are the fast path).
@@ -95,6 +96,7 @@ export const useAppStore = create<AppState>((set, get) => {
     agentEvents: {},
     agentLoaded: {},
     lastLine: {},
+    busy: {},
     selectedAgentId: null,
     sidebarCollapsed: false,
     toasts: [],
@@ -129,7 +131,17 @@ export const useAppStore = create<AppState>((set, get) => {
       get().sessionCreated(se)
       select(se.id)
     },
-    sendMessage: (sid, text) => api.sendMessage(sid, text), // the backend's chat_item event shows the message
+    // The backend's chat_item event shows the message. Busy from the send, not the first output, so the chat
+    // isn't silent while the orchestrator starts up or thinks.
+    sendMessage: async (sid, text) => {
+      set((s) => ({busy: {...s.busy, [sid]: true}}))
+      try {
+        await api.sendMessage(sid, text)
+      } catch (e) {
+        set((s) => ({busy: {...s.busy, [sid]: false}}))
+        throw e
+      }
+    },
     stopSession: async (sid) => { await toasting(api.stopSession(sid)) },
     deleteSession: async (sid) => { await toasting(api.deleteSession(sid)) },
     answerEscalation: async (id, answer) => { await toasting(api.answerEscalation(id, answer)) }, // chat_item flips it to answered
@@ -179,10 +191,11 @@ export const useAppStore = create<AppState>((set, get) => {
       const rest = sessions.filter((x) => x.id !== sid)
       // SQLite reuses ids: drop every per-agent cache of the session so a new agent can't inherit its output.
       const {[sid]: gone, ...data} = get().data
+      const {[sid]: _, ...busy} = get().busy
       const ids = new Set(gone?.agents.map((a) => a.id))
       const drop = <T,>(m: Record<number, T>) => Object.fromEntries(Object.entries(m).filter(([k]) => !ids.has(+k))) as Record<number, T>
       set((s) => ({
-        sessions: rest, data,
+        sessions: rest, data, busy,
         agentEvents: drop(s.agentEvents), agentLoaded: drop(s.agentLoaded), lastLine: drop(s.lastLine),
         selectedAgentId: s.selectedAgentId != null && ids.has(s.selectedAgentId) ? null : s.selectedAgentId,
       }))
@@ -192,14 +205,18 @@ export const useAppStore = create<AppState>((set, get) => {
       if (get().data[sid]) set((s) => ({data: {...s.data, [sid]: f(s.data[sid])}}))
       else loading.get(sid)?.push(f)
     },
-    agentEvent: (ev) => {
+    agentEvent: (sid, ev) => {
       let text = ''
       try {
         const p = JSON.parse(ev.payload)
         if (ev.event_type === 'assistant_text') text = p.text
         else if (ev.event_type === 'tool_use') text = `${p.name} ${JSON.stringify(p.input ?? {})}`.slice(0, 200)
       } catch { /* not JSON: no line */ }
+      // Mirrors the backend's mid-turn tracking (App.onLine): a result ends the orchestrator's turn, other output means one is under way.
+      const orch = get().data[sid]?.agents.some((a) => a.id === ev.agent_id && a.role === 'orchestrator')
+      const busy = !orch ? undefined : ev.event_type === 'result' ? false : ['assistant_text', 'tool_use', 'tool_result'].includes(ev.event_type) ? true : undefined
       set((s) => ({
+        busy: busy === undefined || s.busy[sid] === busy ? s.busy : {...s.busy, [sid]: busy},
         lastLine: text ? {...s.lastLine, [ev.agent_id]: {text, at: ev.created_at}} : s.lastLine,
         agentEvents: s.agentEvents[ev.agent_id] ? {...s.agentEvents, [ev.agent_id]: upsert(s.agentEvents[ev.agent_id], ev)} : s.agentEvents,
       }))
