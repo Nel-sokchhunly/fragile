@@ -184,7 +184,7 @@ func TestSandboxSettingsEscapesPaths(t *testing.T) {
 
 func TestRunnerArgs(t *testing.T) {
 	r := NewRunner(Config{AgentDir: "/d/agents", DBPath: "/d/f.db", LogPath: "/d/events.jsonl"}, nil, nil)
-	args := r.args(Agent{Role: "subagent"}, "/w/dir", "/x/agent-3.mcp.json", "do -it", "SYS")
+	args := r.args(Agent{Role: "subagent"}, "/w/dir", "/x/agent-3.mcp.json", "do -it", "SYS", "")
 	for _, want := range [][]string{
 		{"--mcp-config", "/x/agent-3.mcp.json"}, {"--append-system-prompt", "SYS"},
 		{"--output-format", "stream-json"}, {"--disallowedTools", "Task,Agent,Workflow"}, {"--", "do -it"},
@@ -247,9 +247,14 @@ func TestRunnerArgs(t *testing.T) {
 		t.Errorf("one-shot args take input from stdin: %v", args)
 	}
 	r.Interactive = true
-	iargs := r.args(Agent{Role: "orchestrator"}, "/w/dir", "/x/agent-3.mcp.json", "", "SYS")
-	if i := slices.Index(iargs, "--input-format"); i < 0 || iargs[i+1] != "stream-json" || slices.Contains(iargs, "--") {
+	iargs := r.args(Agent{Role: "orchestrator"}, "/w/dir", "/x/agent-3.mcp.json", "", "SYS", "")
+	if i := slices.Index(iargs, "--input-format"); i < 0 || iargs[i+1] != "stream-json" || slices.Contains(iargs, "--") || slices.Contains(iargs, "--resume") {
 		t.Errorf("interactive orchestrator args: %v", iargs)
+	}
+	// A resumed orchestrator gets the same arguments plus --resume <claude session id>.
+	rargs := r.args(Agent{Role: "orchestrator"}, "/w/dir", "/x/agent-3.mcp.json", "", "SYS", "abc-123")
+	if i := slices.Index(rargs, "--resume"); i < 0 || rargs[i+1] != "abc-123" || !slices.Equal(slices.Delete(slices.Clone(rargs), i, i+2), iargs) {
+		t.Errorf("resumed orchestrator args: %v", rargs)
 	}
 	// The orchestrator runs like the user's CLI: auto mode, user setup, no sandbox; only fragile tools pre-approved.
 	for _, want := range [][]string{{"--permission-mode", "auto"}, {"--allowedTools", "mcp__fragile"}, {"--disallowedTools", "Task,Agent,Workflow"}} {
@@ -265,7 +270,7 @@ func TestRunnerArgs(t *testing.T) {
 	if slices.Contains(args, "--permission-mode") {
 		t.Errorf("sub-agents keep the sandbox, not auto mode: %v", args)
 	}
-	if sub := r.args(Agent{Role: "subagent"}, "/w/dir", "/x", "p", "SYS"); slices.Contains(sub, "--input-format") {
+	if sub := r.args(Agent{Role: "subagent"}, "/w/dir", "/x", "p", "SYS", "");slices.Contains(sub, "--input-format") {
 		t.Errorf("sub-agents stay one-shot: %v", sub)
 	}
 	if !slices.Contains(args, "--strict-mcp-config") || !slices.Contains(args, "--disable-slash-commands") || !slices.Contains(args, "--verbose") || slices.Contains(args, "--dangerously-skip-permissions") {
@@ -538,6 +543,34 @@ func TestRunnerRefusedLaunchAndForget(t *testing.T) {
 	r.Wait(sess.ID)
 	if got, _ := store.GetAgent(sess.ID, a.ID); got.Status != "exited" {
 		t.Fatalf("status = %s", got.Status)
+	}
+}
+
+// ResumeOrchestrator lifts StopSession (not StopAll) and passes --resume to a new orchestrator row.
+func TestRunnerResumeOrchestrator(t *testing.T) {
+	r, _, sess, _ := newTestRunner(t, `echo "args: $*"`)
+	first, err := r.StartOrchestrator(sess.ID, "x")
+	if err != nil {
+		t.Fatal(err)
+	}
+	r.StopSession(sess.ID)
+	if _, err := r.ResumeOrchestrator(sess.ID, ""); err == nil {
+		t.Fatal("resume without a Claude session id succeeded")
+	}
+	a, err := r.ResumeOrchestrator(sess.ID, "abc-123")
+	if err != nil {
+		t.Fatalf("resume after StopSession: %v", err)
+	}
+	r.Wait(sess.ID)
+	if a.ID == first.ID || a.Role != "orchestrator" {
+		t.Fatalf("resumed agent = %+v", a)
+	}
+	if out, _ := os.ReadFile(a.LogPath); !strings.Contains(string(out), "--resume abc-123") {
+		t.Fatalf("resumed args = %q", out)
+	}
+	r.StopAll()
+	if _, err := r.ResumeOrchestrator(sess.ID, "abc-123"); err == nil {
+		t.Fatal("resume after StopAll succeeded")
 	}
 }
 

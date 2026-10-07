@@ -43,6 +43,7 @@ type SessionSnapshot struct {
 
 // CreateSession creates an empty session in workDir (name defaults to the
 // directory's base name). Its orchestrator starts with the first SendMessage.
+// A directory holds at most one session, live or past; deleting it frees the directory.
 func (a *App) CreateSession(name, workDir string) (notes.Session, error) {
 	dir, err := filepath.Abs(workDir)
 	if err != nil {
@@ -55,7 +56,20 @@ func (a *App) CreateSession(name, workDir string) (notes.Session, error) {
 	if name == "" {
 		name = filepath.Base(dir)
 	}
+	a.startMu.Lock() // racing creates for one directory must not both pass the check
+	all, err := a.store.ListSessions()
+	if err != nil {
+		a.startMu.Unlock()
+		return notes.Session{}, err
+	}
+	for _, other := range all {
+		if other.WorkDir != "" && filepath.Clean(other.WorkDir) == dir {
+			a.startMu.Unlock()
+			return notes.Session{}, fmt.Errorf("a session for this directory already exists: %q; open it from the sidebar instead", other.Title)
+		}
+	}
 	se, err := a.store.CreateSessionIn(name, dir)
+	a.startMu.Unlock()
 	if err != nil {
 		return notes.Session{}, err
 	}
@@ -107,8 +121,67 @@ func (a *App) neverStarted(sessionID int64, orchs []notes.Agent) bool {
 	return true
 }
 
-// StopSession stops the session's orchestrator and sub-agents (for good: past
-// sessions are not resumed).
+// resumeMessage is the first message a resumed orchestrator gets.
+const resumeMessage = "This session was resumed after the app restarted or the session was stopped. " +
+	"Sub-agents started before that are no longer running. Check get_subagent_status and the board, " +
+	"respawn or finish any unfinished work, then report."
+
+// ResumeSession starts a new orchestrator for a session whose orchestrator is
+// not running (stopped, exited, or the app was restarted). It resumes the
+// previous Claude Code conversation (--resume) and tells it what happened.
+func (a *App) ResumeSession(sessionID int64) error {
+	if _, err := a.store.GetSession(sessionID); err != nil {
+		return err
+	}
+	a.startMu.Lock()
+	orchs, err := a.store.ListAgents(sessionID, "orchestrator")
+	var orch notes.Agent
+	switch {
+	case err != nil:
+	case a.neverStarted(sessionID, orchs):
+		err = errors.New("this session has not started an orchestrator yet; send a message to start one")
+	case a.runner.Running(orchs[len(orchs)-1].ID):
+		err = errors.New("this session's orchestrator is already running")
+	default:
+		var claudeID string
+		if claudeID, err = a.claudeSessionID(sessionID, orchs); err != nil {
+			break
+		}
+		a.setBusy(sessionID, true) // before the process exists, so the session never flickers to done
+		if orch, err = a.runner.ResumeOrchestrator(sessionID, claudeID); err != nil {
+			a.setBusy(sessionID, false) // the runner recorded the crash; the session derives to done
+		}
+	}
+	a.startMu.Unlock()
+	if err != nil {
+		return err
+	}
+	return a.deliver(orch, resumeMessage, true)
+}
+
+// claudeSessionID returns the Claude Code session id from the newest init line
+// of the session's orchestrators, newest first (a resumed one logs its own).
+func (a *App) claudeSessionID(sessionID int64, orchs []notes.Agent) (string, error) {
+	for i := len(orchs) - 1; i >= 0; i-- {
+		evs, err := a.store.ListAgentEventsOfType(sessionID, orchs[i].ID, evSystem)
+		if err != nil {
+			return "", err
+		}
+		for j := len(evs) - 1; j >= 0; j-- {
+			var p struct {
+				Subtype   string `json:"subtype"`
+				SessionID string `json:"session_id"`
+			}
+			if json.Unmarshal([]byte(evs[j].Payload), &p) == nil && p.Subtype == "init" && p.SessionID != "" {
+				return p.SessionID, nil
+			}
+		}
+	}
+	return "", errors.New("no Claude Code session id was recorded for this session, so it cannot be resumed")
+}
+
+// StopSession stops the session's orchestrator and sub-agents; ResumeSession
+// can start the orchestrator again.
 func (a *App) StopSession(sessionID int64) error {
 	if _, err := a.store.GetSession(sessionID); err != nil {
 		return err
@@ -268,7 +341,7 @@ func (a *App) liveOrchestrator(sessionID int64) (notes.Agent, error) {
 		return notes.Agent{}, err
 	}
 	if len(orchs) == 0 || !a.runner.Running(orchs[len(orchs)-1].ID) {
-		return notes.Agent{}, errors.New("this session's orchestrator is not running (it was stopped, exited, or the app was restarted)")
+		return notes.Agent{}, errors.New("this session's orchestrator is not running (it was stopped, exited, or the app was restarted); resume the session to continue")
 	}
 	return orchs[len(orchs)-1], nil
 }
@@ -570,7 +643,7 @@ func (a *App) killOrphan(ag notes.Agent) {
 }
 
 // recoverStale records agents a previous run left "running" as crashed
-// (nothing is resumed; processes that outlived a hard kill are killed) and
+// (nothing is resumed until ResumeSession; processes that outlived a hard kill are killed) and
 // recomputes every session's status.
 func (a *App) recoverStale() error {
 	stale, err := a.store.MarkRunningAgentsCrashed()

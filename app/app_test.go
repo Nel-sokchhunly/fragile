@@ -149,7 +149,7 @@ func TestSessionChatAndStatus(t *testing.T) {
 	if se.Title != filepath.Base(work) || se.Status != "done" || se.WorkDir == "" {
 		t.Fatalf("session = %+v", se)
 	}
-	if named, _ := a.CreateSession("my name\nmore", work); named.Title != "my name" {
+	if named, _ := a.CreateSession("my name\nmore", t.TempDir()); named.Title != "my name" {
 		t.Fatalf("named session = %+v", named)
 	}
 	if err := a.SendMessage(se.ID, "Write the thing\nwith details"); err != nil {
@@ -203,6 +203,59 @@ func TestSessionChatAndStatus(t *testing.T) {
 	}
 }
 
+// A directory holds one session, whatever its status, until that session is deleted.
+func TestOneSessionPerDirectory(t *testing.T) {
+	a, _ := newTestApp(t, t.TempDir(), echoOrchestrator)
+	work := t.TempDir()
+	first, err := a.CreateSession("first", work)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(work+"/sub", 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for _, dir := range []string{work, work + "/", work + "/.", work + "/sub/.."} {
+		_, err := a.CreateSession("dup", dir)
+		if want := `a session for this directory already exists: "first"; open it from the sidebar instead`; err == nil || err.Error() != want {
+			t.Fatalf("create in %q: err = %v, want %q", dir, err, want)
+		}
+	}
+	if err := a.StopSession(first.ID); err != nil { // a past session still holds its directory
+		t.Fatal(err)
+	}
+	if _, err := a.CreateSession("dup", work); err == nil {
+		t.Fatal("directory of a stopped session reused")
+	}
+	if _, err := a.CreateSession("other", t.TempDir()); err != nil {
+		t.Fatalf("other directory: %v", err)
+	}
+	var wg sync.WaitGroup
+	var mu sync.Mutex
+	created := 0
+	race := t.TempDir()
+	for range 2 { // racing creates for one directory make one session
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			if _, err := a.CreateSession("", race); err == nil {
+				mu.Lock()
+				created++
+				mu.Unlock()
+			}
+		}()
+	}
+	wg.Wait()
+	if created != 1 {
+		t.Fatalf("racing creates made %d sessions", created)
+	}
+	if err := a.DeleteSession(first.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := a.CreateSession("again", work); err != nil {
+		t.Fatalf("directory not freed by delete: %v", err)
+	}
+}
+
 // A new session has no orchestrator (and no agents) until the first message starts it, once.
 func TestFirstMessageStartsOrchestrator(t *testing.T) {
 	a, _ := newTestApp(t, t.TempDir(), echoOrchestrator)
@@ -242,6 +295,67 @@ func TestStopSession(t *testing.T) {
 	}
 	if err := a.SendMessage(se.ID, "hello?"); err == nil {
 		t.Error("message to a stopped session accepted")
+	}
+}
+
+// initOrchestrator is echoOrchestrator that first prints Claude Code's init line,
+// and says so when it was started with --resume of that session.
+const initOrchestrator = `printf '{"type":"system","subtype":"init","session_id":"claude-1"}\n'
+case "$*" in *"--resume claude-1"*) printf '{"type":"assistant","message":{"content":[{"type":"text","text":"resumed claude-1"}]}}\n' ;; esac
+` + echoOrchestrator
+
+func TestResumeSession(t *testing.T) {
+	a, _ := newTestApp(t, t.TempDir(), initOrchestrator)
+	se, err := a.CreateSession("", t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := a.ResumeSession(se.ID); err == nil || !strings.Contains(err.Error(), "not started") {
+		t.Fatalf("resume of a never-started session: err = %v", err)
+	}
+	if err := a.SendMessage(se.ID, "task"); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, "first reply", func() bool { return hasChat(a, se.ID, "echo: ") && snapshot(t, a, se.ID).Session.Status == "done" })
+	if err := a.ResumeSession(se.ID); err == nil || !strings.Contains(err.Error(), "already running") {
+		t.Fatalf("resume of a running session: err = %v", err)
+	}
+	if err := a.StopSession(se.ID); err != nil {
+		t.Fatal(err)
+	}
+	if err := a.SendMessage(se.ID, "hello?"); err == nil || !strings.Contains(err.Error(), "resume") {
+		t.Fatalf("message to a stopped session: err = %v", err)
+	}
+	if err := a.ResumeSession(se.ID); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, "resumed reply", func() bool {
+		return hasChat(a, se.ID, "assistant: resumed claude-1") && hasChat(a, se.ID, `"text":"This session was resumed`) &&
+			snapshot(t, a, se.ID).Session.Status == "done"
+	})
+	s := snapshot(t, a, se.ID)
+	if len(s.Agents) != 2 || s.Agents[0].Status != "stopped" || s.Agents[1].Role != "orchestrator" || s.Agents[1].Status != "running" {
+		t.Fatalf("agents = %+v", s.Agents)
+	}
+	if !hasChat(a, se.ID, "user: This session was resumed") {
+		t.Fatalf("resume message not in chat: %v", chatTexts(s))
+	}
+	if err := a.SendMessage(se.ID, "after resume"); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, "reply after resume", func() bool { return hasChat(a, se.ID, `"text":"after resume`) })
+}
+
+// Without a recorded init line there is no Claude Code session to resume.
+func TestResumeSessionNeedsClaudeSessionID(t *testing.T) {
+	a, _ := newTestApp(t, t.TempDir(), echoOrchestrator)
+	se := startSession(t, a, "task")
+	waitFor(t, "first reply", func() bool { return hasChat(a, se.ID, "echo: ") })
+	if err := a.StopSession(se.ID); err != nil {
+		t.Fatal(err)
+	}
+	if err := a.ResumeSession(se.ID); err == nil || !strings.Contains(err.Error(), "session id") {
+		t.Fatalf("resume without a session id: err = %v", err)
 	}
 }
 

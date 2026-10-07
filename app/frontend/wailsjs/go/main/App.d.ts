@@ -21,6 +21,8 @@ export function ListSessions():Promise<Array<notes.Session>>;
 
 export function PickDirectory():Promise<string>;
 
+export function ResumeSession(arg1:number):Promise<void>;
+
 export function SendMessage(arg1:number,arg2:string):Promise<void>;
 
 export function StopSession(arg1:number):Promise<void>;

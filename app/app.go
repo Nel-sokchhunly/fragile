@@ -64,7 +64,7 @@ type App struct {
 	sendMu sync.Mutex // orders "persist user message, then write it to stdin"
 	ansMu  sync.Mutex // one escalation answer at a time
 
-	startMu sync.Mutex // one first-message orchestrator start per session
+	startMu sync.Mutex // one orchestrator start/resume, or session create, at a time
 }
 
 func NewApp() *App { return &App{ready: make(chan struct{})} }
