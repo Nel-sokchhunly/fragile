@@ -18,19 +18,26 @@ import (
 	"time"
 )
 
-// Tools every agent may use without a permission prompt. "mcp__fragile" allows
+// Tools a sub-agent may use without a permission prompt. "mcp__fragile" allows
 // all tools of the fragile MCP server; the server itself decides per agent
 // which of them it may call. Edit and Write are not here: they are allowed only
 // inside the working directory (see sandboxSettings). In -p mode a tool that is
 // not allowed is denied, never prompted for.
 const allowedTools = "Read,Glob,Grep,Bash,mcp__fragile"
 
+// The orchestrator runs like the user's own CLI: unsandboxed, with the user's
+// settings, in auto mode (Claude Code's classifier approves routine actions and
+// denies risky ones, as there is nobody to prompt in -p mode). Only the fragile
+// tools are pre-approved: a broad "Bash" allow rule would skip the classifier.
+const orchestratorAllowedTools = "mcp__fragile"
+
 // Claude Code tools that launch sub-agents inside the agent process (built-in
 // sub-agent tool is "Task" or "Agent" depending on version; "Workflow" spawns
 // sub-agents too). Never allowed: sub-agents only come from spawn_subagent.
 const disallowedTools = "Task,Agent,Workflow"
 
-// Isolation from the user's personal Claude Code setup (issue #39).
+// Sub-agent isolation from the user's personal Claude Code setup (issue #39).
+// The orchestrator is not isolated: it loads the user's setup like their CLI.
 // "--setting-sources project" skips user and local settings, which is where
 // their plugins, hooks and statusline come from; the project's own settings
 // and CLAUDE.md still apply. "--disable-slash-commands" disables all skills.
@@ -52,15 +59,19 @@ var billingEnv = []string{
 	"AWS_BEARER_TOKEN_BEDROCK",
 }
 
-// agentEnv is the environment an agent runs with: environ minus billingEnv, plus isolationEnv.
-func agentEnv(environ []string) []string {
+// agentEnv is the environment an agent runs with: environ minus billingEnv,
+// plus isolationEnv for an isolated (sub-)agent.
+func agentEnv(environ []string, isolated bool) []string {
 	out := make([]string, 0, len(environ)+1)
 	for _, kv := range environ {
 		if name, _, _ := strings.Cut(kv, "="); !slices.Contains(billingEnv, name) {
 			out = append(out, kv)
 		}
 	}
-	return append(out, isolationEnv)
+	if isolated {
+		out = append(out, isolationEnv)
+	}
+	return out
 }
 
 // Hosts sandboxed Bash may reach (package registries and GitHub); everything
@@ -373,10 +384,14 @@ func (r *Runner) args(a Agent, workDir, mcpConfig, prompt, systemPrompt string) 
 	args = append(args, "--output-format", "stream-json", "--verbose",
 		"--append-system-prompt", systemPrompt,
 		"--mcp-config", mcpConfig, "--strict-mcp-config",
-		"--allowedTools", allowedTools,
 		"--disallowedTools", disallowedTools)
-	args = append(args, isolationArgs...)
-	args = append(args, "--settings", sandboxSettings(r.cfg, workDir))
+	if a.Role == roleOrchestrator {
+		args = append(args, "--permission-mode", "auto", "--allowedTools", orchestratorAllowedTools)
+	} else {
+		args = append(args, "--allowedTools", allowedTools)
+		args = append(args, isolationArgs...)
+		args = append(args, "--settings", sandboxSettings(r.cfg, workDir))
+	}
 	if r.stdinAgent(a) {
 		return args
 	}
@@ -442,7 +457,7 @@ func (r *Runner) start(a Agent, mcpConfig, logPath, prompt, systemPrompt string)
 	workDir := r.workDir(a.SessionID)
 	cmd := exec.Command(r.Command, r.args(a, workDir, mcpConfig, prompt, systemPrompt)...)
 	cmd.Dir = workDir
-	cmd.Env = agentEnv(os.Environ())
+	cmd.Env = agentEnv(os.Environ(), a.Role != roleOrchestrator)
 	cmd.Stdout, cmd.Stderr = out, out // the child writes straight to the file ...
 	if r.OnLine != nil {              // ... unless lines are wanted: then through the tee
 		lw := &lineWriter{w: out, onLine: func(l []byte) { r.OnLine(a, l) }}

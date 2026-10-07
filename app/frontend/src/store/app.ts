@@ -15,7 +15,7 @@ type AppState = {
   agentEvents: Record<number, AgentEvent[]> // by agent id; present = history load started (live events then append)
   agentLoaded: Record<number, boolean> // history fully paged in
   lastLine: Record<number, {text: string; at: string}> // newest assistant_text / tool_use per agent, from live events
-  busy: Record<number, boolean> // by session id: orchestrator mid-turn (set on send, cleared by its result event)
+  busy: Record<number, number> // by session id: when the orchestrator's turn started (ms; set on send, 0 again on its result event)
   selectedAgentId: number | null // null = show the orchestrator chat
   sidebarCollapsed: boolean // mirror of the sidebar panel's collapsed state
   toasts: Toast[]
@@ -134,11 +134,11 @@ export const useAppStore = create<AppState>((set, get) => {
     // The backend's chat_item event shows the message. Busy from the send, not the first output, so the chat
     // isn't silent while the orchestrator starts up or thinks.
     sendMessage: async (sid, text) => {
-      set((s) => ({busy: {...s.busy, [sid]: true}}))
+      set((s) => ({busy: {...s.busy, [sid]: Date.now()}}))
       try {
         await api.sendMessage(sid, text)
       } catch (e) {
-        set((s) => ({busy: {...s.busy, [sid]: false}}))
+        set((s) => ({busy: {...s.busy, [sid]: 0}}))
         throw e
       }
     },
@@ -214,7 +214,8 @@ export const useAppStore = create<AppState>((set, get) => {
       } catch { /* not JSON: no line */ }
       // Mirrors the backend's mid-turn tracking (App.onLine): a result ends the orchestrator's turn, other output means one is under way.
       const orch = get().data[sid]?.agents.some((a) => a.id === ev.agent_id && a.role === 'orchestrator')
-      const busy = !orch ? undefined : ev.event_type === 'result' ? false : ['assistant_text', 'tool_use', 'tool_result'].includes(ev.event_type) ? true : undefined
+      const since = get().busy[sid] ?? 0
+      const busy = !orch ? undefined : ev.event_type === 'result' ? 0 : ['assistant_text', 'tool_use', 'tool_result'].includes(ev.event_type) ? since || Date.now() : undefined
       set((s) => ({
         busy: busy === undefined || s.busy[sid] === busy ? s.busy : {...s.busy, [sid]: busy},
         lastLine: text ? {...s.lastLine, [ev.agent_id]: {text, at: ev.created_at}} : s.lastLine,
