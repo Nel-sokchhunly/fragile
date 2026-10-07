@@ -38,6 +38,10 @@ export function PickDirectory() {
   return window['go']['main']['App']['PickDirectory']();
 }
 
+export function ResumeSession(arg1) {
+  return window['go']['main']['App']['ResumeSession'](arg1);
+}
+
 export function SendMessage(arg1, arg2) {
   return window['go']['main']['App']['SendMessage'](arg1, arg2);
 }

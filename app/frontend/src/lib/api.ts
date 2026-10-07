@@ -1,6 +1,6 @@
 import {
   AddNote, AnswerEscalation, CreateSession, DeleteSession, GetAgentEvents, GetRateLimit, GetSession, ListSessions,
-  PickDirectory, SendMessage, StopSession, UpdateNote,
+  PickDirectory, ResumeSession, SendMessage, StopSession, UpdateNote,
 } from '../../wailsjs/go/main/App'
 import type {Agent, AgentEvent, ChatItem, Escalation, Note, NoteType, RateLimit, Session, Task} from './types'
 
@@ -44,6 +44,8 @@ export const api = {
     as<Note>(UpdateNote(sessionId, noteId, content, status)),
   /** Stops the session's orchestrator and sub-agents for good. */
   stopSession: (sessionId: number): Promise<void> => StopSession(sessionId),
+  /** Starts a new orchestrator that resumes the last one's Claude conversation; rejects if one is running or none ever started. */
+  resumeSession: (sessionId: number): Promise<void> => ResumeSession(sessionId),
   /** Stops the session, then removes it and its chat, agents and notes from Fragile (never its files). */
   deleteSession: (sessionId: number): Promise<void> => DeleteSession(sessionId),
 }
