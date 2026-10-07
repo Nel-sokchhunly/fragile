@@ -330,7 +330,6 @@ export function ChatView({sessionId}: {sessionId: number}) {
           <ChatList key={sessionId} sessionId={sessionId} chat={chat} since={working ? busySince : 0}/>
         )}
       </div>
-      {terminalOpen && <TerminalPane sessionId={sessionId}/>}
       <Composer
         allowPDF={session?.provider !== 'codex'}
         onSend={(t, atts) => send(sessionId, t, atts)} label="Message the orchestrator" placeholder="Message the orchestrator"
@@ -338,6 +337,7 @@ export function ChatView({sessionId}: {sessionId: number}) {
         onInterrupt={working ? () => api.interruptSession(sessionId) : undefined}
         disabledReason={loaded && lead && !running ? <ResumeNotice key={sessionId} sessionId={sessionId}/> : undefined}
       />
+      {terminalOpen && <TerminalPane sessionId={sessionId}/>}
     </div>
   )
 }
