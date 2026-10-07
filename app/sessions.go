@@ -479,11 +479,22 @@ func (a *App) GetSession(sessionID int64) (SessionSnapshot, error) {
 	if err != nil {
 		return s, err
 	}
+	// Reuse this session-scoped read for chat history too: one lookup per
+	// escalation event would otherwise repeat data already loaded here.
+	escalations := make(map[int64]notes.Escalation, len(escs))
 	s.Escalations = []notes.Escalation{}
 	for _, e := range escs {
+		escalations[e.ID] = e
 		if e.Status == "open" {
 			s.Escalations = append(s.Escalations, e)
 		}
+	}
+	lookupEscalation := func(id int64) (notes.Escalation, error) {
+		e, ok := escalations[id]
+		if !ok {
+			return notes.Escalation{}, notes.ErrNotFound
+		}
+		return e, nil
 	}
 	s.Chat = []ChatItem{}
 	for _, ag := range s.Agents {
@@ -495,7 +506,7 @@ func (a *App) GetSession(sessionID int64) (SessionSnapshot, error) {
 			return s, err
 		}
 		for _, ev := range evs {
-			if item, ok := a.chatItem(sessionID, ev); ok {
+			if item, ok := chatItemWithEscalationLookup(sessionID, ev, lookupEscalation); ok {
 				s.Chat = append(s.Chat, item)
 			}
 		}
@@ -680,6 +691,12 @@ func (a *App) publish(ag notes.Agent, ev notes.AgentEvent) {
 // chatItem maps an orchestrator agent event to its chat row; ok is false for
 // events the chat does not show.
 func (a *App) chatItem(sessionID int64, ev notes.AgentEvent) (ChatItem, bool) {
+	return chatItemWithEscalationLookup(sessionID, ev, a.store.FindEscalation)
+}
+
+// Live events resolve the current escalation from the store; snapshots reuse
+// their already-loaded session list. Both paths keep the same access check.
+func chatItemWithEscalationLookup(sessionID int64, ev notes.AgentEvent, findEscalation func(int64) (notes.Escalation, error)) (ChatItem, bool) {
 	item := ChatItem{ID: ev.ID, At: ev.CreatedAt}
 	var p struct {
 		Text         string           `json:"text"`
@@ -711,7 +728,7 @@ func (a *App) chatItem(sessionID int64, ev notes.AgentEvent) (ChatItem, bool) {
 	case evToolUse:
 		item.Kind, item.Name, item.Summary = "tool", strings.TrimPrefix(p.Name, "mcp__fragile__"), toolSummary(p.Input)
 	case evEscalation:
-		e, err := a.store.FindEscalation(p.EscalationID)
+		e, err := findEscalation(p.EscalationID)
 		if err != nil || e.SessionID != sessionID {
 			return item, false
 		}
