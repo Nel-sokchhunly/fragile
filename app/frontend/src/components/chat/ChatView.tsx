@@ -1,8 +1,9 @@
-import {memo, useState} from 'react'
+import {memo, useCallback, useMemo, useState} from 'react'
 import {useNow} from '@/hooks/use-now'
 import {Virtuoso} from 'react-virtuoso'
-import {Square, Wrench} from 'lucide-react'
+import {ChevronRight, Square, Wrench} from 'lucide-react'
 import {Button} from '@/components/ui/button'
+import {Collapsible, CollapsibleContent, CollapsibleTrigger} from '@/components/ui/collapsible'
 import {Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger} from '@/components/ui/dialog'
 import {Textarea} from '@/components/ui/textarea'
 import {Tooltip, TooltipContent, TooltipTrigger} from '@/components/ui/tooltip'
@@ -65,7 +66,53 @@ function EscalationBlock({sessionId, item}: {sessionId: number; item: Extract<Ch
   )
 }
 
-const Row = memo(function Row({sessionId, item}: {sessionId: number; item: ChatItem}) {
+type ToolItem = Extract<ChatItem, {kind: 'tool'}>
+// A run of 2+ consecutive tool calls, shown as one collapsible row. id is its first call's id, so the key holds while the run grows.
+type ToolRun = {id: number; kind: 'tools'; items: ToolItem[]}
+type ChatRow = ChatItem | ToolRun
+
+function groupTools(chat: ChatItem[]): ChatRow[] {
+  const out: ChatRow[] = []
+  for (let i = 0; i < chat.length;) {
+    let j = i
+    while (j < chat.length && chat[j].kind === 'tool') j++
+    if (j - i >= 2) {
+      out.push({id: chat[i].id, kind: 'tools', items: chat.slice(i, j) as ToolItem[]})
+      i = j
+    } else out.push(chat[i++])
+  }
+  return out
+}
+
+function ToolLine({item}: {item: ToolItem}) {
+  return (
+    <div className="flex items-center gap-1.5 text-text-secondary" title={`${item.name} ${item.summary}`}>
+      <Wrench className="size-3 shrink-0 text-muted-foreground" aria-hidden/>
+      <span className="shrink-0 font-mono text-xs">{item.name}</span>
+      <span className="min-w-0 flex-1 truncate font-mono text-xs text-muted-foreground">{item.summary}</span>
+    </div>
+  )
+}
+
+// Collapsed: "N tool calls" and the distinct tool names; open: each call as its own line.
+function ToolGroup({items, open, onOpenChange}: {items: ToolItem[]; open: boolean; onOpenChange: (open: boolean) => void}) {
+  const names = [...new Set(items.map((t) => t.name))].join(', ')
+  return (
+    <Collapsible open={open} onOpenChange={onOpenChange}>
+      <CollapsibleTrigger className="flex w-full items-center gap-1.5 text-left text-text-secondary hover:text-foreground" title={names}>
+        <Wrench className="size-3 shrink-0 text-muted-foreground" aria-hidden/>
+        <span className="shrink-0 font-mono text-xs">{items.length} tool calls</span>
+        <span className="min-w-0 flex-1 truncate font-mono text-xs text-muted-foreground">{names}</span>
+        <ChevronRight className={cn('size-3 shrink-0 text-muted-foreground transition-transform', open && 'rotate-90')} aria-hidden/>
+      </CollapsibleTrigger>
+      <CollapsibleContent>
+        <div className="grid gap-1 pt-1 pl-[18px]">{items.map((t) => <ToolLine key={t.id} item={t}/>)}</div>
+      </CollapsibleContent>
+    </Collapsible>
+  )
+}
+
+const Row = memo(function Row({sessionId, item, open, onToggle}: {sessionId: number; item: ChatRow; open: boolean; onToggle: (id: number, open: boolean) => void}) {
   // Virtuoso items can't use margins, so spacing is padding on the wrapper. The column is centred and capped.
   return (
     <div className="mx-auto max-w-[680px] px-6 py-[5px]">
@@ -76,13 +123,8 @@ const Row = memo(function Row({sessionId, item}: {sessionId: number; item: ChatI
         </div>
       )}
       {item.kind === 'assistant' && <div className="font-serif text-assistant"><Markdown>{item.text}</Markdown></div>}
-      {item.kind === 'tool' && (
-        <div className="flex items-center gap-1.5 text-text-secondary" title={`${item.name} ${item.summary}`}>
-          <Wrench className="size-3 shrink-0 text-muted-foreground" aria-hidden/>
-          <span className="shrink-0 font-mono text-xs">{item.name}</span>
-          <span className="min-w-0 flex-1 truncate font-mono text-xs text-muted-foreground">{item.summary}</span>
-        </div>
-      )}
+      {item.kind === 'tool' && <ToolLine item={item}/>}
+      {item.kind === 'tools' && <ToolGroup items={item.items} open={open} onOpenChange={(o) => onToggle(item.id, o)}/>}
       {item.kind === 'escalation' && <EscalationBlock sessionId={sessionId} item={item}/>}
     </div>
   )
@@ -132,6 +174,30 @@ const Footer = ({context}: {context?: {since: number}}) => (
   <div className="pb-3">{context?.since ? <Working since={context.since}/> : null}</div>
 )
 
+// Keyed by session. Open tool groups live here, not in the row: Virtuoso unmounts rows scrolled out of view.
+function ChatList({sessionId, chat, since}: {sessionId: number; chat: ChatItem[]; since: number}) {
+  const rows = useMemo(() => groupTools(chat), [chat])
+  const [openIds, setOpenIds] = useState<ReadonlySet<number>>(() => new Set())
+  const toggle = useCallback((id: number, open: boolean) => setOpenIds((s) => {
+    const n = new Set(s)
+    if (open) n.add(id)
+    else n.delete(id)
+    return n
+  }), [])
+  return (
+    <Virtuoso
+      data={rows}
+      computeItemKey={(_, r) => r.id}
+      initialTopMostItemIndex={{index: 'LAST', align: 'end'}}
+      followOutput={(atBottom) => (atBottom ? 'smooth' : false)} // stop following once the user scrolls up
+      itemContent={(_, r) => <Row sessionId={sessionId} item={r} open={r.kind === 'tools' && openIds.has(r.id)} onToggle={toggle}/>}
+      context={{since}}
+      components={{Header: Pad, Footer}}
+      className="absolute inset-0"
+    />
+  )
+}
+
 export function ChatView({sessionId}: {sessionId: number}) {
   const session = useAppStore((s) => s.sessions.find((x) => x.id === sessionId))
   const loaded = useAppStore((s) => !!s.data[sessionId])
@@ -169,17 +235,7 @@ export function ChatView({sessionId}: {sessionId: number}) {
         ) : chat.length === 0 ? (
           <p className="p-6 text-[13px] text-muted-foreground">{lead ? 'No messages.' : 'Describe the task to start the orchestrator.'}</p>
         ) : (
-          <Virtuoso
-            key={sessionId}
-            data={chat}
-            computeItemKey={(_, c) => c.id}
-            initialTopMostItemIndex={{index: 'LAST', align: 'end'}}
-            followOutput={(atBottom) => (atBottom ? 'smooth' : false)} // stop following once the user scrolls up
-            itemContent={(_, item) => <Row sessionId={sessionId} item={item}/>}
-            context={{since: working ? busySince : 0}}
-            components={{Header: Pad, Footer}}
-            className="absolute inset-0"
-          />
+          <ChatList key={sessionId} sessionId={sessionId} chat={chat} since={working ? busySince : 0}/>
         )}
       </div>
       <Composer

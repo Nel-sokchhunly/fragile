@@ -22,7 +22,7 @@ func widenPath() {
 	if shell == "" {
 		return
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second) // the window waits on this
 	defer cancel()
 	cmd := exec.CommandContext(ctx, shell, "-ilc", `printf '<<PATH>>%s<<PATH>>' "$PATH"`)
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true} // no controlling tty: an interactive shell must not grab it

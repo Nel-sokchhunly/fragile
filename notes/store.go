@@ -582,6 +582,13 @@ func (s *Store) AnswerEscalation(sessionID, id int64, answer string) (Escalation
 		WHERE id = ? AND session_id = ? AND status = 'open' RETURNING `+escalationCols, answer, id, sessionID))
 }
 
+// ReopenEscalation undoes AnswerEscalation (its answer could not be delivered);
+// an escalation that is not answered is ErrNotFound.
+func (s *Store) ReopenEscalation(sessionID, id int64) error {
+	return affected(s.db.Exec(`UPDATE escalations SET status = 'open', answer = NULL
+		WHERE id = ? AND session_id = ? AND status = 'answered'`, id, sessionID))
+}
+
 // Agent events: per-agent history for the UI (output lines, status changes).
 
 type AgentEvent struct {

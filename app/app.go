@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/wailsapp/wails/v2/pkg/runtime"
@@ -41,8 +42,9 @@ type App struct {
 	log      *notes.EventLog
 	runner   *notes.Runner
 	httpSrv  *http.Server
-	addr     string // the notes server's loopback address
-	agentDir string // per-agent MCP configs and output logs
+	addr     string   // the notes server's loopback address
+	agentDir string   // per-agent MCP configs and output logs
+	lock     *os.File // holds the data dir's flock for the process lifetime
 	closed   bool
 
 	// Events flow OnEvent/push -> queue -> loop -> emit. The queue is unbounded
@@ -107,6 +109,7 @@ func dataDir() (string, error) {
 
 // open starts the backend: store, event log, notes server on a free loopback
 // port, runner. Agents left "running" by a previous run are recorded as crashed.
+// Only one instance may use a data dir: recovery would crash and kill the other's agents.
 func (a *App) open(dir string, emit func(string, any)) (err error) {
 	a.emit = emit
 	agentDir := filepath.Join(dir, "agents")
@@ -118,12 +121,17 @@ func (a *App) open(dir string, emit func(string, any)) (err error) {
 	if err := os.Chmod(agentDir, 0o700); err != nil {
 		return err
 	}
+	if a.lock, err = lockDataDir(dir); err != nil {
+		return err
+	}
 	dbPath, logPath := filepath.Join(dir, "fragile.db"), filepath.Join(dir, "events.jsonl")
 	if a.store, err = notes.OpenStore(dbPath); err != nil {
+		a.lock.Close()
 		return err
 	}
 	if a.log, err = notes.OpenEventLog(logPath); err != nil {
 		a.store.Close()
+		a.lock.Close()
 		return err
 	}
 	// Loopback only: the server can launch agents and must not be reachable from the network.
@@ -131,6 +139,7 @@ func (a *App) open(dir string, emit func(string, any)) (err error) {
 	if err != nil {
 		a.log.Close()
 		a.store.Close()
+		a.lock.Close()
 		return err
 	}
 
@@ -167,6 +176,24 @@ func (a *App) close() {
 	<-a.stopped
 	a.log.Close()
 	a.store.Close()
+	a.lock.Close() // releases the flock
+}
+
+// lockDataDir takes an exclusive, non-blocking flock on dir/fragile.lock; it
+// fails if another Fragile instance holds it. Closing the file releases it.
+func lockDataDir(dir string) (*os.File, error) {
+	f, err := os.OpenFile(filepath.Join(dir, "fragile.lock"), os.O_RDWR|os.O_CREATE, 0o600)
+	if err != nil {
+		return nil, err
+	}
+	if err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
+		f.Close()
+		if errors.Is(err, syscall.EWOULDBLOCK) {
+			return nil, fmt.Errorf("another Fragile instance is already using %s; quit it first", dir)
+		}
+		return nil, fmt.Errorf("locking %s: %w", dir, err)
+	}
+	return f, nil
 }
 
 // Bound methods. Session ids and agent ids are the database ids.

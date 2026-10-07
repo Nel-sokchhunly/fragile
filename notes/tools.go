@@ -211,7 +211,7 @@ func (s *Server) spawnSubagent(_ context.Context, a Agent, in spawnIn) (any, err
 	if strings.TrimSpace(in.Task) == "" {
 		return nil, errors.New("task must not be empty")
 	}
-	for _, sc := range in.Scopes { // validated, but only "session" exists in Phase 0, so nothing else to apply
+	for _, sc := range in.Scopes { // validated, but only "session" exists, so nothing else to apply
 		if err := checkScope(sc); err != nil {
 			return nil, err
 		}

@@ -358,6 +358,28 @@ func TestFailedFirstStartCanBeRetried(t *testing.T) {
 	waitFor(t, "reply", func() bool { return hasChat(a, se.ID, "assistant: echo: ") })
 }
 
+// An orchestrator that crashed on the first message without doing any work (e.g.
+// `claude` not logged in: only an error result) does not brick the session either.
+func TestCrashedWithoutWorkCanBeRetried(t *testing.T) {
+	a, _ := newTestApp(t, t.TempDir(), `IFS= read -r line
+printf '{"type":"system","subtype":"init"}\n'
+printf '{"type":"result","subtype":"success","is_error":true,"result":"Invalid API key · Please run /login"}\n'
+exit 1`)
+	se := startSession(t, a, "hello")
+	waitFor(t, "crash", func() bool {
+		s := snapshot(t, a, se.ID)
+		return len(s.Agents) == 1 && s.Agents[0].Status == "crashed" && hasChat(a, se.ID, "Please run /login")
+	})
+	a.runner.Command = writeScript(t, echoOrchestrator) // logged in now
+	if err := a.SendMessage(se.ID, "hello again"); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, "reply", func() bool { return hasChat(a, se.ID, "assistant: echo: ") })
+	if s := snapshot(t, a, se.ID); len(s.Agents) != 2 || s.Agents[1].Status != "running" {
+		t.Fatalf("agents = %+v", s.Agents)
+	}
+}
+
 // A send that fails leaves no chat message behind.
 func TestFailedSendLeavesNoChatMessage(t *testing.T) {
 	a, _ := newTestApp(t, t.TempDir(), echoOrchestrator)
@@ -482,6 +504,29 @@ func TestEscalationAnswerFlow(t *testing.T) {
 	}
 }
 
+// An answer that cannot be delivered leaves the escalation open, to be answered again.
+func TestUndeliveredAnswerReopensEscalation(t *testing.T) {
+	// Takes the first message, then closes its stdin (so writes fail) but keeps running.
+	a, _ := newTestApp(t, t.TempDir(), `IFS= read -r line
+exec 0<&-
+printf '{"type":"assistant","message":{"content":[{"type":"text","text":"deaf now"}]}}\n'
+printf '{"type":"result","subtype":"success","is_error":false,"result":"ok"}\n'
+sleep 300`)
+	se := startSession(t, a, "task")
+	waitFor(t, "reply", func() bool { return hasChat(a, se.ID, "assistant: deaf now") })
+	orch := snapshot(t, a, se.ID).Agents[0]
+	e, err := a.store.CreateEscalation(se.ID, orch.ID, "Postgres or SQLite?", "small app")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := a.AnswerEscalation(e.ID, "SQLite"); err == nil {
+		t.Fatal("answer to a deaf orchestrator succeeded")
+	}
+	if got, err := a.store.FindEscalation(e.ID); err != nil || got.Status != "open" || got.Answer != "" {
+		t.Fatalf("escalation after failed delivery = %+v, %v", got, err)
+	}
+}
+
 func TestUserNotesWakeAgents(t *testing.T) {
 	a, ev := newTestApp(t, t.TempDir(), echoOrchestrator)
 	se := startSession(t, a, "task")
@@ -565,6 +610,30 @@ func TestStartupRecovery(t *testing.T) {
 	if err := b.SendMessage(se.ID, "hi"); err == nil {
 		t.Error("message to a past session accepted")
 	}
+}
+
+// A second instance on the same data dir refuses to start rather than crash and
+// kill the first one's agents; once the first has closed, the dir is free again.
+func TestSecondInstanceRefused(t *testing.T) {
+	dir := t.TempDir()
+	a, _ := newTestApp(t, dir, echoOrchestrator)
+	se := startSession(t, a, "task")
+	waitFor(t, "reply", func() bool { return hasChat(a, se.ID, "assistant: echo: ") })
+
+	b := NewApp()
+	err := b.open(dir, (&events{}).emit)
+	if err == nil {
+		b.close()
+		t.Fatal("second instance opened the same data dir")
+	}
+	if !strings.Contains(err.Error(), "another Fragile instance") {
+		t.Fatalf("err = %v", err)
+	}
+	if s := snapshot(t, a, se.ID); s.Agents[0].Status != "running" || !a.runner.Running(s.Agents[0].ID) {
+		t.Fatalf("first instance's orchestrator disturbed: %+v", s.Agents[0])
+	}
+	a.close()
+	newTestApp(t, dir, "")
 }
 
 func TestDeriveStatus(t *testing.T) {
