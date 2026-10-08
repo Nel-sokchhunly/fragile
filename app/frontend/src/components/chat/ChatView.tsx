@@ -11,6 +11,7 @@ import {SentAttachments} from '@/components/chat/Attachments'
 import {Composer} from '@/components/chat/Composer'
 import {TerminalPane} from '@/components/chat/TerminalPane'
 import {Markdown} from '@/components/Markdown'
+import {StatusLabel} from '@/components/StatusLabel'
 import {api} from '@/lib/api'
 import {agentContext, agentLabel, agentState, agentSummary, formatElapsed, formatExact, formatTime, modelName} from '@/lib/format'
 import {focusComposer} from '@/lib/keys'
@@ -202,22 +203,22 @@ function ResumeNotice({sessionId}: {sessionId: number}) {
 const Pad = () => <div className="h-3"/>
 // Below the last row while the orchestrator is mid-turn, so a sent message never sits in silence.
 // Its own component so the 1s clock only ticks while it is shown.
-function Working({since}: {since: number}) {
+function Working({since, label = 'Working'}: {since: number; label?: string}) {
   const now = useNow()
   return (
     <div role="status" className="mx-auto flex max-w-[680px] items-center gap-2.5 px-6 py-1.5 text-[13px]">
       <span className="working-dots flex items-center gap-1" aria-hidden><span/><span/><span/></span>
-      <span className="working-shimmer font-medium">Working</span>
+      <span className="working-shimmer font-medium">{label}</span>
       <span className="font-mono text-xs text-muted-foreground tabular-nums">{formatElapsed(now - since)}</span>
     </div>
   )
 }
-const Footer = ({context}: {context?: {since: number}}) => (
-  <div className="pb-3">{context?.since ? <Working since={context.since}/> : null}</div>
+const Footer = ({context}: {context?: {since: number; label?: string}}) => (
+  <div className="pb-3">{context?.since ? <Working since={context.since} label={context.label}/> : null}</div>
 )
 
 // Keyed by session. Open tool groups live here, not in the row: Virtuoso unmounts rows scrolled out of view.
-function ChatList({sessionId, chat, since}: {sessionId: number; chat: ChatItem[]; since: number}) {
+function ChatList({sessionId, chat, since, label}: {sessionId: number; chat: ChatItem[]; since: number; label?: string}) {
   const rows = useMemo(() => groupTools(chat), [chat])
   const [openIds, setOpenIds] = useState<ReadonlySet<number>>(() => new Set())
   const toggle = useCallback((id: number, open: boolean) => setOpenIds((s) => {
@@ -231,9 +232,13 @@ function ChatList({sessionId, chat, since}: {sessionId: number; chat: ChatItem[]
       data={rows}
       computeItemKey={(_, r) => r.id}
       initialTopMostItemIndex={{index: 'LAST', align: 'end'}}
-      followOutput={(atBottom) => (atBottom ? 'smooth' : false)} // stop following once the user scrolls up
+      // Sending is explicit intent: always jump to the user's new row, even a few px off the bottom (a row grew late, the
+      // Working footer appeared). 'auto', not 'smooth': a smooth scroll loses the race with late height changes.
+      // Otherwise stop following once the user scrolls up.
+      followOutput={(atBottom) => (rows[rows.length - 1]?.kind === 'user' ? 'auto' : atBottom ? 'smooth' : false)}
+      atBottomThreshold={48} // late row growth (images, shiki) leaves the view slightly off the bottom
       itemContent={(_, r) => <Row sessionId={sessionId} item={r} open={r.kind === 'tools' && openIds.has(r.id)} onToggle={toggle}/>}
-      context={{since}}
+      context={{since, label}}
       components={{Header: Pad, Footer}}
       className="absolute inset-0"
     />
@@ -254,18 +259,16 @@ export function ChatView({sessionId}: {sessionId: number}) {
   const ctx = agentContext(lead)
   const st = session && STATUS_TEXT[session.status === 'done' && !session.agent_count ? 'new' : session.status]
   // Clicking the ctx figure compacts the orchestrator's context; the result arrives as a notice chat item.
-  const [compacting, setCompacting] = useState(false)
+  const compactingSince = useAppStore((s) => s.compacting[sessionId] ?? 0)
+  const compacting = running && compactingSince > 0
   const [compactError, setCompactError] = useState('')
   useEffect(() => setCompactError(''), [sessionId])
   const compact = async () => {
-    setCompacting(true)
     setCompactError('')
     try {
-      await api.compactSession(sessionId)
+      await useAppStore.getState().compactSession(sessionId)
     } catch (e) {
       setCompactError(String(e))
-    } finally {
-      setCompacting(false)
     }
   }
   // Esc interrupts the current turn (not inside a dialog) by clicking the composer's Interrupt button, so errors show there.
@@ -306,13 +309,13 @@ export function ChatView({sessionId}: {sessionId: number}) {
           <div className="flex min-w-0 items-baseline gap-2.5">
             <h1 className="min-w-0 truncate text-title font-semibold">{session?.title}</h1>
             <span className="shrink-0 text-xs text-muted-foreground">{session?.provider === 'codex' ? 'Codex' : 'Claude'}</span>
-            {st && <span className={cn('shrink-0 font-mono text-xs', st.cls)}>{st.label}</span>}
+            {st && <StatusLabel sessionId={sessionId} working={session?.status === 'working'} label={st.label} className={cn('shrink-0 font-mono text-xs', st.cls)}/>}
           </div>
           <div className="flex min-w-0 items-baseline gap-2 font-mono text-xs leading-4 text-muted-foreground">
             <span className="min-w-0 truncate" title={lead ? `pid ${lead.pid ?? '-'} · started ${formatExact(lead.created_at)}` : undefined}>
               orchestrator{lead ? ` ${lead.status === 'running' ? `pid ${lead.pid ?? '-'}` : agentState(lead)}` : ' not started'} · {lead?.model && <><span title={lead.model}>{modelName(lead.model)}</span> · </>}{ctx && <><button
               type="button" className={cn(ctx.cls, 'enabled:cursor-pointer enabled:hover:underline')} title="Compact context (/compact)"
-              onClick={compact} disabled={!running || working || compacting}
+              onClick={compact} disabled={!running || working || compactingSince > 0}
             >ctx {ctx.text}</button> · </>}{agentSummary(agents)}
             </span>
           </div>
@@ -327,14 +330,15 @@ export function ChatView({sessionId}: {sessionId: number}) {
         ) : chat.length === 0 ? (
           <p className="p-6 text-[13px] text-muted-foreground">{lead ? 'No messages.' : 'Describe the task to start the orchestrator.'}</p>
         ) : (
-          <ChatList key={sessionId} sessionId={sessionId} chat={chat} since={working ? busySince : 0}/>
+          <ChatList key={sessionId} sessionId={sessionId} chat={chat} since={compacting ? compactingSince : working ? busySince : 0} label={compacting ? 'Compacting' : undefined}/>
         )}
       </div>
       <Composer
         allowPDF={session?.provider !== 'codex'}
         onSend={(t, atts) => send(sessionId, t, atts)} label="Message the orchestrator" placeholder="Message the orchestrator"
         terminal={{open: terminalOpen, onToggle: toggleTerminal}}
-        onInterrupt={working ? () => api.interruptSession(sessionId) : undefined}
+        sessionId={sessionId} sendDisabled={compacting}
+        onInterrupt={working && !compacting ? () => api.interruptSession(sessionId) : undefined}
         disabledReason={loaded && lead && !running ? <ResumeNotice key={sessionId} sessionId={sessionId}/> : undefined}
       />
       {terminalOpen && <TerminalPane sessionId={sessionId}/>}

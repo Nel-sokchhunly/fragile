@@ -1,6 +1,7 @@
 import {PanelLeftClose, PanelLeftOpen, Plus, Trash2} from 'lucide-react'
 import {LimitLine} from '@/components/LimitLine'
 import {NewSessionDialog} from '@/components/NewSessionDialog'
+import {StatusLabel} from '@/components/StatusLabel'
 import {Button} from '@/components/ui/button'
 import {ScrollArea} from '@/components/ui/scroll-area'
 import {Tooltip, TooltipContent, TooltipTrigger} from '@/components/ui/tooltip'
@@ -38,7 +39,10 @@ function SessionRow({session, index, selected}: {session: Session; index: number
         )}
       >
         <span className="min-w-0 flex-1 truncate">{session.title}</span>
-        <span className={cn('shrink-0 font-mono text-xs group-focus-within:invisible group-hover:invisible', st.text)}>{st.label}</span>
+        <StatusLabel
+          sessionId={session.id} working={session.status === 'working'} label={st.label}
+          className={cn('shrink-0 font-mono text-xs group-focus-within:invisible group-hover:invisible', st.text)}
+        />
       </button>
       <Button
         variant="ghost" size="icon-xs" onClick={() => confirmDelete(session.id)} aria-label={`Delete session ${session.title}`}

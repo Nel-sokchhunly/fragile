@@ -232,7 +232,7 @@
 .working-dots > span:nth-child(3) { animation-delay: 0.3s; }
 @keyframes working-bounce { 0%, 60%, 100% { transform: translateY(0); opacity: 0.5; } 30% { transform: translateY(-4px); opacity: 1; } }
 .working-shimmer {
-  background: linear-gradient(90deg, var(--muted-foreground) 0%, var(--muted-foreground) 40%, var(--foreground) 50%, var(--muted-foreground) 60%, var(--muted-foreground) 100%) 0 0 / 250% 100%;
+  background: linear-gradient(90deg, var(--shimmer-base, var(--muted-foreground)) 0%, var(--shimmer-base, var(--muted-foreground)) 40%, var(--foreground) 50%, var(--shimmer-base, var(--muted-foreground)) 60%, var(--shimmer-base, var(--muted-foreground)) 100%) 0 0 / 250% 100%;
   background-clip: text; color: transparent; animation: working-shimmer 2s linear infinite;
 }
 @keyframes working-shimmer { from { background-position: 100% 0; } to { background-position: -150% 0; } }
