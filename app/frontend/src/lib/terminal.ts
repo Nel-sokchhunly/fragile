@@ -29,13 +29,12 @@ export const isToggleKey = (e: KeyboardEvent) => (e.ctrlKey || e.metaKey) && !e.
 // the DOM renderer, so fall back to whichever installed Nerd/Powerline font has them.
 const POWERLINE_FALLBACK = "'Symbols Nerd Font Mono', 'JetBrainsMono Nerd Font', 'MesloLGS NF', '0xProto Nerd Font Mono', 'Meslo LG M for Powerline', monospace"
 
-// The app is dark-only (no light theme exists), so one palette. Muted and warm; hues follow the status tokens in
-// index.css (green #34b233, amber #e39b0e, red #e5655a, blue #6ea8ef) toned down for the charcoal background.
-// "black" stays lighter than the background so agnoster-style dark text on coloured segments still reads.
+// The app is dark-only (no light theme exists), so one palette: Zed "Claude Code Inspired Dark", terminal.* keys.
+// "black" (#2d2314) stays lighter than the background so agnoster-style dark text on coloured segments still reads.
 const THEME = {
-  background: '#1f1f1e', foreground: '#f2f1ec', cursor: '#f2f1ec', cursorAccent: '#1f1f1e', selectionBackground: 'rgba(242, 241, 236, 0.25)',
-  black: '#2b2b29', red: '#d9695f', green: '#7fb069', yellow: '#d9a441', blue: '#6f9fd8', magenta: '#b58bc4', cyan: '#6fb3a8', white: '#c9c7bf',
-  brightBlack: '#6b6a64', brightRed: '#e8857b', brightGreen: '#98c785', brightYellow: '#e8bc62', brightBlue: '#8bb6e8', brightMagenta: '#c9a4d6', brightCyan: '#8cc9be', brightWhite: '#f2f1ec',
+  background: '#1a1614', foreground: '#f5e6d3', cursor: '#e67d22', cursorAccent: '#1a1614', selectionBackground: '#e67d2240',
+  black: '#2d2314', red: '#e06c75', green: '#98c379', yellow: '#e5c07b', blue: '#61afef', magenta: '#c678dd', cyan: '#56b6c2', white: '#f5e6d3',
+  brightBlack: '#5c5043', brightRed: '#ff7a85', brightGreen: '#a8d389', brightYellow: '#f5d08b', brightBlue: '#71bfff', brightMagenta: '#d688ed', brightCyan: '#66c6d2', brightWhite: '#ffffff',
 }
 
 function create(sid: number): Entry {

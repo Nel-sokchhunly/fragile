@@ -8,13 +8,13 @@ import {bundledLanguages} from 'shiki/langs'
 let hl: Promise<HighlighterCore> | undefined
 function highlighter() {
   hl ??= (async () => {
-    const [{createHighlighterCore}, {createJavaScriptRegexEngine}, light, dark] = await Promise.all([
+    const [{createHighlighterCore}, {createJavaScriptRegexEngine}, light, {claudeCodeInspiredDark}] = await Promise.all([
       import('shiki/core'),
       import('shiki/engine/javascript'),
       import('shiki/themes/github-light.mjs'),
-      import('shiki/themes/github-dark.mjs'),
+      import('./shiki-theme'),
     ])
-    return createHighlighterCore({themes: [light.default, dark.default], langs: [], engine: createJavaScriptRegexEngine()})
+    return createHighlighterCore({themes: [light.default, claudeCodeInspiredDark], langs: [], engine: createJavaScriptRegexEngine()})
   })()
   return hl
 }
@@ -34,7 +34,7 @@ export async function highlight(code: string, lang: string): Promise<string | nu
   // defaultColor:false emits --shiki-light/--shiki-dark vars; index.css picks one per theme.
   const html = h.codeToHtml(code, {
     lang: lang.toLowerCase(),
-    themes: {light: 'github-light', dark: 'github-dark'},
+    themes: {light: 'github-light', dark: 'claude-code-inspired-dark'},
     defaultColor: false,
   })
   cache.set(key, html)
