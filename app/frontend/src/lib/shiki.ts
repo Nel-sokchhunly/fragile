@@ -1,23 +1,9 @@
 import type {HighlighterCore} from 'shiki/core'
+import {bundledLanguages} from 'shiki/langs'
 
-// Lazy and light: shiki core + JS regex engine + two themes + only the grammars below, each
-// fetched on first use as its own chunk. Nothing here loads until a code block renders.
-const LANGS: Record<string, () => Promise<unknown>> = {
-  ts: () => import('shiki/langs/typescript.mjs'),
-  typescript: () => import('shiki/langs/typescript.mjs'),
-  tsx: () => import('shiki/langs/tsx.mjs'),
-  js: () => import('shiki/langs/javascript.mjs'),
-  javascript: () => import('shiki/langs/javascript.mjs'),
-  json: () => import('shiki/langs/json.mjs'),
-  bash: () => import('shiki/langs/bash.mjs'),
-  sh: () => import('shiki/langs/bash.mjs'),
-  go: () => import('shiki/langs/go.mjs'),
-  python: () => import('shiki/langs/python.mjs'),
-  diff: () => import('shiki/langs/diff.mjs'),
-  yaml: () => import('shiki/langs/yaml.mjs'),
-  sql: () => import('shiki/langs/sql.mjs'),
-}
-const ALIAS: Record<string, string> = {ts: 'typescript', js: 'javascript', sh: 'bash'}
+// Lazy and light: shiki core + JS regex engine + two themes. Every bundled grammar is available (keys
+// include aliases like ts/sh), but each is its own chunk fetched on first use; nothing loads until a code
+// block renders.
 
 let hl: Promise<HighlighterCore> | undefined
 function highlighter() {
@@ -38,16 +24,16 @@ const cache = new Map<string, string>()
 
 // Resolves to highlighted HTML, or null when the language is unsupported (caller shows plain text).
 export async function highlight(code: string, lang: string): Promise<string | null> {
-  const load = LANGS[lang]
+  const load = bundledLanguages[lang.toLowerCase() as keyof typeof bundledLanguages]
   if (!load) return null
   const key = `${lang}\0${code}`
   const hit = cache.get(key)
   if (hit) return hit
   const h = await highlighter()
-  await h.loadLanguage(load() as never)
+  await h.loadLanguage(load())
   // defaultColor:false emits --shiki-light/--shiki-dark vars; index.css picks one per theme.
   const html = h.codeToHtml(code, {
-    lang: ALIAS[lang] ?? lang,
+    lang: lang.toLowerCase(),
     themes: {light: 'github-light', dark: 'github-dark'},
     defaultColor: false,
   })
