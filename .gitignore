@@ -11,3 +11,7 @@ app/frontend/.vite/
 .claude/settings.local.json
 # created by local pnpm 10+; CI uses pnpm 9, which rejects it
 app/frontend/pnpm-workspace.yaml
+# emitted by `tsc -b`
+app/frontend/*.tsbuildinfo
+app/frontend/vite.config.js
+app/frontend/vite.config.d.ts
