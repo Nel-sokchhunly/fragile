@@ -23,15 +23,17 @@ export function GetAgentEvents(arg1:number,arg2:number,arg3:number):Promise<Arra
 
 export function GetAttachment(arg1:number,arg2:number,arg3:number):Promise<string>;
 
-export function GetChanges(arg1:number):Promise<main.Changes>;
+export function GetChanges(arg1:number,arg2:string):Promise<main.Changes>;
 
-export function GetFileDiff(arg1:number,arg2:string):Promise<main.FileDiff>;
+export function GetFileDiff(arg1:number,arg2:string,arg3:string):Promise<main.FileDiff>;
 
 export function GetRateLimit():Promise<main.RateLimit>;
 
 export function GetSession(arg1:number):Promise<main.SessionSnapshot>;
 
 export function InterruptSession(arg1:number):Promise<void>;
+
+export function ListRepos(arg1:number):Promise<Array<string>>;
 
 export function ListSessions():Promise<Array<notes.Session>>;
 

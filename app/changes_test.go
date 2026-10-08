@@ -47,7 +47,12 @@ func newChangesApp(t *testing.T, dir string) (*App, int64) {
 
 func changeMap(t *testing.T, a *App, id int64) map[string]ChangedFile {
 	t.Helper()
-	c, err := a.GetChanges(id)
+	return changeMapRepo(t, a, id, "")
+}
+
+func changeMapRepo(t *testing.T, a *App, id int64, repo string) map[string]ChangedFile {
+	t.Helper()
+	c, err := a.GetChanges(id, repo)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -120,7 +125,7 @@ func TestChanges(t *testing.T) {
 	put(t, dir, "a.txt", strings.Replace(tenLines, "l5", "L5", 1))
 
 	// hunk line numbers
-	d, err := a.GetFileDiff(id, "a.txt")
+	d, err := a.GetFileDiff(id, "", "a.txt")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -145,15 +150,15 @@ func TestChanges(t *testing.T) {
 	}
 
 	// deleted: all "-", no file lines
-	if d, err = a.GetFileDiff(id, "del.txt"); err != nil || len(d.Hunks) != 1 || len(d.Hunks[0].Lines) != 3 || len(d.FileLines) != 0 || d.Hunks[0].Lines[0].Kind != "-" {
+	if d, err = a.GetFileDiff(id, "", "del.txt"); err != nil || len(d.Hunks) != 1 || len(d.Hunks[0].Lines) != 3 || len(d.FileLines) != 0 || d.Hunks[0].Lines[0].Kind != "-" {
 		t.Errorf("del.txt diff = %+v, %v", d, err)
 	}
 	// renamed without edits: no hunks
-	if d, err = a.GetFileDiff(id, "renamed.txt"); err != nil || len(d.Hunks) != 0 || len(d.FileLines) != 5 {
+	if d, err = a.GetFileDiff(id, "", "renamed.txt"); err != nil || len(d.Hunks) != 0 || len(d.FileLines) != 5 {
 		t.Errorf("renamed.txt diff = %+v, %v", d, err)
 	}
 	// untracked: one all-"+" hunk
-	d, err = a.GetFileDiff(id, "u.txt")
+	d, err = a.GetFileDiff(id, "", "u.txt")
 	if err != nil || len(d.Hunks) != 1 || d.Hunks[0].NewLines != 2 || len(d.FileLines) != 2 {
 		t.Fatalf("u.txt diff = %+v, %v", d, err)
 	}
@@ -162,7 +167,7 @@ func TestChanges(t *testing.T) {
 	}
 	// binary, tracked and untracked
 	for _, p := range []string{"bin.dat", "ub.dat"} {
-		if d, err = a.GetFileDiff(id, p); err != nil || !d.Binary || len(d.Hunks) != 0 {
+		if d, err = a.GetFileDiff(id, "", p); err != nil || !d.Binary || len(d.Hunks) != 0 {
 			t.Errorf("%s diff = %+v, %v", p, d, err)
 		}
 	}
@@ -183,11 +188,11 @@ func TestChangesFreshRepo(t *testing.T) {
 	if f := m["g.txt"]; f.Status != "?" || f.Added != 3 {
 		t.Errorf("g.txt = %+v", f)
 	}
-	d, err := a.GetFileDiff(id, "f.txt")
+	d, err := a.GetFileDiff(id, "", "f.txt")
 	if err != nil || len(d.Hunks) != 1 || d.Hunks[0].Lines[0] != (DiffLine{"+", "f", 0, 1}) {
 		t.Errorf("f.txt diff = %+v, %v", d, err)
 	}
-	if d, err = a.GetFileDiff(id, "g.txt"); err != nil || len(d.FileLines) != 3 {
+	if d, err = a.GetFileDiff(id, "", "g.txt"); err != nil || len(d.FileLines) != 3 {
 		t.Errorf("g.txt diff = %+v, %v", d, err)
 	}
 }
@@ -195,7 +200,7 @@ func TestChangesFreshRepo(t *testing.T) {
 func TestChangesNotARepo(t *testing.T) {
 	dir := t.TempDir()
 	a, id := newChangesApp(t, dir)
-	c, err := a.GetChanges(id)
+	c, err := a.GetChanges(id, "")
 	if err != nil || c.IsRepo || c.Files == nil || len(c.Files) != 0 {
 		t.Errorf("GetChanges = %+v, %v", c, err)
 	}
@@ -210,11 +215,67 @@ func TestFileDiffRejectsBadPaths(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, p := range []string{"", ".", "..", "../outside.txt", "a/../../outside.txt", filepath.Join(filepath.Dir(dir), "outside.txt")} {
-		if d, err := a.GetFileDiff(id, p); err == nil {
+		if d, err := a.GetFileDiff(id, "", p); err == nil {
 			t.Errorf("GetFileDiff(%q) = %+v, want an error", p, d)
 		}
 	}
-	if _, err := a.GetFileDiff(id, "sub/../ok.txt"); err != nil {
+	if _, err := a.GetFileDiff(id, "", "sub/../ok.txt"); err != nil {
 		t.Errorf("clean in-dir path rejected: %v", err)
+	}
+}
+
+func TestChangesMultiRepo(t *testing.T) {
+	dir := t.TempDir()
+	a, id := newChangesApp(t, dir)
+	for _, r := range []string{"edubox-core", "edubox-app"} {
+		put(t, dir, r+"/f.txt", "f\n")
+		runGit(t, filepath.Join(dir, r), "init", "-q")
+	}
+	// none of these are listed: not a repo, node_modules, hidden
+	put(t, dir, "plain/f.txt", "x\n")
+	put(t, dir, "node_modules/.git", "")
+	put(t, dir, ".hid/.git", "")
+	put(t, dir, "edubox-app/only-app.txt", "a\n")
+	put(t, dir, "edubox-core/only-core.txt", "c\n")
+
+	repos, err := a.ListRepos(id)
+	if err != nil || len(repos) != 2 || repos[0] != "edubox-app" || repos[1] != "edubox-core" {
+		t.Fatalf("ListRepos = %v, %v", repos, err)
+	}
+	if c, err := a.GetChanges(id, ""); err != nil || c.IsRepo {
+		t.Errorf("parent GetChanges = %+v, %v", c, err)
+	}
+	for repo, other := range map[string]string{"edubox-app": "only-core.txt", "edubox-core": "only-app.txt"} {
+		m := changeMapRepo(t, a, id, repo)
+		if _, ok := m[other]; ok || len(m) != 2 {
+			t.Errorf("%s changes = %+v", repo, m)
+		}
+	}
+	if d, err := a.GetFileDiff(id, "edubox-app", "only-app.txt"); err != nil || len(d.FileLines) != 1 {
+		t.Errorf("repo file diff = %+v, %v", d, err)
+	}
+
+	// a work dir inside a repo is itself the only repo
+	dir2 := t.TempDir()
+	a2, id2 := newChangesApp(t, dir2)
+	runGit(t, dir2, "init", "-q")
+	if repos, err := a2.ListRepos(id2); err != nil || len(repos) != 1 || repos[0] != "" {
+		t.Errorf("ListRepos in repo = %v, %v", repos, err)
+	}
+}
+
+func TestChangesRejectsBadRepo(t *testing.T) {
+	dir := t.TempDir()
+	a, id := newChangesApp(t, dir)
+	put(t, dir, "r/f.txt", "f\n")
+	runGit(t, filepath.Join(dir, "r"), "init", "-q")
+	put(t, dir, "plain/f.txt", "x\n")
+	for _, r := range []string{".", "..", "../x", "plain", "nope", "r/../..", dir} {
+		if c, err := a.GetChanges(id, r); err == nil {
+			t.Errorf("GetChanges(%q) = %+v, want an error", r, c)
+		}
+		if d, err := a.GetFileDiff(id, r, "f.txt"); err == nil {
+			t.Errorf("GetFileDiff(%q) = %+v, want an error", r, d)
+		}
 	}
 }
