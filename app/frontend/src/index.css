@@ -127,15 +127,16 @@
     --text-secondary: oklch(0.371 0 0);
 
     /* status: sessions + agents (design palette; hues are shared, a light theme may override) */
-    --status-working: #34b233; /* green: working session, running agent */
+    --status-working: #98c379; /* Zed success/created: working session, running agent */
     --status-working-fg: var(--status-working);
     --status-exited: var(--muted-foreground); /* done agent */
     --status-done: var(--muted-foreground);
-    --status-needs-you: #e39b0e; /* amber: needs you, question */
+    /* Zed warning/conflict gold. Not "modified" (#ffb38a peach), which sits too close to the #e67d22 orange accent. */
+    --status-needs-you: #e5c07b; /* amber: needs you, question */
     --status-needs-you-fg: var(--status-needs-you);
-    --on-needs-you: black; /* text on a solid needs-you badge */
-    --status-crashed: #e5655a; /* red: crashed, blocker */
-    --status-decision: #6ea8ef; /* blue: decision, links, "you" */
+    --on-needs-you: #1a1614; /* text on a solid needs-you badge */
+    --status-crashed: #e06c75; /* Zed error/deleted: crashed, blocker */
+    --status-decision: #61afef; /* Zed info/renamed: decision, links, "you" */
     /* note types: text colour */
     --note-decision: var(--status-decision);
     --note-blocker: var(--status-crashed);
@@ -143,52 +144,52 @@
     --note-done: var(--status-working);
     --note-question: var(--status-needs-you);
     /* escalation block: solid dark amber with an amber border; text is --escalation-fg */
-    --escalation: #6e4605; /* border */
+    --escalation: #756242; /* border: warning.border at 45% over the background */
     --escalation-fg: var(--status-needs-you);
-    --escalation-bg: #3a2502;
-    --escalation-hover: #6e4605;
+    --escalation-bg: #3d3a2a; /* Zed warning.background */
+    --escalation-hover: #947c52; /* warning.border at 60% over the background */
 }
 
-/* Design palette: warm charcoal neutrals (docs/design/fragile-design-spec.md section 1). */
+/* Palette: Zed theme "Claude Code Inspired Dark" (warm brown neutrals, orange accent). */
 .dark {
     color-scheme: dark;
-    --background: #1f1f1e; /* surface-panel */
-    --foreground: #f2f1ec; /* text-primary */
-    --card: #1f1f1e;
-    --card-foreground: #f2f1ec;
-    --popover: #1f1f1e;
-    --popover-foreground: #f2f1ec;
-    --primary: #f2f1ec;
-    --primary-foreground: #141413;
-    --secondary: #262624;
-    --secondary-foreground: #f2f1ec;
-    --muted: #262624;
-    --muted-foreground: #8f8e89; /* text-muted */
-    --accent: #262624; /* surface-hover */
-    --accent-foreground: #f2f1ec;
-    --destructive: #e5655a;
-    --border: #2f2f2d; /* border-subtle: dividers */
-    --input: #55544f; /* border-strong: inputs */
-    --ring: #8f8e89;
-    --chart-1: #c9c8c2;
-    --chart-2: #8f8e89;
-    --chart-3: #55544f;
-    --chart-4: #3a3a37;
-    --chart-5: #2f2f2d;
-    --sidebar: #1c1c1b; /* surface-frame */
-    --sidebar-foreground: #f2f1ec;
-    --sidebar-primary: #f2f1ec;
-    --sidebar-primary-foreground: #141413;
-    --sidebar-accent: #262624;
-    --sidebar-accent-foreground: #f2f1ec;
-    --sidebar-border: #2f2f2d;
-    --sidebar-ring: #8f8e89;
-    --surface-sunken: #141413; /* user bubble, composer, code */
-    --surface-hover: #262624;
-    --border-subtle: #2f2f2d;
-    --border-default: #3a3a37; /* card borders */
-    --border-strong: #55544f; /* selected row, hovered card, inputs */
-    --text-secondary: #c9c8c2;
+    --background: #1a1614; /* background / panel.background */
+    --foreground: #f5e6d3; /* text */
+    --card: #1a1614;
+    --card-foreground: #f5e6d3;
+    --popover: #3d2a1a; /* elevated_surface.background */
+    --popover-foreground: #f5e6d3;
+    --primary: #e67d22; /* text.accent / border.focused */
+    --primary-foreground: #1a1614;
+    --secondary: #2d2314; /* surface.background / element.background */
+    --secondary-foreground: #f5e6d3;
+    --muted: #2d2314;
+    --muted-foreground: #c4a584; /* text.muted */
+    --accent: #3d2a1a; /* element.hover */
+    --accent-foreground: #f5e6d3;
+    --destructive: #e06c75; /* error */
+    --border: #3a2a1a; /* border.disabled: dividers */
+    --input: #5a4a3a; /* border.variant: inputs */
+    --ring: #e67d22; /* border.focused */
+    --chart-1: #c4a584;
+    --chart-2: #a08060; /* icon.muted */
+    --chart-3: #6a5a4a;
+    --chart-4: #4a3a2a;
+    --chart-5: #3d2a1a;
+    --sidebar: #1a1614; /* panel.background */
+    --sidebar-foreground: #f5e6d3;
+    --sidebar-primary: #e67d22;
+    --sidebar-primary-foreground: #1a1614;
+    --sidebar-accent: #3d2a1a;
+    --sidebar-accent-foreground: #f5e6d3;
+    --sidebar-border: #3a2a1a;
+    --sidebar-ring: #e67d22;
+    --surface-sunken: #131010; /* user bubble, composer, code: darker than background (no Zed key; derived) */
+    --surface-hover: #3d2a1a; /* element.hover */
+    --border-subtle: #3a2a1a;
+    --border-default: #4a3a2a; /* border: card borders, scrollbar thumb */
+    --border-strong: #5a4a3a; /* border.variant: hovered card, scrollbar hover */
+    --text-secondary: #ddc5a9; /* between text and text.muted (derived) */
 }
 
 @layer base {
