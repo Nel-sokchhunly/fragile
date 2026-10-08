@@ -190,7 +190,7 @@ Guiding principle: at swarm scale the question becomes "which few agents need at
 ### 4.3 Roadmap `[ROADMAP]`
 
 - **Session groups:** a shared board across sessions, while each keeps its internal board private.
-- **Additional agent backends** (Codex, OpenCode, etc.).
+- **Additional agent backends** (Codex, Antigravity agy, OpenCode, etc.).
 - **Sidebar hints** like "Orchestra · 4 agents · 1 needs you".
 - **Nested sub-agents** outside of swarm mode.
 

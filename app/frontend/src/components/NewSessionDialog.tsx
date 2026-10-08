@@ -13,7 +13,7 @@ export function NewSessionDialog({children, tip}: {children: ReactNode; tip?: st
   const createSession = useAppStore((s) => s.createSession)
   const [open, setOpen] = useState(false)
   const [name, setName] = useState('')
-  const [provider, setProvider] = useState<'claude' | 'codex'>('claude')
+  const [provider, setProvider] = useState<'claude' | 'codex' | 'agy'>('claude')
   const [dir, setDir] = useState('')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
@@ -61,15 +61,17 @@ export function NewSessionDialog({children, tip}: {children: ReactNode; tip?: st
             <Tip content={dir}><span className="min-w-0 flex-1 truncate font-mono text-xs text-muted-foreground">{dir || 'working dir required'}</span></Tip>
           </div>
           <div className="flex items-center gap-2 text-xs">Provider
-            <Select value={provider} onValueChange={(v) => setProvider(v as 'claude' | 'codex')}>
+            <Select value={provider} onValueChange={(v) => setProvider(v as 'claude' | 'codex' | 'agy')}>
               <SelectTrigger aria-label="Provider" className="w-44"><SelectValue/></SelectTrigger>
               <SelectContent>
                 <SelectItem value="claude">Claude Code</SelectItem>
                 <SelectItem value="codex">Codex (ChatGPT)</SelectItem>
+                <SelectItem value="agy">Antigravity (agy)</SelectItem>
               </SelectContent>
             </Select>
           </div>
           {provider === 'codex' && <p className="text-xs text-muted-foreground">Install Codex CLI 0.158+ and run <code>codex login</code> with ChatGPT. Your existing login is used; no API key needed. Text and image attachments supported.</p>}
+          {provider === 'agy' && <p className="text-xs text-muted-foreground">Requires Antigravity CLI (<code>agy</code>) installed and logged in. Your existing Google login is used; no API key needed.</p>}
           <Input autoFocus value={name} onChange={(e) => setName(e.target.value)} aria-label="Name" placeholder="name (default: directory name)"/>
           {error && <p role="alert" className="text-xs text-destructive">{error}</p>}
           <DialogFooter><Button type="submit" disabled={!ready}>{busy ? 'Starting...' : 'Create'}</Button></DialogFooter>

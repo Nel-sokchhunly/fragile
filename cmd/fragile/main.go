@@ -24,7 +24,7 @@ import (
 
 func main() {
 	var cfg notes.Config
-	flag.StringVar(&cfg.Provider, "provider", notes.ProviderClaude, "agent CLI provider: claude or codex (ChatGPT login)")
+	flag.StringVar(&cfg.Provider, "provider", notes.ProviderClaude, "agent CLI provider: claude, codex (ChatGPT login) or agy (Antigravity)")
 	flag.StringVar(&cfg.Addr, "addr", "127.0.0.1:7777", "listen address (keep it on localhost)")
 	flag.StringVar(&cfg.DBPath, "db", ".fragile/fragile.db", "SQLite database path")
 	flag.StringVar(&cfg.LogPath, "log", ".fragile/events.jsonl", "observation log path (tail -f it)")

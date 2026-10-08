@@ -36,7 +36,7 @@ Download the latest `build-N` release from [Releases](https://github.com/Nel-sok
   ```
 - **Linux** (`fragile-linux-amd64.tar.gz`): needs `libgtk-3` and `libwebkit2gtk-4.1`. Agents need `bubblewrap` and `socat` (`apt install bubblewrap socat`); without them a session refuses to start.
 
-Requires your selected provider's CLI on `PATH`, logged in: [`claude`](https://docs.claude.com/en/docs/claude-code) for Claude, or [Codex CLI](https://developers.openai.com/codex/cli) for Codex (setup below). Agents use your existing subscription login; no API key needed.
+Requires your selected provider's CLI on `PATH`, logged in: [`claude`](https://docs.claude.com/en/docs/claude-code) for Claude, [Codex CLI](https://developers.openai.com/codex/cli) for Codex, or Antigravity CLI (`agy`) for Antigravity (setup below). Agents use your existing subscription login; no API key needed.
 
 ## Build from source
 
@@ -78,6 +78,19 @@ FRAGILE_CODEX_E2E=1 go test -tags e2e ./app -run '^TestCodexAppE2E$' -v -timeout
 ```
 
 This exercises the app API and emitted UI events, not desktop clicks. If `CODEX_HOME` is set, it must select the CLI home where you signed in with ChatGPT.
+
+## Antigravity (agy) with your Google login
+
+Choose **Antigravity (agy)** in the new-session dialog. Install [Antigravity CLI](https://antigravity.google/docs/cli) (`agy`) on the same machine and log in with your Google Antigravity account. Fragile uses that CLI's existing credential storage; it does not ask for an API key, copy login tokens, or implement its own OAuth flow.
+
+The one-shot notes CLI also accepts:
+```bash
+fragile -provider agy -dir /path/to/project "your task"
+```
+
+The session's provider is persisted and used by both its orchestrator and all workers. Existing sessions stay on their configured provider. Antigravity runs through the CLI's stream adapter: persistent chat turns, Fragile notes/team MCP, escalation answers, text/image input, stop, interrupt, and saved-thread resume.
+
+**Models:** Model selection is provider-specific: omit `model` for the Antigravity default, or supply a shorthand alias (`flash`, `pro`, `flash_lite`) or a full Gemini/Antigravity model id. Claude aliases do not cross providers.
 
 ## Keyboard shortcuts
 

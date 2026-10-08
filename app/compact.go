@@ -38,7 +38,7 @@ func (a *App) CompactSession(sessionID int64) error {
 
 // compactNotice is the chat text for a compaction: "Context compacted (manual): 25.4k → 4.7k tokens".
 func compactNotice(c compactBoundary) string {
-	if c.Provider == "codex" {
+	if c.Provider == "codex" || c.Provider == "agy" {
 		return "Context compacted."
 	}
 	trigger := c.Metadata.Trigger

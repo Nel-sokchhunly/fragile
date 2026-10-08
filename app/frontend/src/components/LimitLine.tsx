@@ -13,14 +13,15 @@ const exact = (w: LimitWindow | null, now: number) =>
 export function LimitLine({compact}: {compact?: boolean}) {
   const limit = useAppStore((s) => s.limit)
   const now = useNow(60_000)
-  const isCodex = useAppStore((s) => s.sessions.find((x) => x.id === s.selectedSessionId)?.provider === 'codex')
+  const provider = useAppStore((s) => s.sessions.find((x) => x.id === s.selectedSessionId)?.provider)
   const five = limit?.five_hour ?? null
   const seven = limit?.seven_day ?? null
   const title = `5h: ${limitPct(five)}, ${exact(five, now)}\n7d: ${limitPct(seven)}, ${exact(seven, now)}`
   const part = (label: string, w: LimitWindow | null) => (
     <span className={usageCls(w?.utilization ?? 0)}>{label} {limitPct(w)}</span>
   )
-  if (isCodex) return <Tip content="Codex subscription limits are not reported here"><span className="px-3 font-mono text-xs text-muted-foreground">{compact ? '—' : 'Codex · limits unavailable'}</span></Tip>
+  if (provider === 'codex') return <Tip content="Codex subscription limits are not reported here"><span className="px-3 font-mono text-xs text-muted-foreground">{compact ? '—' : 'Codex · limits unavailable'}</span></Tip>
+  if (provider === 'agy') return <Tip content="Antigravity subscription limits are managed through Google Antigravity"><span className="px-3 font-mono text-xs text-muted-foreground">{compact ? '—' : 'Antigravity · limits unavailable'}</span></Tip>
   if (compact) return <Tip content={title} side="right"><span className={cn('font-mono text-mini', usageCls(five?.utilization ?? 0))}>{limitPct(five)}</span></Tip>
   return (
     <Tip content={title} side="top">

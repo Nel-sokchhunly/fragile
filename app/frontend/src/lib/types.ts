@@ -10,7 +10,7 @@ export type NoteStatus = 'open' | 'resolved'
 export type EscalationStatus = 'open' | 'answered'
 
 export type Session = {
-  provider: 'claude' | 'codex'
+  provider: 'claude' | 'codex' | 'agy'
   id: number
   title: string
   status: SessionStatus
