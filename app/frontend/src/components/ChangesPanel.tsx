@@ -1,0 +1,141 @@
+import {useCallback, useEffect, useMemo, useRef, useState} from 'react'
+import type {GroupedVirtuosoHandle} from 'react-virtuoso'
+import {RefreshCw} from 'lucide-react'
+import {Button} from '@/components/ui/button'
+import {Counts, DiffView, type DiffEntry, PathLabel, StatusLetter} from '@/components/DiffView'
+import {api} from '@/lib/api'
+import type {Changes} from '@/lib/types'
+import {cn} from '@/lib/utils'
+import {useAppStore} from '@/store/app'
+
+// Code changes: the session work dir's uncommitted changes (git diff HEAD + untracked). Mounted only while shown and
+// keyed by session, so polling stops when it is hidden or the session changes. Polls every POLL_MS only while agents
+// work (an orchestrator turn or a running sub-agent), refreshes once when they stop, when a `done` note lands, and on
+// the button; a file's diff is refetched only when its sig changed. Old data stays up
+// while new data loads, so nothing flashes.
+
+const POLL_MS = 3000
+const MAX_OPEN_LINES = 1000 // files with more diff lines start collapsed
+const CONCURRENT_DIFFS = 6
+
+export function ChangesPanel({sessionId}: {sessionId: number}) {
+  const [changes, setChanges] = useState<Changes | null>(null)
+  const [error, setError] = useState('')
+  const [loading, setLoading] = useState(false)
+  const [diffs, setDiffs] = useState<Record<string, DiffEntry>>({})
+  const [toggled, setToggled] = useState<Record<string, boolean>>({}) // the user's collapse choice per path
+  const list = useRef<GroupedVirtuosoHandle>(null)
+  const alive = useRef(true)
+  const busy = useRef(false)
+  const latest = useRef(changes)
+  latest.current = changes
+
+  const refresh = useCallback(async () => {
+    if (busy.current) return
+    busy.current = true
+    setLoading(true)
+    try {
+      const c = await api.getChanges(sessionId)
+      if (!alive.current) return
+      setError('')
+      setChanges((p) => (p && JSON.stringify(p) === JSON.stringify(c) ? p : c))
+      const paths = new Set(c.files.map((f) => f.path))
+      setDiffs((d) => (Object.keys(d).every((p) => paths.has(p)) ? d : Object.fromEntries(Object.entries(d).filter(([p]) => paths.has(p)))))
+    } catch (e) {
+      if (alive.current) setError(String(e))
+    } finally {
+      busy.current = false
+      if (alive.current) setLoading(false)
+    }
+  }, [sessionId])
+  useEffect(() => {
+    alive.current = true
+    return () => { alive.current = false }
+  }, [])
+  const working = useAppStore((s) => (s.busy[sessionId] ?? 0) > 0
+    || !!s.data[sessionId]?.agents.some((a) => a.role !== 'orchestrator' && a.status === 'running'))
+  useEffect(() => {
+    void refresh() // on open, and once more when agents stop (their last edits)
+    if (!working) return
+    const t = setInterval(refresh, POLL_MS)
+    return () => clearInterval(t)
+  }, [working, refresh])
+  // A sub-agent finishing usually means files changed.
+  const lastDone = useAppStore((s) => s.data[sessionId]?.notes.findLast((n) => n.type === 'done')?.id ?? 0)
+  useEffect(() => { if (lastDone) void refresh() }, [lastDone, refresh])
+
+  const files = changes?.files
+  const closed = useMemo(() => (files ?? []).map((f) =>
+    toggled[f.path] ?? (f.binary || f.added + f.removed > MAX_OPEN_LINES || !!diffs[f.path]?.diff?.too_large)), [files, toggled, diffs])
+
+  // Fetch diffs of open files whose sig moved. A reply for a sig that is no longer current is dropped.
+  const fetching = useRef(new Set<string>())
+  useEffect(() => {
+    const need = (files ?? []).filter((f, i) => !closed[i] && !f.binary && diffs[f.path]?.sig !== f.sig && !fetching.current.has(`${f.path}\0${f.sig}`))
+    if (!need.length) return
+    void (async () => {
+      for (let i = 0; i < need.length; i += CONCURRENT_DIFFS) {
+        await Promise.all(need.slice(i, i + CONCURRENT_DIFFS).map(async (f) => {
+          const key = `${f.path}\0${f.sig}`
+          fetching.current.add(key)
+          let e: DiffEntry
+          try { e = {sig: f.sig, diff: await api.getFileDiff(sessionId, f.path)} } catch (err) { e = {sig: f.sig, error: String(err)} }
+          fetching.current.delete(key)
+          if (!alive.current || latest.current?.files.find((x) => x.path === f.path)?.sig !== f.sig) return
+          setDiffs((d) => ({...d, [f.path]: e}))
+        }))
+      }
+    })()
+  }, [files, closed, diffs, sessionId])
+
+  const toggle = useCallback((path: string) => {
+    const i = latest.current?.files.findIndex((f) => f.path === path) ?? -1
+    if (i >= 0) setToggled((t) => ({...t, [path]: !closed[i]}))
+  }, [closed])
+  const total = (files ?? []).reduce((s, f) => ({added: s.added + f.added, removed: s.removed + f.removed}), {added: 0, removed: 0})
+
+  return (
+    <section className="flex h-full min-h-0 flex-col" aria-label="Code changes">
+      <header className="flex h-9 shrink-0 items-center gap-2 pr-1.5 pl-3">
+        <h2 className="text-title font-semibold">Changes</h2>
+        {files && files.length > 0 && (
+          <span className="min-w-0 flex-1 truncate font-mono text-xs text-muted-foreground">
+            {files.length} {files.length === 1 ? 'file' : 'files'} <Counts {...total}/>
+          </span>
+        )}
+        <Button variant="ghost" size="icon-sm" className="ml-auto" onClick={() => void refresh()} aria-label="Refresh changes" title="Refresh">
+          <RefreshCw className={cn(loading && 'animate-spin')}/>
+        </Button>
+      </header>
+      {error && <p role="alert" className="shrink-0 px-3 pb-1 text-[13px] break-words text-destructive">{error}</p>}
+      {!changes ? (
+        !error && <p className="px-3 text-[13px] text-muted-foreground">Loading...</p>
+      ) : !changes.is_repo ? (
+        <p className="px-3 text-[13px] text-muted-foreground">Not a git repository</p>
+      ) : !changes.files.length ? (
+        <p className="px-3 text-[13px] text-muted-foreground">No uncommitted changes</p>
+      ) : (
+        <>
+          <ul className="max-h-[30%] shrink-0 overflow-y-auto border-b pb-1">
+            {changes.files.map((f, i) => (
+              <li key={f.path}>
+                <button
+                  type="button" title={f.old_path ? `${f.old_path} → ${f.path}` : f.path}
+                  onClick={() => list.current?.scrollToIndex({groupIndex: i, align: 'start'})}
+                  className="flex w-full cursor-pointer items-center gap-1.5 px-3 py-px text-left text-[13px] leading-[18px] hover:bg-surface-hover"
+                >
+                  <StatusLetter s={f.status}/>
+                  <span className="min-w-0 flex-1 truncate font-mono text-xs"><PathLabel path={f.path}/></span>
+                  {f.binary ? <span className="shrink-0 text-xs text-muted-foreground">binary</span> : <Counts {...f}/>}
+                </button>
+              </li>
+            ))}
+          </ul>
+          <div className="relative min-h-0 flex-1">
+            <DiffView files={changes.files} diffs={diffs} closed={closed} onToggle={toggle} listRef={list}/>
+          </div>
+        </>
+      )}
+    </section>
+  )
+}

@@ -285,6 +285,7 @@ export function ChatView({sessionId}: {sessionId: number}) {
   }, [working])
   // Closing the terminal hands focus back to the composer; opening focuses the terminal (TerminalPane).
   const terminalOpen = useAppStore((s) => !!s.terminalOpen[sessionId])
+  const changesOpen = useAppStore((s) => !!s.changesOpen[sessionId])
   const toggleTerminal = useCallback(() => {
     const st = useAppStore.getState()
     const wasOpen = !!st.terminalOpen[sessionId]
@@ -337,6 +338,7 @@ export function ChatView({sessionId}: {sessionId: number}) {
         allowPDF={session?.provider !== 'codex'}
         onSend={(t, atts) => send(sessionId, t, atts)} label="Message the orchestrator" placeholder="Message the orchestrator"
         terminal={{open: terminalOpen, onToggle: toggleTerminal}}
+        changes={{open: changesOpen, onToggle: () => useAppStore.getState().toggleChanges(sessionId)}}
         sessionId={sessionId} sendDisabled={compacting}
         onInterrupt={working && !compacting ? () => api.interruptSession(sessionId) : undefined}
         disabledReason={loaded && lead && !running ? <ResumeNotice key={sessionId} sessionId={sessionId}/> : undefined}
