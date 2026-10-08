@@ -93,6 +93,7 @@ This exercises the app API and emitted UI events, not desktop clicks. If `CODEX_
 | `⌘⌫` | Delete the current session (asks first) |
 | `Enter` / `Shift+Enter` | Send / new line (message box, escalation answer) |
 | ``⌘` `` | Toggle the terminal |
+| `⌘`+click | Open a link in the terminal |
 | `?` | Show all keyboard shortcuts (also the keyboard button in the sidebar) |
 
 ## How it works

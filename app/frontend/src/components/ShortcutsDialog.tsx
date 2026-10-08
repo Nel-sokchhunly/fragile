@@ -17,6 +17,7 @@ const SHORTCUTS: [keys: string[], action: string][] = [
   [['Esc'], 'Interrupt the running turn'],
   [['Esc'], 'Agent output view → back to chat'],
   [[`${MOD}\``], 'Toggle the terminal'],
+  [[`${MOD}Click`], 'Open a link in the terminal'],
   [['?'], 'Show keyboard shortcuts'],
 ]
 
