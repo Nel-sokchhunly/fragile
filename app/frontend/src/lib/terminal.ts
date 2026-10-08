@@ -1,8 +1,10 @@
 import {Terminal} from '@xterm/xterm'
 import {FitAddon} from '@xterm/addon-fit'
+import {WebLinksAddon} from '@xterm/addon-web-links'
 import '@xterm/xterm/css/xterm.css'
 import {api} from '@/lib/api'
 import {on} from '@/lib/events'
+import {BrowserOpenURL} from '../../wailsjs/runtime/runtime'
 
 // One xterm per session, kept here (not in React) so hiding the pane or switching sessions keeps the screen
 // and scrollback. Each lives in its own div that TerminalPane appends into its container and detaches again.
@@ -37,6 +39,10 @@ const THEME = {
   brightBlack: '#5c5043', brightRed: '#ff7a85', brightGreen: '#a8d389', brightYellow: '#f5d08b', brightBlue: '#71bfff', brightMagenta: '#d688ed', brightCyan: '#66c6d2', brightWhite: '#ffffff',
 }
 
+// Ctrl+click (Cmd+click on macOS) opens a link in the browser, like VS Code's terminal; a plain click keeps
+// selecting text.
+const openLink = (ev: MouseEvent, uri: string) => { if (ev.ctrlKey || ev.metaKey) BrowserOpenURL(uri) }
+
 function create(sid: number): Entry {
   const mono = getComputedStyle(document.documentElement).getPropertyValue('--font-mono').trim()
   const term = new Terminal({
@@ -45,9 +51,11 @@ function create(sid: number): Entry {
     cursorBlink: true,
     scrollback: 5000,
     theme: THEME,
+    linkHandler: {activate: openLink}, // OSC 8 hyperlinks
   })
   const fit = new FitAddon()
   term.loadAddon(fit)
+  term.loadAddon(new WebLinksAddon(openLink)) // plain-text URLs
   const el = document.createElement('div')
   el.style.height = '100%'
   const e: Entry = {term, fit, el, exited: false, opening: null}
