@@ -6,6 +6,7 @@ import {Button} from '@/components/ui/button'
 import {ScrollArea} from '@/components/ui/scroll-area'
 import {Tip, Tooltip, TooltipContent, TooltipTrigger} from '@/components/ui/tooltip'
 import {MOD, SESSION_MOD} from '@/lib/keys'
+import {ShortcutsDialog} from '@/components/ShortcutsDialog'
 import type {Session, SessionStatus} from '@/lib/types'
 import {cn} from '@/lib/utils'
 import {useAppStore} from '@/store/app'
@@ -109,6 +110,7 @@ export function SessionsSidebar({onToggle}: {onToggle: () => void}) {
             {sessions.map((s, i) => <RailItem key={s.id} session={s} index={i} selected={s.id === selectedId}/>)}
           </div>
         </ScrollArea>
+        <ShortcutsDialog side="right"/>
         <LimitLine compact/>
       </nav>
     )
@@ -117,6 +119,7 @@ export function SessionsSidebar({onToggle}: {onToggle: () => void}) {
     <nav aria-label="Sessions" className="flex h-full flex-col bg-sidebar text-sidebar-foreground">
       <header className="flex h-[52px] shrink-0 items-center gap-0.5 pr-1.5 pl-3">
         <h2 className="flex-1 text-base font-semibold tracking-[-0.01em]">Fragile</h2>
+        <ShortcutsDialog/>
         {toggle}
         {add}
       </header>
