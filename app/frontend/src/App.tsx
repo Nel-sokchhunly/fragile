@@ -91,7 +91,7 @@ export default function App() {
     window.addEventListener('resize', fit)
     return () => { clearInterval(t); window.removeEventListener('resize', fit) }
   }, [sidebar])
-  // Keyboard: Cmd/Ctrl+B sidebar, +Backspace delete session, +K or "/" composer, +N new session, Esc agent view -> chat;
+  // Keyboard: Cmd/Ctrl+B sidebar, +Backspace delete session, +K or "/" composer, +N new session, Esc agent view -> chat, "?" shortcuts dialog;
   // Cmd+1..9 (macOS) or Alt+1..9 (Linux, Windows) selects the numbered session.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -109,6 +109,7 @@ export default function App() {
       else if (mod && key === 'backspace' && !typing && !dialogOpen && st.selectedSessionId != null) st.setConfirmDelete(st.selectedSessionId)
       else if (sessionMod && digit) { const s = st.sessions[digit - 1]; if (s) st.selectSession(s.id) }
       else if (key === 'escape' && st.selectedAgentId != null && !dialogOpen) st.selectAgent(null)
+      else if (e.key === '?' && !e.metaKey && !e.ctrlKey && !e.altKey && !typing && !dialogOpen) document.querySelector<HTMLElement>('[data-shortcuts]')?.click()
       else return
       e.preventDefault()
     }
