@@ -2,6 +2,7 @@ import {type DragEvent, type ReactNode, useEffect, useRef, useState} from 'react
 import {CornerDownLeft, FileDiff, Paperclip, Square, SquareTerminal} from 'lucide-react'
 import {Button} from '@/components/ui/button'
 import {Textarea} from '@/components/ui/textarea'
+import {Tooltip, TooltipContent, TooltipTrigger} from '@/components/ui/tooltip'
 import {FileChip, ImageChip} from '@/components/chat/Attachments'
 import {MAX_ATTACHMENTS, MAX_TOTAL, type PendingAttachment, readAttachment} from '@/lib/attachments'
 import {formatBytes} from '@/lib/format'
@@ -125,29 +126,44 @@ export function Composer({onSend, onInterrupt, placeholder, label, disabledReaso
         )}
         <div className="flex items-end gap-1.5">
           {terminal && (
-            <Button
-              variant="ghost" size="icon-sm" onClick={terminal.onToggle} aria-pressed={terminal.open} aria-label="Terminal" title={`Terminal (${MOD}\`)`}
-              className={cn('mb-1 shrink-0', terminal.open && 'bg-accent text-foreground')}
-            >
-              <SquareTerminal/>
-            </Button>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  variant="ghost" size="icon-sm" onClick={terminal.onToggle} aria-pressed={terminal.open} aria-label="Terminal"
+                  className={cn('mb-1 shrink-0', terminal.open && 'bg-accent text-foreground')}
+                >
+                  <SquareTerminal/>
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent side="top">{`Terminal (${MOD}\`)`}</TooltipContent>
+            </Tooltip>
           )}
           {changes && (
-            <Button
-              variant="ghost" size="icon-sm" onClick={changes.onToggle} aria-pressed={changes.open} aria-label="Code changes" title="Code changes"
-              className={cn('mb-1 shrink-0', changes.open && 'bg-accent text-foreground')}
-            >
-              <FileDiff/>
-            </Button>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  variant="ghost" size="icon-sm" onClick={changes.onToggle} aria-pressed={changes.open} aria-label="Code changes"
+                  className={cn('mb-1 shrink-0', changes.open && 'bg-accent text-foreground')}
+                >
+                  <FileDiff/>
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent side="top">Code changes</TooltipContent>
+            </Tooltip>
           )}
           <div className="relative min-w-0 flex-1">
             <input ref={input} type="file" accept={allowPDF ? undefined : "image/png,image/jpeg,image/gif,image/webp,text/*,.txt,.md,.json,.csv,.log"} multiple hidden onChange={(e) => { void add(e.target.files); e.target.value = '' }}/>
-            <Button
-              variant="ghost" size="icon-xs" onClick={() => input.current?.click()} disabled={off} aria-label="Attach files" title="Attach files (or drop / paste them)"
-              className="absolute bottom-2 left-2"
-            >
-              <Paperclip/>
-            </Button>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  variant="ghost" size="icon-xs" onClick={() => input.current?.click()} disabled={off} aria-label="Attach files"
+                  className="absolute bottom-2 left-2"
+                >
+                  <Paperclip/>
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent side="top">Attach files (or drop / paste them)</TooltipContent>
+            </Tooltip>
             <Textarea
               data-composer value={text} onChange={(e) => setText(e.target.value)} rows={1} aria-label={label} placeholder={placeholder} disabled={off}
               className={cn('max-h-40 min-h-10 resize-none rounded-[10px] py-[9px] pl-9', onInterrupt ? 'pr-16' : 'pr-10', dragging && 'border-ring')}
@@ -168,19 +184,29 @@ export function Composer({onSend, onInterrupt, placeholder, label, disabledReaso
             />
             <div className="absolute right-2 bottom-2 flex gap-0.5">
               {onInterrupt && (
-                <Button
-                  data-interrupt variant="ghost" size="icon-xs" onClick={interrupt} disabled={interrupting} aria-label="Interrupt" title="Interrupt (Esc)"
-                  className="text-foreground"
-                >
-                  <Square className="fill-current"/>
-                </Button>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button
+                      data-interrupt variant="ghost" size="icon-xs" onClick={interrupt} disabled={interrupting} aria-label="Interrupt"
+                      className="text-foreground"
+                    >
+                      <Square className="fill-current"/>
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent side="top">Interrupt (Esc)</TooltipContent>
+                </Tooltip>
               )}
-              <Button
-                variant="ghost" size="icon-xs" onClick={send} disabled={!ready} aria-label="Send message" title="Send (Enter, Shift+Enter for newline)"
-                className={cn(ready && 'text-foreground')}
-              >
-                <CornerDownLeft/>
-              </Button>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    variant="ghost" size="icon-xs" onClick={send} disabled={!ready} aria-label="Send message"
+                    className={cn(ready && 'text-foreground')}
+                  >
+                    <CornerDownLeft/>
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent side="top">Send (Enter, Shift+Enter for newline)</TooltipContent>
+              </Tooltip>
             </div>
           </div>
         </div>

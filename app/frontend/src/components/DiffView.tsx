@@ -1,6 +1,7 @@
 import {type CSSProperties, type Ref, memo, useEffect, useMemo, useRef, useState} from 'react'
 import {GroupedVirtuoso, type GroupedVirtuosoHandle, type ListRange} from 'react-virtuoso'
 import {ChevronRight} from 'lucide-react'
+import {Tooltip, TooltipContent, TooltipTrigger} from '@/components/ui/tooltip'
 import {type Token, tokenize} from '@/lib/shiki'
 import type {ChangedFile, ChangeStatus, DiffLine, FileDiff} from '@/lib/types'
 import {cn} from '@/lib/utils'
@@ -103,15 +104,20 @@ const LineRow = memo(function LineRow({line, nw, tokens}: {line: DiffLine; nw: n
 
 function FileHeader({f, closed, onToggle}: {f: ChangedFile; closed: boolean; onToggle: () => void}) {
   return (
-    <button
-      type="button" onClick={onToggle} aria-expanded={!closed} title={f.old_path ? `${f.old_path} → ${f.path}` : f.path}
-      className="flex h-7 w-full cursor-pointer items-center gap-1.5 border-y border-border-default bg-secondary pr-2 pl-1 text-left text-xs hover:bg-surface-hover"
-    >
-      <ChevronRight className={cn('size-3.5 shrink-0 text-muted-foreground transition-transform', !closed && 'rotate-90')}/>
-      <StatusLetter s={f.status}/>
-      <span className="min-w-0 flex-1 truncate font-mono"><PathLabel path={f.path}/></span>
-      {f.binary ? <span className="shrink-0 text-muted-foreground">binary</span> : <Counts {...f}/>}
-    </button>
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <button
+          type="button" onClick={onToggle} aria-expanded={!closed}
+          className="flex h-7 w-full cursor-pointer items-center gap-1.5 border-y border-border-default bg-secondary pr-2 pl-1 text-left text-xs hover:bg-surface-hover"
+        >
+          <ChevronRight className={cn('size-3.5 shrink-0 text-muted-foreground transition-transform', !closed && 'rotate-90')}/>
+          <StatusLetter s={f.status}/>
+          <span className="min-w-0 flex-1 truncate font-mono"><PathLabel path={f.path}/></span>
+          {f.binary ? <span className="shrink-0 text-muted-foreground">binary</span> : <Counts {...f}/>}
+        </button>
+      </TooltipTrigger>
+      <TooltipContent side="bottom" className="font-mono break-all">{f.old_path ? `${f.old_path} → ${f.path}` : f.path}</TooltipContent>
+    </Tooltip>
   )
 }
 

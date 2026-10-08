@@ -4,7 +4,7 @@ import {NewSessionDialog} from '@/components/NewSessionDialog'
 import {StatusLabel} from '@/components/StatusLabel'
 import {Button} from '@/components/ui/button'
 import {ScrollArea} from '@/components/ui/scroll-area'
-import {Tooltip, TooltipContent, TooltipTrigger} from '@/components/ui/tooltip'
+import {Tip, Tooltip, TooltipContent, TooltipTrigger} from '@/components/ui/tooltip'
 import {MOD} from '@/lib/keys'
 import type {Session, SessionStatus} from '@/lib/types'
 import {cn} from '@/lib/utils'
@@ -30,20 +30,21 @@ function SessionRow({session, index, selected}: {session: Session; index: number
   // The trash icon takes the status's place while the row is hovered or focused.
   return (
     <div className="group relative">
-      <button
-        type="button" onClick={() => select(session.id)} aria-current={selected ? 'true' : undefined}
-        title={`#${session.id}${session.work_dir ? ` ${session.work_dir}` : ''}${hint(index)}`}
-        className={cn(
-          'flex w-full items-baseline gap-2 rounded-lg border border-transparent px-2 py-1 text-left hover:bg-sidebar-accent focus-visible:border-border-strong focus-visible:outline-none',
-          selected && 'border-border-strong bg-background hover:bg-background',
-        )}
-      >
-        <span className="min-w-0 flex-1 truncate">{session.title}</span>
-        <StatusLabel
-          sessionId={session.id} working={session.status === 'working'} label={st.label}
-          className={cn('shrink-0 font-mono text-xs group-focus-within:invisible group-hover:invisible', st.text)}
-        />
-      </button>
+      <Tip content={`#${session.id}${session.work_dir ? ` ${session.work_dir}` : ''}${hint(index)}`} side="right">
+        <button
+          type="button" onClick={() => select(session.id)} aria-current={selected ? 'true' : undefined}
+          className={cn(
+            'flex w-full items-baseline gap-2 rounded-lg border border-transparent px-2 py-1 text-left hover:bg-sidebar-accent focus-visible:border-border-strong focus-visible:outline-none',
+            selected && 'border-border-strong bg-background hover:bg-background',
+          )}
+        >
+          <span className="min-w-0 flex-1 truncate">{session.title}</span>
+          <StatusLabel
+            sessionId={session.id} working={session.status === 'working'} label={st.label}
+            className={cn('shrink-0 font-mono text-xs group-focus-within:invisible group-hover:invisible', st.text)}
+          />
+        </button>
+      </Tip>
       <Button
         variant="ghost" size="icon-xs" onClick={() => confirmDelete(session.id)} aria-label={`Delete session ${session.title}`}
         className="absolute top-1/2 right-1 -translate-y-1/2 opacity-0 group-focus-within:opacity-100 group-hover:opacity-100"

@@ -2,6 +2,8 @@ import {useCallback, useEffect, useMemo, useRef, useState} from 'react'
 import type {GroupedVirtuosoHandle} from 'react-virtuoso'
 import {RefreshCw} from 'lucide-react'
 import {Button} from '@/components/ui/button'
+import {Select, SelectContent, SelectItem, SelectTrigger, SelectValue} from '@/components/ui/select'
+import {Tooltip, TooltipContent, TooltipTrigger} from '@/components/ui/tooltip'
 import {Counts, DiffView, type DiffEntry, PathLabel, StatusLetter} from '@/components/DiffView'
 import {api} from '@/lib/api'
 import type {Changes} from '@/lib/types'
@@ -136,21 +138,28 @@ export function ChangesPanel({sessionId}: {sessionId: number}) {
       <header className="flex h-9 shrink-0 items-center gap-2 pr-1.5 pl-3">
         <h2 className="text-title font-semibold">Changes</h2>
         {repos.length > 1 && repo !== null && (
-          <select
-            value={repo} onChange={(e) => select(e.target.value)} aria-label="Repository" title="Repository"
-            className="h-6 min-w-0 max-w-[40%] shrink cursor-pointer truncate rounded-md border bg-background px-1 font-mono text-xs text-foreground"
-          >
-            {repos.map((r) => <option key={r} value={r}>{r}</option>)}
-          </select>
+          <Select value={repo} onValueChange={select}>
+            <SelectTrigger size="sm" aria-label="Repository" className="h-6 min-w-0 max-w-[40%] shrink gap-1 px-1.5 py-0 font-mono text-xs">
+              <SelectValue className="truncate"/>
+            </SelectTrigger>
+            <SelectContent>
+              {repos.map((r) => <SelectItem key={r} value={r} className="font-mono text-xs">{r}</SelectItem>)}
+            </SelectContent>
+          </Select>
         )}
         {files && files.length > 0 && (
           <span className="min-w-0 flex-1 truncate font-mono text-xs text-muted-foreground">
             {files.length} {files.length === 1 ? 'file' : 'files'} <Counts {...total}/>
           </span>
         )}
-        <Button variant="ghost" size="icon-sm" className="ml-auto" onClick={() => void refresh(true)} aria-label="Refresh changes" title="Refresh">
-          <RefreshCw className={cn(loading && 'animate-spin')}/>
-        </Button>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button variant="ghost" size="icon-sm" className="ml-auto" onClick={() => void refresh(true)} aria-label="Refresh changes">
+              <RefreshCw className={cn(loading && 'animate-spin')}/>
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent>Refresh</TooltipContent>
+        </Tooltip>
       </header>
       {error && <p role="alert" className="shrink-0 px-3 pb-1 text-[13px] break-words text-destructive">{error}</p>}
       {!changes ? (
@@ -164,15 +173,20 @@ export function ChangesPanel({sessionId}: {sessionId: number}) {
           <ul className="max-h-[30%] shrink-0 overflow-y-auto border-b pb-1">
             {changes.files.map((f, i) => (
               <li key={f.path}>
-                <button
-                  type="button" title={f.old_path ? `${f.old_path} → ${f.path}` : f.path}
-                  onClick={() => list.current?.scrollToIndex({groupIndex: i, align: 'start'})}
-                  className="flex w-full cursor-pointer items-center gap-1.5 px-3 py-px text-left text-[13px] leading-[18px] hover:bg-surface-hover"
-                >
-                  <StatusLetter s={f.status}/>
-                  <span className="min-w-0 flex-1 truncate font-mono text-xs"><PathLabel path={f.path}/></span>
-                  {f.binary ? <span className="shrink-0 text-xs text-muted-foreground">binary</span> : <Counts {...f}/>}
-                </button>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <button
+                      type="button"
+                      onClick={() => list.current?.scrollToIndex({groupIndex: i, align: 'start'})}
+                      className="flex w-full cursor-pointer items-center gap-1.5 px-3 py-px text-left text-[13px] leading-[18px] hover:bg-surface-hover"
+                    >
+                      <StatusLetter s={f.status}/>
+                      <span className="min-w-0 flex-1 truncate font-mono text-xs"><PathLabel path={f.path}/></span>
+                      {f.binary ? <span className="shrink-0 text-xs text-muted-foreground">binary</span> : <Counts {...f}/>}
+                    </button>
+                  </TooltipTrigger>
+                  <TooltipContent side="bottom" className="font-mono break-all">{f.old_path ? `${f.old_path} → ${f.path}` : f.path}</TooltipContent>
+                </Tooltip>
               </li>
             ))}
           </ul>

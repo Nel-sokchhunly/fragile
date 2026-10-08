@@ -1,6 +1,7 @@
 import {useEffect, useState} from 'react'
 import {FileText, X} from 'lucide-react'
 import {Dialog, DialogContent, DialogTitle} from '@/components/ui/dialog'
+import {Tip} from '@/components/ui/tooltip'
 import {api} from '@/lib/api'
 import {formatBytes} from '@/lib/format'
 import type {AttachmentInfo} from '@/lib/types'
@@ -47,17 +48,19 @@ export function FileChip({name, size, mediaType = '', source, onRemove}: {name: 
     </>
   )
   return (
-    <div className="flex h-7 max-w-56 items-center gap-1.5 rounded-md border border-border-default px-2 text-xs text-text-secondary" title={name}>
-      {source && isText(mediaType)
-        ? <button type="button" onClick={() => setOpen(true)} aria-label={`Preview ${name}`} className="flex min-w-0 flex-1 items-center gap-1.5 self-stretch">{body}</button>
-        : <div className="flex min-w-0 flex-1 items-center gap-1.5">{body}</div>}
-      {onRemove && (
-        <button type="button" onClick={(e) => { e.stopPropagation(); onRemove() }} aria-label={`Remove ${name}`} className="-mr-1 shrink-0 rounded-sm p-0.5 text-muted-foreground hover:bg-accent hover:text-foreground">
-          <X className="size-3"/>
-        </button>
-      )}
-      {open && source && <PreviewDialog name={name} image={false} source={source} onClose={() => setOpen(false)}/>}
-    </div>
+    <Tip content={name}>
+      <div className="flex h-7 max-w-56 items-center gap-1.5 rounded-md border border-border-default px-2 text-xs text-text-secondary">
+        {source && isText(mediaType)
+          ? <button type="button" onClick={() => setOpen(true)} aria-label={`Preview ${name}`} className="flex min-w-0 flex-1 items-center gap-1.5 self-stretch">{body}</button>
+          : <div className="flex min-w-0 flex-1 items-center gap-1.5">{body}</div>}
+        {onRemove && (
+          <button type="button" onClick={(e) => { e.stopPropagation(); onRemove() }} aria-label={`Remove ${name}`} className="-mr-1 shrink-0 rounded-sm p-0.5 text-muted-foreground hover:bg-accent hover:text-foreground">
+            <X className="size-3"/>
+          </button>
+        )}
+        {open && source && <PreviewDialog name={name} image={false} source={source} onClose={() => setOpen(false)}/>}
+      </div>
+    </Tip>
   )
 }
 
@@ -65,19 +68,21 @@ export function FileChip({name, size, mediaType = '', source, onRemove}: {name: 
 export function ImageChip({src, name, onRemove}: {src?: string; name: string; onRemove?: () => void}) {
   const [open, setOpen] = useState(false)
   return (
-    <div className="relative size-14 shrink-0 overflow-hidden rounded-md border border-border-default bg-surface-sunken" title={name}>
-      {src && (
-        <button type="button" onClick={() => setOpen(true)} aria-label={`Preview ${name}`} className="size-full">
-          <img src={src} alt={name} className="size-full object-cover"/>
-        </button>
-      )}
-      {onRemove && (
-        <button type="button" onClick={(e) => { e.stopPropagation(); onRemove() }} aria-label={`Remove ${name}`} className="absolute top-0.5 right-0.5 rounded-sm bg-background/80 p-0.5 text-muted-foreground hover:text-foreground">
-          <X className="size-3"/>
-        </button>
-      )}
-      {open && src && <PreviewDialog name={name} image source={src} onClose={() => setOpen(false)}/>}
-    </div>
+    <Tip content={name}>
+      <div className="relative size-14 shrink-0 overflow-hidden rounded-md border border-border-default bg-surface-sunken">
+        {src && (
+          <button type="button" onClick={() => setOpen(true)} aria-label={`Preview ${name}`} className="size-full">
+            <img src={src} alt={name} className="size-full object-cover"/>
+          </button>
+        )}
+        {onRemove && (
+          <button type="button" onClick={(e) => { e.stopPropagation(); onRemove() }} aria-label={`Remove ${name}`} className="absolute top-0.5 right-0.5 rounded-sm bg-background/80 p-0.5 text-muted-foreground hover:text-foreground">
+            <X className="size-3"/>
+          </button>
+        )}
+        {open && src && <PreviewDialog name={name} image source={src} onClose={() => setOpen(false)}/>}
+      </div>
+    </Tip>
   )
 }
 
@@ -103,12 +108,14 @@ function SentImage({sessionId, itemId, index, a}: {sessionId: number; itemId: nu
   }, [k, src, sessionId, itemId, index])
   if (failed) return <FileChip name={a.name} size={a.size}/>
   return (
-    <div className="h-24 overflow-hidden rounded-md border border-border-default bg-surface-sunken" title={a.name}>
-      {src
-        ? <button type="button" onClick={() => setOpen(true)} aria-label={`Preview ${a.name}`} className="h-full"><img src={src} alt={a.name} className="h-full max-w-60 object-contain"/></button>
-        : <div className="h-full w-24"/>}
-      {open && src && <PreviewDialog name={a.name} image source={src} onClose={() => setOpen(false)}/>}
-    </div>
+    <Tip content={a.name}>
+      <div className="h-24 overflow-hidden rounded-md border border-border-default bg-surface-sunken">
+        {src
+          ? <button type="button" onClick={() => setOpen(true)} aria-label={`Preview ${a.name}`} className="h-full"><img src={src} alt={a.name} className="h-full max-w-60 object-contain"/></button>
+          : <div className="h-full w-24"/>}
+        {open && src && <PreviewDialog name={a.name} image source={src} onClose={() => setOpen(false)}/>}
+      </div>
+    </Tip>
   )
 }
 

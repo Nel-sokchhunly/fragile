@@ -6,7 +6,7 @@ import {Button} from '@/components/ui/button'
 import {Collapsible, CollapsibleContent, CollapsibleTrigger} from '@/components/ui/collapsible'
 import {Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger} from '@/components/ui/dialog'
 import {Textarea} from '@/components/ui/textarea'
-import {Tooltip, TooltipContent, TooltipTrigger} from '@/components/ui/tooltip'
+import {Tip, Tooltip, TooltipContent, TooltipTrigger} from '@/components/ui/tooltip'
 import {SentAttachments} from '@/components/chat/Attachments'
 import {Composer} from '@/components/chat/Composer'
 import {TerminalPane} from '@/components/chat/TerminalPane'
@@ -92,11 +92,13 @@ function groupTools(chat: ChatItem[]): ChatRow[] {
 
 function ToolLine({item}: {item: ToolItem}) {
   return (
-    <div className="flex items-center gap-1.5 text-text-secondary" title={`${item.name} ${item.summary}`}>
-      <Wrench className="size-3 shrink-0 text-muted-foreground" aria-hidden/>
-      <span className="shrink-0 font-mono text-xs">{item.name}</span>
-      <span className="min-w-0 flex-1 truncate font-mono text-xs text-muted-foreground">{item.summary}</span>
-    </div>
+    <Tip content={`${item.name} ${item.summary}`}>
+      <div className="flex items-center gap-1.5 text-text-secondary">
+        <Wrench className="size-3 shrink-0 text-muted-foreground" aria-hidden/>
+        <span className="shrink-0 font-mono text-xs">{item.name}</span>
+        <span className="min-w-0 flex-1 truncate font-mono text-xs text-muted-foreground">{item.summary}</span>
+      </div>
+    </Tip>
   )
 }
 
@@ -105,12 +107,14 @@ function ToolGroup({items, open, onOpenChange}: {items: ToolItem[]; open: boolea
   const names = [...new Set(items.map((t) => t.name))].join(', ')
   return (
     <Collapsible open={open} onOpenChange={onOpenChange}>
-      <CollapsibleTrigger className="flex w-full items-center gap-1.5 text-left text-text-secondary hover:text-foreground" title={names}>
-        <Wrench className="size-3 shrink-0 text-muted-foreground" aria-hidden/>
-        <span className="shrink-0 font-mono text-xs">{items.length} tool calls</span>
-        <span className="min-w-0 flex-1 truncate font-mono text-xs text-muted-foreground">{names}</span>
-        <ChevronRight className={cn('size-3 shrink-0 text-muted-foreground transition-transform', open && 'rotate-90')} aria-hidden/>
-      </CollapsibleTrigger>
+      <Tip content={names}>
+        <CollapsibleTrigger className="flex w-full items-center gap-1.5 text-left text-text-secondary hover:text-foreground">
+          <Wrench className="size-3 shrink-0 text-muted-foreground" aria-hidden/>
+          <span className="shrink-0 font-mono text-xs">{items.length} tool calls</span>
+          <span className="min-w-0 flex-1 truncate font-mono text-xs text-muted-foreground">{names}</span>
+          <ChevronRight className={cn('size-3 shrink-0 text-muted-foreground transition-transform', open && 'rotate-90')} aria-hidden/>
+        </CollapsibleTrigger>
+      </Tip>
       <CollapsibleContent>
         <div className="grid gap-1 pt-1 pl-[18px]">{items.map((t) => <ToolLine key={t.id} item={t}/>)}</div>
       </CollapsibleContent>
@@ -124,7 +128,7 @@ const Row = memo(function Row({sessionId, item, open, onToggle}: {sessionId: num
     <div className="mx-auto max-w-[680px] px-6 py-[5px]">
       {item.kind === 'user' && (
         <div className="group flex items-end justify-end gap-2">
-          <time className="font-mono text-mini leading-5 text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100" dateTime={item.at} title={formatExact(item.at)}>{formatTime(item.at)}</time>
+          <Tip content={formatExact(item.at)}><time className="font-mono text-mini leading-5 text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100" dateTime={item.at}>{formatTime(item.at)}</time></Tip>
           <div className="grid max-w-[80%] min-w-0 justify-items-end gap-1">
             {!!item.attachments?.length && <SentAttachments sessionId={sessionId} itemId={item.id} attachments={item.attachments}/>}
             {item.text && <div className="max-w-full rounded-lg bg-surface-sunken px-3 py-1.5 whitespace-pre-wrap break-words">{item.text}</div>}
@@ -136,11 +140,13 @@ const Row = memo(function Row({sessionId, item, open, onToggle}: {sessionId: num
       {item.kind === 'tools' && <ToolGroup items={item.items} open={open} onOpenChange={(o) => onToggle(item.id, o)}/>}
       {item.kind === 'escalation' && <EscalationBlock sessionId={sessionId} item={item}/>}
       {item.kind === 'notice' && (
-        <div role="note" className="flex items-center gap-3 text-xs text-muted-foreground" title={formatExact(item.at)}>
-          <span className="h-px flex-1 bg-border" aria-hidden/>
-          <span className="shrink-0">{item.text}</span>
-          <span className="h-px flex-1 bg-border" aria-hidden/>
-        </div>
+        <Tip content={formatExact(item.at)}>
+          <div role="note" className="flex items-center gap-3 text-xs text-muted-foreground">
+            <span className="h-px flex-1 bg-border" aria-hidden/>
+            <span className="shrink-0">{item.text}</span>
+            <span className="h-px flex-1 bg-border" aria-hidden/>
+          </div>
+        </Tip>
       )}
     </div>
   )
@@ -313,12 +319,14 @@ export function ChatView({sessionId}: {sessionId: number}) {
             {st && <StatusLabel sessionId={sessionId} working={session?.status === 'working'} label={st.label} className={cn('shrink-0 font-mono text-xs', st.cls)}/>}
           </div>
           <div className="flex min-w-0 items-baseline gap-2 font-mono text-xs leading-4 text-muted-foreground">
-            <span className="min-w-0 truncate" title={lead ? `pid ${lead.pid ?? '-'} · started ${formatExact(lead.created_at)}` : undefined}>
-              orchestrator{lead ? ` ${lead.status === 'running' ? `pid ${lead.pid ?? '-'}` : agentState(lead)}` : ' not started'} · {lead?.model && <><span title={lead.model}>{modelName(lead.model)}</span> · </>}{ctx && <><button
-              type="button" className={cn(ctx.cls, 'enabled:cursor-pointer enabled:hover:underline')} title="Compact context (/compact)"
-              onClick={compact} disabled={!running || working || compactingSince > 0}
-            >ctx {ctx.text}</button> · </>}{agentSummary(agents)}
-            </span>
+            <Tip content={lead ? `pid ${lead.pid ?? '-'} · started ${formatExact(lead.created_at)}` : undefined}>
+              <span className="min-w-0 truncate">
+                orchestrator{lead ? ` ${lead.status === 'running' ? `pid ${lead.pid ?? '-'}` : agentState(lead)}` : ' not started'} · {lead?.model && <><Tip content={lead.model}><span>{modelName(lead.model)}</span></Tip> · </>}{ctx && <><Tip content="Compact context (/compact)"><span><button
+                type="button" className={cn(ctx.cls, 'enabled:cursor-pointer enabled:hover:underline')}
+                onClick={compact} disabled={!running || working || compactingSince > 0}
+              >ctx {ctx.text}</button></span></Tip> · </>}{agentSummary(agents)}
+              </span>
+            </Tip>
           </div>
         </div>
         {anyRunning && <StopButton sessionId={sessionId}/>}
