@@ -25,7 +25,7 @@ export const api = {
   /** Native directory chooser; '' if cancelled. */
   pickDirectory: (): Promise<string> => PickDirectory(),
   /** Creates an empty session in `workDir` (must exist); `name` '' = the directory's name. The orchestrator starts with the first sendMessage. */
-  createSession: (name: string, workDir: string, provider: 'claude' | 'codex' = 'claude') => as<Session>(CreateSessionWithProvider(name, workDir, provider)),
+  createSession: (name: string, workDir: string, provider: 'claude' | 'codex' | 'agy' = 'claude') => as<Session>(CreateSessionWithProvider(name, workDir, provider)),
   /** Latest subscription limits seen, null until any agent reported them. */
   getRateLimit: () => as<RateLimit | null>(GetRateLimit()),
   /** All sessions, newest first. */

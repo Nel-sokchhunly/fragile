@@ -403,6 +403,9 @@ func (a *App) providerSessionID(sessionID int64, orchs []notes.Agent) (string, e
 	if se.Provider == notes.ProviderCodex {
 		return "", errors.New("no Codex thread id was recorded for this session, so it cannot be resumed")
 	}
+	if se.Provider == notes.ProviderAGY {
+		return "", errors.New("no Antigravity session id was recorded for this session, so it cannot be resumed")
+	}
 	return "", errors.New("no Claude Code session id was recorded for this session, so it cannot be resumed")
 }
 

@@ -14,17 +14,23 @@ import (
 const (
 	ProviderClaude = "claude"
 	ProviderCodex  = "codex"
+	ProviderAGY    = "agy"
 )
 
 func CheckProvider(p string) error {
-	if p != ProviderClaude && p != ProviderCodex {
-		return fmt.Errorf("unknown provider %q (choose claude or codex)", p)
+	if p != ProviderClaude && p != ProviderCodex && p != ProviderAGY {
+		return fmt.Errorf("unknown provider %q (choose claude, codex or agy)", p)
 	}
 	return nil
 }
 func (r *Runner) provider(id int64) string {
-	if s, e := r.store.GetSession(id); e == nil && s.Provider == ProviderCodex {
-		return ProviderCodex
+	if s, e := r.store.GetSession(id); e == nil {
+		if s.Provider == ProviderCodex {
+			return ProviderCodex
+		}
+		if s.Provider == ProviderAGY {
+			return ProviderAGY
+		}
 	}
 	return ProviderClaude
 }
@@ -151,4 +157,82 @@ func codexPrompt(a Agent, prompt string) string {
 		prompt = strings.Join(lines, "\n")
 	}
 	return prompt + "\n\nUse only the Fragile MCP server for team coordination. Native delegation is disabled. Do not spawn agents with shell commands, contact unrelated MCP servers, or read personal skills, hooks, or memories.\n"
+}
+
+// checkAGYPrereqs checks for the Antigravity CLI binary and login.
+func checkAGYPrereqs(command string) error {
+	if _, e := exec.LookPath(command); e != nil {
+		return errors.New("Antigravity CLI (agy) not found on PATH; install agy and log in")
+	}
+	out, e := exec.Command(command, "--version").Output()
+	if e != nil {
+		return fmt.Errorf("checking Antigravity CLI: %w", e)
+	}
+	if len(strings.TrimSpace(string(out))) == 0 {
+		return errors.New("cannot identify Antigravity CLI version")
+	}
+	return nil
+}
+
+// agyEnv cleans billing and API key overrides so agy uses standard account authentication.
+func agyEnv(environ []string) []string {
+	out := agentEnv(environ, false)
+	out = slices.DeleteFunc(out, func(kv string) bool {
+		k, _, _ := strings.Cut(kv, "=")
+		return slices.Contains([]string{
+			"GEMINI_API_KEY", "GOOGLE_API_KEY", "ANTIGRAVITY_API_KEY",
+			"AGY_API_KEY", "VERTEX_API_KEY", "VERTEXAI_API_KEY",
+		}, k)
+	})
+	return out
+}
+
+// agyModelAliases maps shorthand model names to Gemini / Antigravity model IDs.
+var agyModelAliases = map[string]string{
+	"flash":      "gemini-3.8-flash",
+	"pro":        "gemini-3.8-pro",
+	"flash_lite": "gemini-3.8-flash-lite",
+	"flash-lite": "gemini-3.8-flash-lite",
+}
+
+// resolveAGYModel resolves an AGY model alias to a full model id, or verifies a custom model.
+func resolveAGYModel(model string) (string, error) {
+	model = strings.TrimSpace(model)
+	if model == "sonnet" || model == "opus" || model == "haiku" || strings.HasPrefix(model, "claude-") {
+		return "", fmt.Errorf("%s is a Claude model; omit model for the AGY default or pass an AGY model id", strconv.Quote(model))
+	}
+	if id, ok := agyModelAliases[model]; ok {
+		return id, nil
+	}
+	if strings.ContainsAny(model, " \t\n") {
+		return "", fmt.Errorf("invalid model %q: model id must not contain whitespace", model)
+	}
+	return model, nil
+}
+
+// validAGYModel checks whether model is allowed for an AGY agent.
+func validAGYModel(model string) error {
+	_, err := resolveAGYModel(model)
+	return err
+}
+
+// agyPrompt tailors system prompts for Antigravity agents.
+func agyPrompt(a Agent, prompt string) string {
+	prompt = strings.ReplaceAll(prompt, "Task/Agent", "invoke_subagent")
+	prompt = strings.ReplaceAll(prompt, "Claude Code", "Antigravity")
+	if a.Role == roleOrchestrator {
+		start := strings.Index(prompt, "4. **Spawn**")
+		end := strings.Index(prompt, "5. **Wait loop.**")
+		if start >= 0 && end > start {
+			prompt = prompt[:start] + "4. **Spawn** independent sub-agents with spawn_subagent. Omit model to use the Antigravity default, or pass an AGY model id (e.g. \"flash\", \"pro\", \"flash_lite\").\n" + prompt[end:]
+		}
+		lines := strings.Split(prompt, "\n")
+		for i, line := range lines {
+			if strings.HasPrefix(line, "- `spawn_subagent(") {
+				lines[i] = "- `spawn_subagent(title, task, scopes, model?)` - use `scopes: [\"session\"]`. Always provide a short title and a self-contained task. Omit model for the Antigravity default, or pass an AGY model id (e.g. \"flash\", \"pro\", \"flash_lite\"). Never use Claude aliases."
+			}
+		}
+		prompt = strings.Join(lines, "\n")
+	}
+	return prompt + "\n\nUse only the Fragile MCP server for team coordination. Native delegation is disabled. Do not invoke subagents natively.\n"
 }

@@ -42,7 +42,7 @@ type AppState = {
   setChangesRepo: (sessionId: number, repo: string) => void
   notify: (e: unknown) => void
   // Throw the backend's error string; the caller shows it inline.
-  createSession: (name: string, workDir: string, provider?: 'claude' | 'codex') => Promise<void>
+  createSession: (name: string, workDir: string, provider?: 'claude' | 'codex' | 'agy') => Promise<void>
   sendMessage: (sessionId: number, text: string, attachments?: Attachment[]) => Promise<void>
   compactSession: (sessionId: number) => Promise<void>
   // Report failures as toasts.
