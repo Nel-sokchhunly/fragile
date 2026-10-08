@@ -6,6 +6,7 @@ import {FileChip, ImageChip} from '@/components/chat/Attachments'
 import {MAX_ATTACHMENTS, MAX_TOTAL, type PendingAttachment, readAttachment} from '@/lib/attachments'
 import {formatBytes} from '@/lib/format'
 import {focusComposer, MOD} from '@/lib/keys'
+import {type Draft, NO_DRAFT, useAppStore} from '@/store/app'
 import type {Attachment} from '@/lib/types'
 import {cn} from '@/lib/utils'
 import {ClipboardImage} from '../../../wailsjs/go/main/App'
@@ -29,23 +30,29 @@ async function clipboardImage(): Promise<File | undefined> {
 // `onInterrupt` (set while the orchestrator works) adds an Interrupt button; data-interrupt lets ChatView's Esc click it.
 // `disabledReason` turns the box off and says why (may hold an action). data-composer lets the global shortcuts focus it.
 // `terminal` adds the terminal pane toggle left of the box (it stays usable while the box is off).
-export function Composer({onSend, onInterrupt, placeholder, label, disabledReason, terminal, allowPDF = true}: {
+// `sessionId` keeps the draft (text and attachments) in the store per session, so it survives switching; without it
+// the draft is plain local state. `sendDisabled` blocks sending only (typing stays on), e.g. while compacting.
+export function Composer({onSend, onInterrupt, placeholder, label, disabledReason, sendDisabled, sessionId, terminal, allowPDF = true}: {
   onSend: (text: string, attachments: Attachment[]) => Promise<void>; onInterrupt?: () => Promise<void>
-  placeholder: string; label: string; disabledReason?: ReactNode
+  placeholder: string; label: string; disabledReason?: ReactNode; sendDisabled?: boolean; sessionId?: number
   allowPDF?: boolean
   terminal?: {open: boolean; onToggle: () => void}
 }) {
-  const [text, setText] = useState('')
-  const [files, setFiles] = useState<PendingAttachment[]>([])
+  const stored = useAppStore((s) => (sessionId != null ? s.drafts[sessionId] : undefined))
+  const [local, setLocal] = useState(NO_DRAFT)
+  const {text, files} = sessionId != null ? stored ?? NO_DRAFT : local
+  const patch = (d: Partial<Draft>, sid = sessionId) => sid != null ? useAppStore.getState().setDraft(sid, d) : setLocal((l) => ({...l, ...d}))
+  const setText = (t: string) => patch({text: t})
   const filesRef = useRef(files) // current list for the async reads below
+  filesRef.current = files
   const [reading, setReading] = useState(0)
   const [dragging, setDragging] = useState(false)
   const [interrupting, setInterrupting] = useState(false)
   const [error, setError] = useState('')
   const input = useRef<HTMLInputElement>(null)
   const off = !!disabledReason
-  const ready = !off && !reading && (!!text.trim() || files.length > 0)
-  const update = (next: PendingAttachment[]) => { filesRef.current = next; setFiles(next) }
+  const ready = !off && !sendDisabled && !reading && (!!text.trim() || files.length > 0)
+  const update = (next: PendingAttachment[]) => patch({files: next})
   // Focus when shown (ChatView remounts per session) and when re-enabled (after Resume brings the orchestrator back),
   // but leave an open terminal (which focuses itself first) alone.
   useEffect(() => { if (!off && !document.activeElement?.closest('[data-terminal]')) focusComposer() }, [off])
@@ -53,6 +60,7 @@ export function Composer({onSend, onInterrupt, placeholder, label, disabledReaso
   const add = async (list: FileList | File[] | null) => {
     const picked = [...(list ?? [])]
     if (off || !picked.length) return
+    const sid = sessionId
     setError('')
     setReading((n) => n + 1)
     const errs: string[] = []
@@ -61,22 +69,22 @@ export function Composer({onSend, onInterrupt, placeholder, label, disabledReaso
       try { const attachment = await readAttachment(f); if (!allowPDF && attachment.media_type === "application/pdf") throw "Codex supports images and text, not PDFs; send extracted text instead"; got.push(attachment) } catch (e) { errs.push(String(e)) }
     }
     setReading((n) => n - 1)
-    const next = [...filesRef.current]
+    const next = [...(sid != null ? useAppStore.getState().drafts[sid]?.files ?? [] : filesRef.current)] // the draft may have changed session meanwhile
     for (const a of got) {
       if (next.length >= MAX_ATTACHMENTS) { errs.push(`at most ${MAX_ATTACHMENTS} attachments per message`); break }
       if (next.reduce((s, x) => s + x.size, a.size) > MAX_TOTAL) { errs.push(`${a.name} not added: attachments can total at most ${formatBytes(MAX_TOTAL)}`); continue }
       next.push(a)
     }
-    update(next)
+    patch({files: next}, sid)
     setError(errs.join('\n'))
   }
   const send = async () => {
     if (!ready) return
     setError('')
+    const sid = sessionId
     try {
       await onSend(text.trim(), files.map(({name, media_type, data}) => ({name, media_type, data})))
-      setText('')
-      update([])
+      patch({text: '', files: []}, sid)
       focusComposer() // the Send button may have taken focus
     } catch (e) {
       setError(String(e))

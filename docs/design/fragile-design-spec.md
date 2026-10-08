@@ -20,61 +20,79 @@ Source: `docs/design/fragile-session.html` (Claude Design export, "Session.dc.ht
 
 ## 1. Tokens
 
-Every value is defined on `:root` (dark). In the "Light" column, "n/a" means the design gives no value. "Ours" names the existing token in `app/frontend/src/index.css` (`.dark`) it should map to.
+The app is dark-only and uses the Zed theme "Claude Code Inspired Dark" (warm brown neutrals, orange accent). The code is the source of truth: the `.dark` block and status tokens in `app/frontend/src/index.css`. Original theme: `~/.local/share/zed/extensions/installed/claude-code-inspired-dark/themes/claude-code-inspired-dark.json`. The semantic token names below come from the original design export; the "Ours" column names the `index.css` token that carries each value.
+
+The HTML mockups in `docs/design/` (`fragile-session.html` etc.) predate the retheme and still show the old neutral/green/amber colours.
 
 ### Palette (raw)
-| Token | Value |
-|---|---|
-| `--neutral-950` | `#141413` |
-| `--neutral-900` | `#1a1a19` |
-| `--neutral-850` | `#1c1c1b` |
-| `--neutral-800` | `#1f1f1e` |
-| `--neutral-750` | `#262624` |
-| `--neutral-700` | `#2f2f2d` |
-| `--neutral-650` | `#3a3a37` |
-| `--neutral-600` | `#55544f` |
-| `--neutral-400` | `#8f8e89` |
-| `--neutral-200` | `#c9c8c2` |
-| `--neutral-50` | `#f2f1ec` |
-| `--green-500` | `#34b233` |
-| `--amber-500` | `#e39b0e` |
-| `--amber-800` | `#6e4605` |
-| `--amber-900` | `#3a2502` |
-| `--blue-400` | `#6ea8ef` |
-| `--red-400` | `#e5655a` |
+| Token | Value | Role / Zed key |
+|---|---|---|
+| `--background` | `#1A1614` | `background`, `panel.background`: page, panels, sidebar, cards |
+| `--surface-sunken` | `#131010` | **derived** (no Zed key): user bubble, composer, code, darker than the background |
+| `--secondary` / `--muted` | `#2D2314` | `surface.background`, `element.background` |
+| `--accent` / `--surface-hover` | `#3D2A1A` | `element.hover` |
+| `--popover` | `#3D2A1A` | `elevated_surface.background` |
+| `--border-subtle` / `--border` | `#3A2A1A` | `border.disabled`: dividers |
+| `--border-default` | `#4A3A2A` | `border`: card borders, scrollbar thumb |
+| `--border-strong` / `--input` | `#5A4A3A` | `border.variant`: inputs, hovered card |
+| `--foreground` | `#F5E6D3` | `text` |
+| `--text-secondary` | `#DDC5A9` | **derived**: midpoint between `text` and `text.muted` |
+| `--muted-foreground` | `#C4A584` | `text.muted` |
+| `--primary` / `--ring` | `#E67D22` | `text.accent`, `border.focused`: orange accent |
+| `--status-working` | `#98C379` | `success` / `created` |
+| `--status-needs-you` | `#E5C07B` | `warning` / `conflict`: gold |
+| `--status-crashed` / `--destructive` | `#E06C75` | `error` / `deleted` |
+| `--status-decision` | `#61AFEF` | `info` / `renamed` |
 
-The neutrals are a warm charcoal ramp: they are slightly yellow, where our shadcn ramp is pure grey (`oklch(x 0 0)`).
+Chart ramp: `#C4A584`, `#A08060` (`icon.muted`), `#6A5A4A`, `#4A3A2A`, `#3D2A1A`.
+
+Values not taken from Zed (derived): `--surface-sunken` `#131010`, `--text-secondary` `#DDC5A9`, and the escalation border `#756242` / hover `#947C52` (Zed `warning.border` mixed at 45% / 60% over the background).
 
 ### Semantic
 | Token | Dark | Light | Purpose | Ours (maps to) |
 |---|---|---|---|---|
-| `--surface-page` | `#1a1a19` | n/a | body bg (covered by the app grid) | `--background` |
-| `--surface-frame` | `#1c1c1b` | n/a | sidebar bg | `--sidebar` |
-| `--surface-panel` | `#1f1f1e` | n/a | main + right column bg; selected session row bg | `--background` / `--card` |
-| `--surface-sunken` | `#141413` | n/a | user bubble, composer bg | none (closest `--muted`); **add** e.g. `--surface-sunken` |
-| `--surface-hover` | `#262624` | n/a | hover bg (cards, icon buttons) | `--accent`, `--sidebar-accent` |
-| `--surface-escalation` | `#3a2502` | n/a | open escalation bg (solid) | `--escalation` (ours is used at 10% alpha) |
-| `--border-subtle` | `#2f2f2d` | n/a | column and header dividers | `--border`, `--sidebar-border` |
-| `--border-default` | `#3a3a37` | n/a | agent card border, closed escalation border | `--border` (ours is one level only) |
-| `--border-strong` | `#55544f` | n/a | selected session row, hovered card, composer and note input border | `--input` / `--ring` |
-| `--border-escalation` | `#6e4605` | n/a | escalation border, option button border; option hover bg (`--amber-800`) | `--escalation` |
-| `--text-primary` | `#f2f1ec` | n/a | body text | `--foreground` |
-| `--text-secondary` | `#c9c8c2` | n/a | task lines, tool rows, icon-button idle colour, heads_up note label | none; **add** (`--secondary-foreground` is not used this way) |
-| `--text-muted` | `#8f8e89` | n/a | meta, placeholders, labels, icons | `--muted-foreground` |
-| `--status-running` | `#34b233` (green) | n/a | running agent, "working" session | `--status-working` (**conflict**: ours is blue) |
-| `--status-done` | `#34b233` (green) | n/a | "done" note type only | `--note-done` |
-| `--status-attention` | `#e39b0e` (amber) | n/a | "needs you", escalation text, question note | `--status-needs-you(-fg)`, `--escalation-fg`, `--note-question` (**conflict**: ours is violet) |
-| `--status-decision` | `#6ea8ef` (blue) | n/a | decision note, links, "you" label | `--note-decision` |
-| `--status-blocked` | `#e5655a` (red) | n/a | blocker note | `--note-blocker`, `--status-crashed` |
-| `--status-idle` | `#8f8e89` | n/a | defined but unused | `--status-done` |
+| `--surface-page` | `#1A1614` | n/a | body bg (covered by the app grid) | `--background` |
+| `--surface-frame` | `#1A1614` | n/a | sidebar bg | `--sidebar` |
+| `--surface-panel` | `#1A1614` | n/a | main + right column bg; selected session row bg | `--background` / `--card` |
+| `--surface-sunken` | `#131010` | n/a | user bubble, composer bg (derived) | `--surface-sunken` |
+| `--surface-hover` | `#3D2A1A` | n/a | hover bg (cards, icon buttons) | `--accent`, `--sidebar-accent`, `--surface-hover` |
+| `--surface-escalation` | `#3D3A2A` | n/a | open escalation bg (`warning.background`) | `--escalation-bg` |
+| `--border-subtle` | `#3A2A1A` | n/a | column and header dividers | `--border`, `--sidebar-border` |
+| `--border-default` | `#4A3A2A` | n/a | agent card border, closed escalation border | `--border-default` |
+| `--border-strong` | `#5A4A3A` | n/a | selected session row, hovered card, composer and note input border | `--input`, `--border-strong` |
+| `--border-escalation` | `#756242` | n/a | escalation border, option button border; option hover bg `#947C52` (derived) | `--escalation`, `--escalation-hover` |
+| `--text-primary` | `#F5E6D3` | n/a | body text | `--foreground` |
+| `--text-secondary` | `#DDC5A9` | n/a | task lines, tool rows, icon-button idle colour, heads_up note label (derived) | `--text-secondary` |
+| `--text-muted` | `#C4A584` | n/a | meta, placeholders, labels, icons | `--muted-foreground` |
+| `--status-running` | `#98C379` (green) | n/a | running agent, "working" session | `--status-working` |
+| `--status-done` | `#98C379` (green) | n/a | "done" note type only | `--note-done` |
+| `--status-attention` | `#E5C07B` (warning gold) | n/a | "needs you", escalation text, question note; kept distinct from the orange accent `#E67D22` (Zed `modified` `#FFB38A` was rejected as too close to it) | `--status-needs-you(-fg)`, `--escalation-fg`, `--note-question` |
+| `--status-decision` | `#61AFEF` (blue) | n/a | decision note, links, "you" label | `--note-decision` |
+| `--status-blocked` | `#E06C75` (red) | n/a | blocker note | `--note-blocker`, `--status-crashed` |
+| `--status-idle` | `#C4A584` | n/a | defined but unused | `--status-done` |
+
+Orange `#E67D22` (`--primary`, `--ring`) is the accent: focus rings and primary buttons. Text on a solid needs-you badge is `#1A1614` (`--on-needs-you`).
 
 Colour by status:
 
 | Status | Design colour | Ours |
 |---|---|---|
 | Done session | `--text-muted` | `--status-done` = muted, matches |
-| Done agent ("done · 1m40s") | `--text-muted` | `--status-exited` (green-teal), conflict |
-| heads_up note | `--text-secondary` (neutral) | `--note-heads-up` (amber), conflict |
+| Done agent ("done · 1m40s") | `--text-muted` | `--status-exited` = muted, matches |
+| heads_up note | `--text-secondary` | `--note-heads-up` = `--text-secondary`, matches |
+
+### Contrast
+Ratios on the `#1A1614` background (WCAG relative luminance). I recomputed them by hand and they match the earlier figures:
+
+| Colour | Ratio |
+|---|---|
+| Text `#F5E6D3` | 14.7:1 |
+| Muted `#C4A584` | 7.8:1 |
+| Error `#E06C75` | 5.6:1 |
+
+### Code blocks and terminal
+- **Code blocks:** Shiki theme `claude-code-inspired-dark` in `app/frontend/src/lib/shiki-theme.ts`, a TextMate port of the Zed `syntax` map (bg `#1A1614`, fg `#F5E6D3`). Light mode keeps `github-light`. Diffs use `#98C379` (added), `#E06C75` (removed), `#FFB38A` (changed).
+- **Terminal:** `THEME` in `app/frontend/src/lib/terminal.ts`: bg `#1A1614`, fg `#F5E6D3`, cursor `#E67D22`, selection `#E67D2240`. The 16 ANSI colours are Zed's `terminal.ansi.*` (e.g. red `#E06C75`, green `#98C379`, yellow `#E5C07B`, blue `#61AFEF`; black `#2D2314` stays lighter than the background). Bright black `#5C5043` is low contrast on the background.
 
 ### Type, space, radius, motion
 | Token | Value | Used in markup? |
@@ -103,8 +121,8 @@ The design uses one working size (14px). Hierarchy comes from weight, colour and
 | Panel / session titles (main header, Agents, Notes, agent view) | sans | 15 / 20 | 600 | primary |
 | Body, user msg, notes, cards | sans | 14 / 20 | 400 | primary |
 | Agent card name | sans | 14 / 20 | 600 | primary |
-| "Escalation" label | sans | 14 / 20 | 500 | amber |
-| Small meta ("Sessions" label, option buttons, "or reply below", "Output stream · view only") | sans | 13 / 18–20 | 400 | muted / amber |
+| "Escalation" label | sans | 14 / 20 | 500 | warning gold |
+| Small meta ("Sessions" label, option buttons, "or reply below", "Output stream · view only") | sans | 13 / 18–20 | 400 | muted / warning gold |
 | Assistant message | **serif** | 15 / 22, `text-wrap:pretty` | 400 | primary |
 | Empty-state headline | **serif** | 18 / 24 | 400 | primary |
 | Agent stream tool line | mono | 12 / 20 | 400 | secondary |
@@ -163,8 +181,8 @@ Status labels:
 
 | Status | Colour |
 |---|---|
-| `working` | green |
-| `needs you` | amber |
+| `working` | green (`#98C379`) |
+| `needs you` | warning gold (`#E5C07B`) |
 | `done` | muted |
 | `new` | muted (session with no messages) |
 
@@ -175,16 +193,16 @@ There are no dots, badges, pills, accent bars or needs-you counts.
 - No stop button.
 
 ### Orchestrator chat
-- **User message**: `justify-self:end`, max-width 80%, bg `--surface-sunken` (`#141413`, darker than the panel), radius 8, padding `6px 12px`, sans 14. No timestamp, no tail.
+- **User message**: `justify-self:end`, max-width 80%, bg `--surface-sunken` (`#131010`, darker than the panel), radius 8, padding `6px 12px`, sans 14. No timestamp, no tail.
 - **Assistant message**: plain serif 15/22, full column width, no bubble or avatar. This is the "voice" of the orchestrator. Plain text in the design; ours renders Markdown.
 - **Tool call row**: flex, gap 6, 13px wrench icon (muted) followed by a one-line sans 14 `--text-secondary` summary (`spawn_subagent x3`). No border, no bg, no mono, no expand.
 - **Escalation (open)**:
-  - Box: bg `#3a2502`, 1px border `#6e4605`, radius 8, padding `10px 14px`, all text amber (`--status-attention`), `gap:2px`.
+  - Box: bg `#3D3A2A`, 1px border `#756242`, radius 8, padding `10px 14px`, all text warning gold (`--status-attention`, `#E5C07B`), `gap:2px`.
   - Line 1: **Escalation** (500) followed by `from #2 storage` at opacity .75.
   - Line 2: the question.
   - Line 3 (margin-top 8, gap 6): one **option button** per suggested answer, plus "or reply below" (13px, opacity .75).
-    - Option button: 13/18, amber text, transparent bg, 1px `#6e4605` border, radius 6, padding `3px 10px`.
-    - Option hover: bg `#6e4605`, text primary.
+    - Option button: 13/18, gold text, transparent bg, 1px `#756242` border, radius 6, padding `3px 10px`.
+    - Option hover: bg `#947C52`, text primary.
   - **There is no answer box inside the block.** Free-text answers go through the main composer, whose placeholder becomes "Answer the escalation, or message the orchestrator". The next message sent answers the open escalation.
 - **Escalation (answered)**:
   - Box: 1px `--border-default` border, no bg, radius 8, padding `8px 14px`.
@@ -256,11 +274,11 @@ States:
 
   | Type | Colour | Icon (in agent card) |
   |---|---|---|
-  | decision | blue `#6ea8ef` | gavel |
-  | question | amber `#e39b0e` | circle-help |
-  | blocker | red `#e5655a` | octagon-alert |
-  | heads_up | `--text-secondary` `#c9c8c2` | sticky-note |
-  | done | green `#34b233` | check |
+  | decision | blue `#61AFEF` | gavel |
+  | question | gold `#E5C07B` | circle-help |
+  | blocker | red `#E06C75` | octagon-alert |
+  | heads_up | `--text-secondary` `#DDC5A9` | sticky-note |
+  | done | green `#98C379` | check |
 - **Resolved**: not in design.
 - **Add note**: "+" toggles an inline input at the top of the list instead of a dialog.
   - Input: placeholder "Post a decision to all agents", transparent bg, 1px `--border-strong`, radius 8, padding `5px 10px`, focus border `--text-muted`.
@@ -297,7 +315,7 @@ We already use `lucide-react`, so these map 1:1.
 | Session row | none | bg panel, border strong | none |
 | Agent card | bg hover, border strong | n/a (opens view) | none |
 | Icon button | bg hover, text primary | n/a | none |
-| Escalation option | bg amber-800, text primary | n/a | none |
+| Escalation option | bg `#947C52`, text primary | n/a | none |
 | Composer / note input | n/a | n/a | border becomes `--text-muted` |
 
 - No transitions, no `focus-visible` rings and no disabled states.
@@ -317,7 +335,7 @@ We already use `lucide-react`, so these map 1:1.
 - **Note `author` as `#id`** instead of the agent name. Display only.
 - **Agent view in the right column**, keeping the chat visible.
 - **Fonts**: Instrument Sans, Source Serif 4 (assistant voice) and JetBrains Mono. Ours uses Geist only.
-- **Warm neutral palette** and a green "running" colour. Ours is pure grey with a blue "working" colour.
+- ~~Warm neutral palette and a green "running" colour~~: done, the app uses the Zed "Claude Code Inspired Dark" palette (section 1).
 - **Empty-session prompt** ("What should this session build?") and an instant "New session".
 
 **In our app, not in the design (keep, and style in the design's language):**

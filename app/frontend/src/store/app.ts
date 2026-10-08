@@ -1,5 +1,6 @@
 import {create} from 'zustand'
 import {api} from '@/lib/api'
+import type {PendingAttachment} from '@/lib/attachments'
 import type {Agent, AgentEvent, Attachment, ChatItem,Note, NoteType, RateLimit, Session, SessionStatus, Task} from '@/lib/types'
 
 // Zustand store fed by the backend: snapshots (lib/api.ts) on first view of a session, then Wails events
@@ -7,6 +8,8 @@ import type {Agent, AgentEvent, Attachment, ChatItem,Note, NoteType, RateLimit, 
 
 export type SessionData = {agents: Agent[]; tasks: Task[]; notes: Note[]; chat: ChatItem[]}
 export type Toast = {id: number; text: string}
+export type Draft = {text: string; files: PendingAttachment[]}
+export const NO_DRAFT: Draft = {text: '', files: []}
 
 type AppState = {
   sessions: Session[]
@@ -16,6 +19,8 @@ type AppState = {
   agentLoaded: Record<number, boolean> // bounded history snapshot loaded
   lastLine: Record<number, {text: string; at: string; sid: number}> // newest assistant_text / tool_use per agent, from live events
   busy: Record<number, number> // by session id: when the orchestrator's turn started (ms; set on send, 0 again on its result event)
+  compacting: Record<number, number> // by session id: when /compact started (ms; 0 again on the orchestrator's result event)
+  drafts: Record<number, Draft> // by session id: unsent composer text and attachments (in memory only)
   selectedAgentId: number | null // null = show the orchestrator chat
   sidebarCollapsed: boolean // mirror of the sidebar panel's collapsed state
   toasts: Toast[]
@@ -27,6 +32,7 @@ type AppState = {
   selectSession: (id: number | null) => void
   setConfirmDelete: (id: number | null) => void
   setLimit: (l: RateLimit) => void
+  setDraft: (sessionId: number, d: Partial<Draft>) => void
   selectAgent: (id: number | null) => void
   setSidebarCollapsed: (c: boolean) => void
   toggleTerminal: (sessionId: number) => void
@@ -34,6 +40,7 @@ type AppState = {
   // Throw the backend's error string; the caller shows it inline.
   createSession: (name: string, workDir: string, provider?: 'claude' | 'codex') => Promise<void>
   sendMessage: (sessionId: number, text: string, attachments?: Attachment[]) => Promise<void>
+  compactSession: (sessionId: number) => Promise<void>
   // Report failures as toasts.
   stopSession: (sessionId: number) => Promise<void>
   deleteSession: (sessionId: number) => Promise<void> // the session_deleted event removes it
@@ -95,6 +102,17 @@ export const useAppStore = create<AppState>((set, get) => {
     try { return await p } catch (e) { get().notify(e) }
   }
 
+  // Busy from the request, not the first output, so the chat isn't silent while the orchestrator starts up or thinks.
+  const busyWhile = async (sid: number, req: () => Promise<unknown>) => {
+    set((s) => ({busy: {...s.busy, [sid]: Date.now()}}))
+    try {
+      await req()
+    } catch (e) {
+      set((s) => ({busy: {...s.busy, [sid]: 0}}))
+      throw e
+    }
+  }
+
   return {
     sessions: [],
     selectedSessionId: null,
@@ -103,6 +121,8 @@ export const useAppStore = create<AppState>((set, get) => {
     agentLoaded: {},
     lastLine: {},
     busy: {},
+    compacting: {},
+    drafts: {},
     selectedAgentId: null,
     sidebarCollapsed: false,
     toasts: [],
@@ -124,6 +144,7 @@ export const useAppStore = create<AppState>((set, get) => {
     selectSession: select,
     setConfirmDelete: (confirmDelete) => set({confirmDelete}),
     setLimit: (limit) => set({limit}),
+    setDraft: (sid, d) => set((s) => ({drafts: {...s.drafts, [sid]: {...(s.drafts[sid] ?? NO_DRAFT), ...d}}})),
     selectAgent: (selectedAgentId) => set({selectedAgentId}),
     setSidebarCollapsed: (sidebarCollapsed) => set({sidebarCollapsed}),
     toggleTerminal: (sid) => set((s) => ({terminalOpen: {...s.terminalOpen, [sid]: !s.terminalOpen[sid]}})),
@@ -139,14 +160,15 @@ export const useAppStore = create<AppState>((set, get) => {
       get().sessionCreated(se)
       select(se.id)
     },
-    // The backend's chat_item event shows the message. Busy from the send, not the first output, so the chat
-    // isn't silent while the orchestrator starts up or thinks.
-    sendMessage: async (sid, text, attachments = []) => {
-      set((s) => ({busy: {...s.busy, [sid]: Date.now()}}))
+    // The backend's chat_item event shows the message.
+    sendMessage: (sid, text, attachments = []) => busyWhile(sid, () => api.sendMessage(sid, text, attachments)),
+    // /compact streams no text, only a result, so without this the chat shows nothing until the notice lands.
+    compactSession: async (sid) => {
+      set((s) => ({compacting: {...s.compacting, [sid]: Date.now()}}))
       try {
-        await api.sendMessage(sid, text, attachments)
+        await api.compactSession(sid)
       } catch (e) {
-        set((s) => ({busy: {...s.busy, [sid]: 0}}))
+        set((s) => ({compacting: {...s.compacting, [sid]: 0}}))
         throw e
       }
     },
@@ -202,12 +224,14 @@ export const useAppStore = create<AppState>((set, get) => {
       const {[sid]: gone, ...data} = get().data
       const {[sid]: _, ...busy} = get().busy
       const {[sid]: __, ...terminalOpen} = get().terminalOpen
+      const {[sid]: ___, ...compacting} = get().compacting
+      const {[sid]: ____, ...drafts} = get().drafts
       // lastLine knows its session, so agents of a never-opened snapshot are found too.
       const ids = new Set([...(gone?.agents.map((a) => a.id) ?? []), ...Object.entries(get().lastLine).filter(([, l]) => l.sid === sid).map(([k]) => +k)])
       for (const id of ids) agentLoads.delete(id)
       const drop = <T,>(m: Record<number, T>) => Object.fromEntries(Object.entries(m).filter(([k]) => !ids.has(+k))) as Record<number, T>
       set((s) => ({
-        sessions: rest, data, busy, terminalOpen,
+        sessions: rest, data, busy, compacting, drafts, terminalOpen,
         agentEvents: drop(s.agentEvents), agentLoaded: drop(s.agentLoaded), lastLine: drop(s.lastLine),
         selectedAgentId: s.selectedAgentId != null && ids.has(s.selectedAgentId) ? null : s.selectedAgentId,
       }))
@@ -230,6 +254,7 @@ export const useAppStore = create<AppState>((set, get) => {
       const busy = !orch ? undefined : ev.event_type === 'result' ? 0 : ['assistant_text', 'tool_use', 'tool_result'].includes(ev.event_type) ? since || Date.now() : undefined
       set((s) => ({
         busy: busy === undefined || s.busy[sid] === busy ? s.busy : {...s.busy, [sid]: busy},
+        compacting: orch && ev.event_type === 'result' && s.compacting[sid] ? {...s.compacting, [sid]: 0} : s.compacting,
         lastLine: text ? {...s.lastLine, [ev.agent_id]: {text, at: ev.created_at, sid}} : s.lastLine,
         agentEvents: s.agentEvents[ev.agent_id] ? {...s.agentEvents, [ev.agent_id]: upsert(s.agentEvents[ev.agent_id], ev).slice(-MAX_AGENT_EVENTS)} : s.agentEvents,
       }))
