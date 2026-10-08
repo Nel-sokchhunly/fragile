@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -38,14 +39,69 @@ const disallowedTools = "Task,Agent,Workflow"
 
 // Sub-agent isolation from the user's personal Claude Code setup (issue #39).
 // The orchestrator is not isolated: it loads the user's setup like their CLI.
-// "--setting-sources project" skips user and local settings, which is where
-// their plugins, hooks and statusline come from; the project's own settings
-// and CLAUDE.md still apply. "--disable-slash-commands" disables all skills.
+// "--setting-sources project" skips user and local settings (hooks, statusline,
+// enabled plugins, user CLAUDE.md); the project's own settings and CLAUDE.md
+// still apply. The user's plugins and personal skills are added back on purpose,
+// as --plugin-dir (see UserPluginDirs); plugin hooks run outside the Bash sandbox.
 // Auth is unaffected (claude.ai login lives in the keychain, not in settings).
 // Auto-memory is switched off by env so agents do not read or write ~/.claude memory.
-var isolationArgs = []string{"--setting-sources", "project", "--disable-slash-commands"}
+var isolationArgs = []string{"--setting-sources", "project"}
 
 const isolationEnv = "CLAUDE_CODE_DISABLE_AUTO_MEMORY=1"
+
+// UserPluginDirs returns the --plugin-dir values that give a sub-agent the
+// user's enabled plugins (settings.json enabledPlugins, resolved through
+// plugins/installed_plugins.json) and personal skills. Skills have no flag, so
+// they are wrapped in a synthetic plugin "user" at agentDir/user-skills with a
+// symlink to <claude dir>/skills (they show up as user:<skill>). Missing or
+// unparseable files just mean fewer plugins.
+func UserPluginDirs(agentDir string) []string {
+	dir := os.Getenv("CLAUDE_CONFIG_DIR")
+	if dir == "" {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return nil
+		}
+		dir = filepath.Join(home, ".claude")
+	}
+	var dirs []string
+	var settings struct{ EnabledPlugins map[string]bool }
+	var installed struct {
+		Plugins map[string][]struct{ InstallPath string }
+	}
+	readJSON := func(p string, v any) bool {
+		b, err := os.ReadFile(p)
+		return err == nil && json.Unmarshal(b, v) == nil
+	}
+	if readJSON(filepath.Join(dir, "settings.json"), &settings) && readJSON(filepath.Join(dir, "plugins", "installed_plugins.json"), &installed) {
+		for _, name := range slices.Sorted(maps.Keys(settings.EnabledPlugins)) {
+			e := installed.Plugins[name]
+			if !settings.EnabledPlugins[name] || len(e) == 0 {
+				continue
+			}
+			if st, err := os.Stat(e[0].InstallPath); err == nil && st.IsDir() {
+				dirs = append(dirs, e[0].InstallPath)
+			}
+		}
+	}
+	skills := filepath.Join(dir, "skills")
+	if st, err := os.Stat(skills); err == nil && st.IsDir() {
+		p := filepath.Join(agentDir, "user-skills")
+		if os.MkdirAll(filepath.Join(p, ".claude-plugin"), 0o700) == nil &&
+			os.WriteFile(filepath.Join(p, ".claude-plugin", "plugin.json"), []byte(`{"name":"user"}`), 0o600) == nil {
+			link := filepath.Join(p, "skills")
+			if cur, err := os.Readlink(link); err != nil || cur != skills { // idempotent; repoint if the claude dir changed
+				os.Remove(link)
+				err = os.Symlink(skills, link)
+				if err != nil {
+					return dirs
+				}
+			}
+			dirs = append(dirs, p)
+		}
+	}
+	return dirs
+}
 
 // Variables that make claude bill an API account (or another provider) instead
 // of the user's subscription. Agents never get them; CLAUDE_CODE_OAUTH_TOKEN
@@ -222,8 +278,9 @@ const (
 // One Runner serves every session of a store; sessions can be stopped
 // individually (StopSession) or together (StopAll).
 type Runner struct {
-	CodexCommand string // Codex CLI binary; defaults to codex
-	Command      string // binary to run; "claude" unless a test substitutes a fake
+	CodexCommand string   // Codex CLI binary; defaults to codex
+	Command      string   // binary to run; "claude" unless a test substitutes a fake
+	PluginDirs   []string // --plugin-dir values for sub-agents (set before use; see UserPluginDirs)
 
 	// Interactive (set before use) makes the orchestrator a long-lived process
 	// that reads stream-json user messages from stdin (see SendUser) instead of
@@ -439,6 +496,9 @@ func (r *Runner) args(a Agent, workDir, mcpConfig, prompt, systemPrompt, resume,
 	} else {
 		args = append(args, "--allowedTools", allowedTools)
 		args = append(args, isolationArgs...)
+		for _, d := range r.PluginDirs {
+			args = append(args, "--plugin-dir", d)
+		}
 		args = append(args, "--settings", sandboxSettings(r.cfg, workDir))
 	}
 	if model == "" { // the orchestrator always, and sub-agents spawned without a model

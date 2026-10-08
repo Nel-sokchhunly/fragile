@@ -109,6 +109,7 @@ func run(cfg notes.Config, task string) error {
 	defer store.SetSessionStatus(session.ID, notes.SessionDone) // runs before store.Close
 
 	runner := notes.NewRunner(cfg, store, evlog)
+	runner.PluginDirs = notes.UserPluginDirs(cfg.AgentDir)
 	srv := &notes.Server{Store: store, Log: evlog, Runner: runner}
 	httpSrv := &http.Server{Handler: srv.Handler()}
 

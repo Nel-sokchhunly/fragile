@@ -3,6 +3,7 @@ package notes
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"slices"
@@ -273,7 +274,7 @@ func TestRunnerArgs(t *testing.T) {
 			t.Errorf("orchestrator args missing %v: %v", want, iargs)
 		}
 	}
-	for _, flag := range []string{"--settings", "--setting-sources", "--disable-slash-commands", "--dangerously-skip-permissions"} {
+	for _, flag := range []string{"--settings", "--setting-sources", "--disable-slash-commands", "--plugin-dir", "--dangerously-skip-permissions"} {
 		if slices.Contains(iargs, flag) {
 			t.Errorf("orchestrator args must not have %s: %v", flag, iargs)
 		}
@@ -284,8 +285,58 @@ func TestRunnerArgs(t *testing.T) {
 	if sub := r.args(Agent{Role: "subagent"}, "/w/dir", "/x", "p", "SYS", "", ""); slices.Contains(sub, "--input-format") {
 		t.Errorf("sub-agents stay one-shot: %v", sub)
 	}
-	if !slices.Contains(args, "--strict-mcp-config") || !slices.Contains(args, "--disable-slash-commands") || !slices.Contains(args, "--verbose") || slices.Contains(args, "--dangerously-skip-permissions") {
+	if !slices.Contains(args, "--strict-mcp-config") || slices.Contains(args, "--disable-slash-commands") || !slices.Contains(args, "--verbose") || slices.Contains(args, "--dangerously-skip-permissions") {
 		t.Errorf("args: %v", args)
+	}
+}
+
+// Sub-agents get the user's enabled plugins and a synthetic "user" plugin for personal skills.
+func TestUserPluginDirs(t *testing.T) {
+	claude, agents := t.TempDir(), t.TempDir()
+	t.Setenv("CLAUDE_CONFIG_DIR", claude)
+	if d := UserPluginDirs(agents); len(d) != 0 {
+		t.Errorf("empty config dir gave %v", d)
+	}
+	on, off := filepath.Join(claude, "plugins", "cache", "on"), filepath.Join(claude, "plugins", "cache", "off")
+	for _, p := range []string{on, off, filepath.Join(claude, "skills", "mine")} {
+		if err := os.MkdirAll(p, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write := func(name, s string) {
+		if err := os.WriteFile(filepath.Join(claude, name), []byte(s), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write("settings.json", `{"enabledPlugins":{"on@m":true,"off@m":false,"gone@m":true,"missing@m":true}}`)
+	write("plugins/installed_plugins.json", fmt.Sprintf(`{"plugins":{"on@m":[{"installPath":%q},{"installPath":"/other"}],"off@m":[{"installPath":%q}],"gone@m":[{"installPath":"/no/such/dir"}]}}`, on, off))
+	want := []string{on, filepath.Join(agents, "user-skills")}
+	for range 2 { // the second call must be idempotent
+		if got := UserPluginDirs(agents); !slices.Equal(got, want) {
+			t.Fatalf("UserPluginDirs = %v, want %v", got, want)
+		}
+	}
+	if b, _ := os.ReadFile(filepath.Join(want[1], ".claude-plugin", "plugin.json")); string(b) != `{"name":"user"}` {
+		t.Errorf("plugin.json = %q", b)
+	}
+	if l, _ := os.Readlink(filepath.Join(want[1], "skills")); l != filepath.Join(claude, "skills") {
+		t.Errorf("skills symlink -> %q", l)
+	}
+	r := NewRunner(Config{AgentDir: agents}, nil, nil)
+	r.PluginDirs = want
+	args := r.args(Agent{Role: "subagent"}, "/w", "/x", "p", "SYS", "", "")
+	for _, d := range want {
+		if i := slices.Index(args, d); i < 1 || args[i-1] != "--plugin-dir" {
+			t.Errorf("args missing --plugin-dir %s: %v", d, args)
+		}
+	}
+	// Unparseable files mean no plugins, and no skills dir means no synthetic plugin.
+	write("settings.json", `{nope`)
+	if err := os.RemoveAll(filepath.Join(claude, "skills")); err != nil {
+		t.Fatal(err)
+	}
+	if d := UserPluginDirs(t.TempDir()); len(d) != 0 {
+		t.Errorf("broken settings gave %v", d)
 	}
 }
 
