@@ -88,7 +88,7 @@ This exercises the app API and emitted UI events, not desktop clicks. If `CODEX_
 | `⌘B` | Collapse / expand the sidebar |
 | `⌘K` or `/` | Focus the message box |
 | `⌘N` | New session |
-| `⌘1`–`⌘9` | Switch to session 1–9 |
+| `⌘1`–`⌘9` (`Alt+1`–`Alt+9` on Linux and Windows) | Switch to session 1–9 (the number shown in the sidebar) |
 | `Esc` | Agent output view → back to chat |
 | `⌘⌫` | Delete the current session (asks first) |
 | `Enter` / `Shift+Enter` | Send / new line (message box, escalation answer) |

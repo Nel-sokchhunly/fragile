@@ -12,7 +12,7 @@ import {ResizableHandle, ResizablePanel, ResizablePanelGroup} from '@/components
 import {TooltipProvider} from '@/components/ui/tooltip'
 import {useDefaultLayout, usePanelRef} from 'react-resizable-panels'
 import {Plus} from 'lucide-react'
-import {MOD} from '@/lib/keys'
+import {IS_MAC, MOD} from '@/lib/keys'
 import {useAppStore} from '@/store/app'
 
 // Panel sizing in one place. The chat column never drops below CENTER_MIN: the right column shrinks
@@ -91,7 +91,8 @@ export default function App() {
     window.addEventListener('resize', fit)
     return () => { clearInterval(t); window.removeEventListener('resize', fit) }
   }, [sidebar])
-  // Keyboard: Cmd/Ctrl+B sidebar, +Backspace delete session, +K or "/" composer, +N new session, +1..9 session, Esc agent view -> chat.
+  // Keyboard: Cmd/Ctrl+B sidebar, +Backspace delete session, +K or "/" composer, +N new session, Esc agent view -> chat;
+  // Cmd+1..9 (macOS) or Alt+1..9 (Linux, Windows) selects the numbered session.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const mod = (e.metaKey || e.ctrlKey) && !e.shiftKey && !e.altKey
@@ -99,12 +100,14 @@ export default function App() {
       const st = useAppStore.getState()
       const typing = e.target instanceof HTMLElement && e.target.closest('input, textarea, select, [contenteditable]')
       const dialogOpen = !!document.querySelector('[role=dialog]')
+      const sessionMod = !e.shiftKey && !e.ctrlKey && (IS_MAC ? e.metaKey && !e.altKey : e.altKey && !e.metaKey)
+      const digit = /^Digit[1-9]$/.test(e.code) ? Number(e.code.slice(5)) : 0 // e.code: Alt/Option can change e.key
       if (mod && key === 'b') toggleSidebar()
       else if (mod && key === 'k') document.querySelector<HTMLElement>('[data-composer]')?.focus()
       else if (key === '/' && !e.metaKey && !e.ctrlKey && !typing && !dialogOpen) document.querySelector<HTMLElement>('[data-composer]')?.focus()
       else if (mod && key === 'n' && !dialogOpen) document.querySelector<HTMLElement>('[data-new-session]')?.click()
       else if (mod && key === 'backspace' && !typing && !dialogOpen && st.selectedSessionId != null) st.setConfirmDelete(st.selectedSessionId)
-      else if (mod && /^[1-9]$/.test(key)) { const s = st.sessions[Number(key) - 1]; if (s) st.selectSession(s.id) }
+      else if (sessionMod && digit) { const s = st.sessions[digit - 1]; if (s) st.selectSession(s.id) }
       else if (key === 'escape' && st.selectedAgentId != null && !dialogOpen) st.selectAgent(null)
       else return
       e.preventDefault()

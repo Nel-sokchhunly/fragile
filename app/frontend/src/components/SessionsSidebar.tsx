@@ -5,7 +5,7 @@ import {StatusLabel} from '@/components/StatusLabel'
 import {Button} from '@/components/ui/button'
 import {ScrollArea} from '@/components/ui/scroll-area'
 import {Tip, Tooltip, TooltipContent, TooltipTrigger} from '@/components/ui/tooltip'
-import {MOD} from '@/lib/keys'
+import {MOD, SESSION_MOD} from '@/lib/keys'
 import type {Session, SessionStatus} from '@/lib/types'
 import {cn} from '@/lib/utils'
 import {useAppStore} from '@/store/app'
@@ -21,7 +21,7 @@ const STATUS: Record<SessionStatus | 'new', {label: string; text: string; dot: s
 
 const statusOf = (s: Session) => STATUS[s.status === 'done' && !s.agent_count ? 'new' : s.status]
 
-const hint = (i: number) => (i < 9 ? ` (${MOD}${i + 1})` : '')
+const hint = (i: number) => (i < 9 ? ` (${SESSION_MOD}${i + 1})` : '')
 
 function SessionRow({session, index, selected}: {session: Session; index: number; selected: boolean}) {
   const select = useAppStore((s) => s.selectSession)
@@ -38,6 +38,7 @@ function SessionRow({session, index, selected}: {session: Session; index: number
             selected && 'border-border-strong bg-background hover:bg-background',
           )}
         >
+          <span className="w-4 shrink-0 text-right font-mono text-xs text-muted-foreground tabular-nums">{index + 1}</span>
           <span className="min-w-0 flex-1 truncate">{session.title}</span>
           <StatusLabel
             sessionId={session.id} working={session.status === 'working'} label={st.label}
