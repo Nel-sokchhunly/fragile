@@ -178,8 +178,8 @@ func TestMCPSpawnSubagent(t *testing.T) {
 	if fi, _ := os.Stat(path); fi.Mode().Perm() != 0o600 {
 		t.Fatalf("mcp config mode = %v, want 0600", fi.Mode().Perm())
 	}
-	if log, _ := os.ReadFile(subs[0].LogPath); !strings.Contains(string(log), "--disallowedTools\n") || !strings.Contains(string(log), "--model\n"+defaultModel+"\n") {
-		t.Fatalf("no model given, so --model %s: %s", defaultModel, log)
+	if log, _ := os.ReadFile(subs[0].LogPath); !strings.Contains(string(log), "--disallowedTools\n") || strings.Contains(string(log), "--model\n") {
+		t.Fatalf("no model given, so no --model: %s", log)
 	}
 
 	// model: aliases map to full ids, a full "claude-" id passes as is, anything else is refused.

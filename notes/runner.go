@@ -475,9 +475,6 @@ func (r *Runner) createSubagent(sessionID, parentID int64, title, task string) (
 	return a, r.store.SetTaskAgent(sessionID, t.ID, a.ID)
 }
 
-// defaultModel runs every agent that is not given a model: the orchestrator always.
-const defaultModel = "claude-opus-5-5"
-
 // args builds the claude command line. The prompt goes after "--" so a task
 // starting with "-" is not parsed as a flag and the variadic flags stop there.
 // A non-empty resume is the Claude Code session id to continue (--resume); a
@@ -501,10 +498,9 @@ func (r *Runner) args(a Agent, workDir, mcpConfig, prompt, systemPrompt, resume,
 		}
 		args = append(args, "--settings", sandboxSettings(r.cfg, workDir))
 	}
-	if model == "" { // the orchestrator always, and sub-agents spawned without a model
-		model = defaultModel
+	if model != "" { // empty (the orchestrator, sub-agents spawned without a model) uses the CLI's default
+		args = append(args, "--model", model)
 	}
-	args = append(args, "--model", model)
 	if resume != "" {
 		args = append(args, "--resume", resume)
 	}

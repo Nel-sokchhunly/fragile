@@ -247,9 +247,9 @@ func TestRunnerArgs(t *testing.T) {
 	if slices.Contains(args, "--input-format") {
 		t.Errorf("one-shot args take input from stdin: %v", args)
 	}
-	// No model given: defaultModel (Opus); a given one goes in as --model <id>, before the prompt.
-	if i := slices.Index(args, "--model"); i < 0 || args[i+1] != defaultModel {
-		t.Errorf("args without a model must use --model %s: %v", defaultModel, args)
+	// No model given: no --model (the CLI's default); a given one goes in as --model <id>, before the prompt.
+	if slices.Contains(args, "--model") {
+		t.Errorf("args without a model must not pass --model: %v", args)
 	}
 	margs := r.args(Agent{Role: "subagent"}, "/w/dir", "/x/agent-3.mcp.json", "do -it", "SYS", "", "claude-sonnet-5-5")
 	if i := slices.Index(margs, "--model"); i < 0 || margs[i+1] != "claude-sonnet-5-5" || i > slices.Index(margs, "--") {
@@ -260,8 +260,8 @@ func TestRunnerArgs(t *testing.T) {
 	if i := slices.Index(iargs, "--input-format"); i < 0 || iargs[i+1] != "stream-json" || slices.Contains(iargs, "--") || slices.Contains(iargs, "--resume") {
 		t.Errorf("interactive orchestrator args: %v", iargs)
 	}
-	if i := slices.Index(iargs, "--model"); i < 0 || iargs[i+1] != "claude-opus-5-5" {
-		t.Errorf("the orchestrator must always run on Opus 5.5: %v", iargs)
+	if slices.Contains(iargs, "--model") {
+		t.Errorf("the orchestrator runs on the CLI's default model, no --model: %v", iargs)
 	}
 	// A resumed orchestrator gets the same arguments plus --resume <claude session id>.
 	rargs := r.args(Agent{Role: "orchestrator"}, "/w/dir", "/x/agent-3.mcp.json", "", "SYS", "abc-123", "")
