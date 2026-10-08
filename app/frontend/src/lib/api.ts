@@ -1,6 +1,6 @@
 import {
   AddNote, AnswerEscalation, CompactSession, CreateSessionWithProvider, DeleteSession, GetAgentEventTail, GetAgentEvents, GetAttachment, GetChanges, GetFileDiff, GetRateLimit, GetSession,
-  InterruptSession, ListSessions, PickDirectory, ResumeSession, SendMessage, StopSession, TerminalClose, TerminalOpen,
+  InterruptSession, ListRepos, ListSessions, PickDirectory, ResumeSession, SendMessage, StopSession, TerminalClose, TerminalOpen,
   TerminalResize, TerminalWrite, UpdateNote,
 } from '../../wailsjs/go/main/App'
 import type {Agent, AgentEvent, Attachment, Changes, ChatItem, Escalation, FileDiff, Note, NoteType, RateLimit, Session, Task} from './types'
@@ -60,11 +60,13 @@ export const api = {
   deleteSession: (sessionId: number): Promise<void> => DeleteSession(sessionId),
 
   // Uncommitted git changes in the session's work dir (read-only).
-  /** Changed and untracked files, sorted by path; is_repo false (no error) outside a git repo. */
+  /** Repo dirs relative to the work dir: [""] if the work dir is a repo, else its child repos; [] if none. */
+  listRepos: (sessionId: number) => as<string[] | null>(ListRepos(sessionId)).then((r) => r ?? []),
+  /** Changed and untracked files, sorted by path; is_repo false (no error) outside a git repo. `repo` is a listRepos entry. */
   // Go nil slices arrive as null; these hand back [] instead.
-  getChanges: (sessionId: number) => as<Changes>(GetChanges(sessionId)).then((c) => ({...c, files: c.files ?? []})),
+  getChanges: (sessionId: number, repo: string) => as<Changes>(GetChanges(sessionId, repo)).then((c) => ({...c, files: c.files ?? []})),
   /** -U3 hunks plus the whole working-tree file; `path` must be one of getChanges' files. */
-  getFileDiff: (sessionId: number, path: string) => as<FileDiff>(GetFileDiff(sessionId, path)).then((d) => ({
+  getFileDiff: (sessionId: number, repo: string, path: string) => as<FileDiff>(GetFileDiff(sessionId, repo, path)).then((d) => ({
     ...d, file_lines: d.file_lines ?? [], hunks: (d.hunks ?? []).map((h) => ({...h, lines: h.lines ?? []})),
   })),
 

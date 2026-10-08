@@ -42,12 +42,12 @@ export function GetAttachment(arg1, arg2, arg3) {
   return window['go']['main']['App']['GetAttachment'](arg1, arg2, arg3);
 }
 
-export function GetChanges(arg1) {
-  return window['go']['main']['App']['GetChanges'](arg1);
+export function GetChanges(arg1, arg2) {
+  return window['go']['main']['App']['GetChanges'](arg1, arg2);
 }
 
-export function GetFileDiff(arg1, arg2) {
-  return window['go']['main']['App']['GetFileDiff'](arg1, arg2);
+export function GetFileDiff(arg1, arg2, arg3) {
+  return window['go']['main']['App']['GetFileDiff'](arg1, arg2, arg3);
 }
 
 export function GetRateLimit() {
@@ -60,6 +60,10 @@ export function GetSession(arg1) {
 
 export function InterruptSession(arg1) {
   return window['go']['main']['App']['InterruptSession'](arg1);
+}
+
+export function ListRepos(arg1) {
+  return window['go']['main']['App']['ListRepos'](arg1);
 }
 
 export function ListSessions() {

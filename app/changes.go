@@ -62,10 +62,63 @@ type DiffLine struct {
 	NewNo int    `json:"new_no"`
 }
 
-// GetChanges lists the session's uncommitted files, sorted by path. A work dir
-// that is not a git repo gives is_repo=false and no error.
-func (a *App) GetChanges(sessionID int64) (Changes, error) {
-	dir, err := a.changesDir(sessionID)
+// ListRepos returns the git repos the panel can show, as paths relative to the
+// work dir: [""] when the work dir is itself in a repo, else its immediate
+// subdirectories that are repos, sorted. Empty means no repo.
+func (a *App) ListRepos(sessionID int64) ([]string, error) {
+	root, err := a.changesDir(sessionID)
+	if err != nil {
+		return nil, err
+	}
+	return listRepos(root), nil
+}
+
+func listRepos(root string) []string {
+	if isGitRepo(root) {
+		return []string{""}
+	}
+	repos := []string{}
+	// ponytail: depth 1 is the ceiling (no recursive walk); raise it if repos nest deeper than work_dir/<repo>
+	ents, _ := os.ReadDir(root)
+	for _, e := range ents {
+		n := e.Name()
+		if !e.IsDir() || strings.HasPrefix(n, ".") || n == "node_modules" { // symlinks are not IsDir, so none escape
+			continue
+		}
+		if _, err := os.Stat(filepath.Join(root, n, ".git")); err == nil {
+			repos = append(repos, n)
+		}
+	}
+	sort.Strings(repos)
+	return repos
+}
+
+// repoDir resolves repo (as listed by ListRepos; "" is the work dir) to the
+// directory git runs in.
+func (a *App) repoDir(sessionID int64, repo string) (string, error) {
+	root, err := a.changesDir(sessionID)
+	if err != nil {
+		return "", err
+	}
+	if repo == "" {
+		return root, nil
+	}
+	rel, err := cleanRelPath(repo)
+	if err != nil {
+		return "", err
+	}
+	for _, r := range listRepos(root) {
+		if r == rel {
+			return filepath.Join(root, filepath.FromSlash(rel)), nil
+		}
+	}
+	return "", fmt.Errorf("unknown repo %q", repo)
+}
+
+// GetChanges lists the selected repo's uncommitted files, sorted by path. A
+// repo that is not a git repo gives is_repo=false and no error.
+func (a *App) GetChanges(sessionID int64, repo string) (Changes, error) {
+	dir, err := a.repoDir(sessionID, repo)
 	if err != nil {
 		return Changes{}, err
 	}
@@ -81,9 +134,9 @@ func (a *App) GetChanges(sessionID int64) (Changes, error) {
 }
 
 // GetFileDiff returns one file's diff against HEAD (-U3 hunks) and its
-// working-tree lines. path is relative to the session's work dir.
-func (a *App) GetFileDiff(sessionID int64, path string) (FileDiff, error) {
-	dir, err := a.changesDir(sessionID)
+// working-tree lines. path is relative to the repo dir.
+func (a *App) GetFileDiff(sessionID int64, repo, path string) (FileDiff, error) {
+	dir, err := a.repoDir(sessionID, repo)
 	if err != nil {
 		return FileDiff{}, err
 	}
@@ -177,7 +230,7 @@ func (a *App) changesDir(sessionID int64) (string, error) {
 	return se.WorkDir, nil
 }
 
-// cleanRelPath rejects absolute paths and paths that leave the work dir, and
+// cleanRelPath rejects absolute paths and paths that leave their base dir, and
 // returns the cleaned slash-separated path.
 func cleanRelPath(p string) (string, error) {
 	c := filepath.Clean(p)

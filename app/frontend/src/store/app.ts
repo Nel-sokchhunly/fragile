@@ -28,6 +28,7 @@ type AppState = {
   confirmDelete: number | null // session awaiting delete confirmation
   terminalOpen: Record<number, boolean> // by session id: its terminal pane is shown (not persisted)
   changesOpen: Record<number, boolean> // by session id: the right column shows Code changes instead of Agents + Notes (not persisted)
+  changesRepo: Record<number, string> // by session id: the repo (relative to its work dir) the Code changes panel shows (not persisted)
 
   init: () => Promise<void>
   selectSession: (id: number | null) => void
@@ -38,6 +39,7 @@ type AppState = {
   setSidebarCollapsed: (c: boolean) => void
   toggleTerminal: (sessionId: number) => void
   toggleChanges: (sessionId: number) => void
+  setChangesRepo: (sessionId: number, repo: string) => void
   notify: (e: unknown) => void
   // Throw the backend's error string; the caller shows it inline.
   createSession: (name: string, workDir: string, provider?: 'claude' | 'codex') => Promise<void>
@@ -132,6 +134,7 @@ export const useAppStore = create<AppState>((set, get) => {
     confirmDelete: null,
     terminalOpen: {},
     changesOpen: {},
+    changesRepo: {},
 
     init: async () => {
       void api.getRateLimit().then((l) => l && get().setLimit(l), (e) => get().notify(e))
@@ -152,6 +155,7 @@ export const useAppStore = create<AppState>((set, get) => {
     setSidebarCollapsed: (sidebarCollapsed) => set({sidebarCollapsed}),
     toggleTerminal: (sid) => set((s) => ({terminalOpen: {...s.terminalOpen, [sid]: !s.terminalOpen[sid]}})),
     toggleChanges: (sid) => set((s) => ({changesOpen: {...s.changesOpen, [sid]: !s.changesOpen[sid]}})),
+    setChangesRepo: (sid, repo) => set((s) => ({changesRepo: {...s.changesRepo, [sid]: repo}})),
 
     notify: (e) => {
       const id = ++toastId
@@ -231,12 +235,13 @@ export const useAppStore = create<AppState>((set, get) => {
       const {[sid]: ___, ...compacting} = get().compacting
       const {[sid]: ____, ...drafts} = get().drafts
       const {[sid]: _____, ...changesOpen} = get().changesOpen
+      const {[sid]: ______, ...changesRepo} = get().changesRepo
       // lastLine knows its session, so agents of a never-opened snapshot are found too.
       const ids = new Set([...(gone?.agents.map((a) => a.id) ?? []), ...Object.entries(get().lastLine).filter(([, l]) => l.sid === sid).map(([k]) => +k)])
       for (const id of ids) agentLoads.delete(id)
       const drop = <T,>(m: Record<number, T>) => Object.fromEntries(Object.entries(m).filter(([k]) => !ids.has(+k))) as Record<number, T>
       set((s) => ({
-        sessions: rest, data, busy, compacting, drafts, terminalOpen, changesOpen,
+        sessions: rest, data, busy, compacting, drafts, terminalOpen, changesOpen, changesRepo,
         agentEvents: drop(s.agentEvents), agentLoaded: drop(s.agentLoaded), lastLine: drop(s.lastLine),
         selectedAgentId: s.selectedAgentId != null && ids.has(s.selectedAgentId) ? null : s.selectedAgentId,
       }))

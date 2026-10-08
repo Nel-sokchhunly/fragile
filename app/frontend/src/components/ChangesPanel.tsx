@@ -24,19 +24,50 @@ export function ChangesPanel({sessionId}: {sessionId: number}) {
   const [loading, setLoading] = useState(false)
   const [diffs, setDiffs] = useState<Record<string, DiffEntry>>({})
   const [toggled, setToggled] = useState<Record<string, boolean>>({}) // the user's collapse choice per path
+  const [repos, setRepos] = useState<string[]>([])
+  const [repo, setRepo] = useState<string | null>(null) // null until listRepos answered; "" = the work dir itself
+  const repoRef = useRef<string | null>(null)
   const list = useRef<GroupedVirtuosoHandle>(null)
   const alive = useRef(true)
   const busy = useRef(false)
+  const fetching = useRef(new Set<string>())
   const latest = useRef(changes)
   latest.current = changes
 
-  const refresh = useCallback(async () => {
+  const switchTo = useCallback((r: string) => {
+    repoRef.current = r
+    setRepo(r)
+    setChanges(null)
+    setDiffs({})
+    setToggled({})
+    setError('')
+    fetching.current.clear()
+  }, [])
+
+  // relist: re-run listRepos first (on open and on the button; polls reuse the known list).
+  const refresh = useCallback(async (relist = false) => {
     if (busy.current) return
     busy.current = true
     setLoading(true)
     try {
-      const c = await api.getChanges(sessionId)
-      if (!alive.current) return
+      let cur = repoRef.current
+      if (relist || cur === null) {
+        const rs = await api.listRepos(sessionId)
+        if (!alive.current) return
+        setRepos(rs)
+        const stored = useAppStore.getState().changesRepo[sessionId]
+        const pick = rs.length === 0 ? null : rs.includes(stored) ? stored : rs[0]
+        if (pick !== cur) switchTo(pick ?? '')
+        if (pick === null) { // no repo anywhere
+          setError('')
+          setChanges({is_repo: false, files: []})
+          return
+        }
+        cur = pick
+      }
+      if (cur === null) return
+      const c = await api.getChanges(sessionId, cur)
+      if (!alive.current || repoRef.current !== cur) return
       setError('')
       setChanges((p) => (p && JSON.stringify(p) === JSON.stringify(c) ? p : c))
       const paths = new Set(c.files.map((f) => f.path))
@@ -47,17 +78,23 @@ export function ChangesPanel({sessionId}: {sessionId: number}) {
       busy.current = false
       if (alive.current) setLoading(false)
     }
-  }, [sessionId])
+  }, [sessionId, switchTo])
   useEffect(() => {
     alive.current = true
     return () => { alive.current = false }
   }, [])
+  const select = (r: string) => {
+    useAppStore.getState().setChangesRepo(sessionId, r)
+    switchTo(r)
+    busy.current = false // an in-flight reply for the old repo is dropped by its repo check
+    void refresh()
+  }
   const working = useAppStore((s) => (s.busy[sessionId] ?? 0) > 0
     || !!s.data[sessionId]?.agents.some((a) => a.role !== 'orchestrator' && a.status === 'running'))
   useEffect(() => {
-    void refresh() // on open, and once more when agents stop (their last edits)
+    void refresh(true) // on open, and once more when agents stop (their last edits)
     if (!working) return
-    const t = setInterval(refresh, POLL_MS)
+    const t = setInterval(() => void refresh(), POLL_MS)
     return () => clearInterval(t)
   }, [working, refresh])
   // A sub-agent finishing usually means files changed.
@@ -69,8 +106,8 @@ export function ChangesPanel({sessionId}: {sessionId: number}) {
     toggled[f.path] ?? (f.binary || f.added + f.removed > MAX_OPEN_LINES || !!diffs[f.path]?.diff?.too_large)), [files, toggled, diffs])
 
   // Fetch diffs of open files whose sig moved. A reply for a sig that is no longer current is dropped.
-  const fetching = useRef(new Set<string>())
   useEffect(() => {
+    if (repo === null) return
     const need = (files ?? []).filter((f, i) => !closed[i] && !f.binary && diffs[f.path]?.sig !== f.sig && !fetching.current.has(`${f.path}\0${f.sig}`))
     if (!need.length) return
     void (async () => {
@@ -79,14 +116,14 @@ export function ChangesPanel({sessionId}: {sessionId: number}) {
           const key = `${f.path}\0${f.sig}`
           fetching.current.add(key)
           let e: DiffEntry
-          try { e = {sig: f.sig, diff: await api.getFileDiff(sessionId, f.path)} } catch (err) { e = {sig: f.sig, error: String(err)} }
+          try { e = {sig: f.sig, diff: await api.getFileDiff(sessionId, repo, f.path)} } catch (err) { e = {sig: f.sig, error: String(err)} }
           fetching.current.delete(key)
-          if (!alive.current || latest.current?.files.find((x) => x.path === f.path)?.sig !== f.sig) return
+          if (!alive.current || repoRef.current !== repo || latest.current?.files.find((x) => x.path === f.path)?.sig !== f.sig) return
           setDiffs((d) => ({...d, [f.path]: e}))
         }))
       }
     })()
-  }, [files, closed, diffs, sessionId])
+  }, [files, closed, diffs, sessionId, repo])
 
   const toggle = useCallback((path: string) => {
     const i = latest.current?.files.findIndex((f) => f.path === path) ?? -1
@@ -98,12 +135,20 @@ export function ChangesPanel({sessionId}: {sessionId: number}) {
     <section className="flex h-full min-h-0 flex-col" aria-label="Code changes">
       <header className="flex h-9 shrink-0 items-center gap-2 pr-1.5 pl-3">
         <h2 className="text-title font-semibold">Changes</h2>
+        {repos.length > 1 && repo !== null && (
+          <select
+            value={repo} onChange={(e) => select(e.target.value)} aria-label="Repository" title="Repository"
+            className="h-6 min-w-0 max-w-[40%] shrink cursor-pointer truncate rounded-md border bg-background px-1 font-mono text-xs text-foreground"
+          >
+            {repos.map((r) => <option key={r} value={r}>{r}</option>)}
+          </select>
+        )}
         {files && files.length > 0 && (
           <span className="min-w-0 flex-1 truncate font-mono text-xs text-muted-foreground">
             {files.length} {files.length === 1 ? 'file' : 'files'} <Counts {...total}/>
           </span>
         )}
-        <Button variant="ghost" size="icon-sm" className="ml-auto" onClick={() => void refresh()} aria-label="Refresh changes" title="Refresh">
+        <Button variant="ghost" size="icon-sm" className="ml-auto" onClick={() => void refresh(true)} aria-label="Refresh changes" title="Refresh">
           <RefreshCw className={cn(loading && 'animate-spin')}/>
         </Button>
       </header>
