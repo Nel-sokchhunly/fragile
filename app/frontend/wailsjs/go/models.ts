@@ -32,6 +32,62 @@ export namespace main {
 	        this.size = source["size"];
 	    }
 	}
+	export class ChangedFile {
+	    path: string;
+	    old_path: string;
+	    status: string;
+	    added: number;
+	    removed: number;
+	    binary: boolean;
+	    sig: string;
+
+	    static createFrom(source: any = {}) {
+	        return new ChangedFile(source);
+	    }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.path = source["path"];
+	        this.old_path = source["old_path"];
+	        this.status = source["status"];
+	        this.added = source["added"];
+	        this.removed = source["removed"];
+	        this.binary = source["binary"];
+	        this.sig = source["sig"];
+	    }
+	}
+	export class Changes {
+	    is_repo: boolean;
+	    files: ChangedFile[];
+
+	    static createFrom(source: any = {}) {
+	        return new Changes(source);
+	    }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.is_repo = source["is_repo"];
+	        this.files = this.convertValues(source["files"], ChangedFile);
+	    }
+
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
 	export class ChatItem {
 	    id: number;
 	    kind: string;
@@ -58,6 +114,100 @@ export namespace main {
 	        this.at = source["at"];
 	    }
 	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
+	export class DiffLine {
+	    kind: string;
+	    text: string;
+	    old_no: number;
+	    new_no: number;
+
+	    static createFrom(source: any = {}) {
+	        return new DiffLine(source);
+	    }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.kind = source["kind"];
+	        this.text = source["text"];
+	        this.old_no = source["old_no"];
+	        this.new_no = source["new_no"];
+	    }
+	}
+	export class Hunk {
+	    old_start: number;
+	    old_lines: number;
+	    new_start: number;
+	    new_lines: number;
+	    lines: DiffLine[];
+
+	    static createFrom(source: any = {}) {
+	        return new Hunk(source);
+	    }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.old_start = source["old_start"];
+	        this.old_lines = source["old_lines"];
+	        this.new_start = source["new_start"];
+	        this.new_lines = source["new_lines"];
+	        this.lines = this.convertValues(source["lines"], DiffLine);
+	    }
+
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
+	export class FileDiff {
+	    path: string;
+	    binary: boolean;
+	    too_large: boolean;
+	    hunks: Hunk[];
+	    file_lines: string[];
+
+	    static createFrom(source: any = {}) {
+	        return new FileDiff(source);
+	    }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.path = source["path"];
+	        this.binary = source["binary"];
+	        this.too_large = source["too_large"];
+	        this.hunks = this.convertValues(source["hunks"], Hunk);
+	        this.file_lines = source["file_lines"];
+	    }
+
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
 		    if (!a) {
 		        return a;

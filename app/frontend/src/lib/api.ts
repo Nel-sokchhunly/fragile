@@ -1,9 +1,9 @@
 import {
-  AddNote, AnswerEscalation, CompactSession, CreateSessionWithProvider, DeleteSession, GetAgentEventTail, GetAgentEvents, GetAttachment, GetRateLimit, GetSession,
+  AddNote, AnswerEscalation, CompactSession, CreateSessionWithProvider, DeleteSession, GetAgentEventTail, GetAgentEvents, GetAttachment, GetChanges, GetFileDiff, GetRateLimit, GetSession,
   InterruptSession, ListSessions, PickDirectory, ResumeSession, SendMessage, StopSession, TerminalClose, TerminalOpen,
   TerminalResize, TerminalWrite, UpdateNote,
 } from '../../wailsjs/go/main/App'
-import type {Agent, AgentEvent, Attachment, ChatItem, Escalation, Note, NoteType, RateLimit, Session, Task} from './types'
+import type {Agent, AgentEvent, Attachment, Changes, ChatItem, Escalation, FileDiff, Note, NoteType, RateLimit, Session, Task} from './types'
 
 // Typed wrappers around the generated Wails bindings (wailsjs/go, regenerate with `wails generate module`
 // from app/). The generated typings use classes and plain `string` for enums; the values are plain JSON
@@ -58,6 +58,15 @@ export const api = {
   resumeSession: (sessionId: number): Promise<void> => ResumeSession(sessionId),
   /** Stops the session, then removes it and its chat, agents and notes from Fragile (never its files). */
   deleteSession: (sessionId: number): Promise<void> => DeleteSession(sessionId),
+
+  // Uncommitted git changes in the session's work dir (read-only).
+  /** Changed and untracked files, sorted by path; is_repo false (no error) outside a git repo. */
+  // Go nil slices arrive as null; these hand back [] instead.
+  getChanges: (sessionId: number) => as<Changes>(GetChanges(sessionId)).then((c) => ({...c, files: c.files ?? []})),
+  /** -U3 hunks plus the whole working-tree file; `path` must be one of getChanges' files. */
+  getFileDiff: (sessionId: number, path: string) => as<FileDiff>(GetFileDiff(sessionId, path)).then((d) => ({
+    ...d, file_lines: d.file_lines ?? [], hunks: (d.hunks ?? []).map((h) => ({...h, lines: h.lines ?? []})),
+  })),
 
   // The session's shell (one per session, in its work dir). Output arrives as terminal_output events.
   /** Starts the shell if none is running (else resizes it); resolves with the base64 backlog of recent output. */

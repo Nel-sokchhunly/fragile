@@ -70,6 +70,8 @@
     --color-escalation-bg: var(--escalation-bg);
     --color-escalation-hover: var(--escalation-hover);
     --color-status-decision: var(--status-decision);
+    --color-diff-added: var(--diff-added);
+    --color-diff-removed: var(--diff-removed);
     /* design surfaces / borders / text levels (names follow docs/design/fragile-design-spec.md) */
     --color-surface-sunken: var(--surface-sunken);
     --color-surface-hover: var(--surface-hover);
@@ -148,6 +150,9 @@
     --escalation-fg: var(--status-needs-you);
     --escalation-bg: #3d3a2a; /* Zed warning.background */
     --escalation-hover: #947c52; /* warning.border at 60% over the background */
+    /* diff view (Zed created / deleted); line tints use these at low alpha */
+    --diff-added: #98c379;
+    --diff-removed: #e06c75;
 }
 
 /* Palette: Zed theme "Claude Code Inspired Dark" (warm brown neutrals, orange accent). */

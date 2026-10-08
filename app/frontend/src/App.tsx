@@ -1,5 +1,6 @@
 import {useDeferredValue, useEffect, useState} from 'react'
 import {AgentsPanel} from '@/components/AgentsPanel'
+import {ChangesPanel} from '@/components/ChangesPanel'
 import {NotesPanel} from '@/components/NotesPanel'
 import {DeleteSessionDialog} from '@/components/DeleteSessionDialog'
 import {NewSessionDialog} from '@/components/NewSessionDialog'
@@ -57,6 +58,7 @@ function EmptyCenter() {
 export default function App() {
   const sessionId = useAppStore((s) => s.selectedSessionId)
   const agentId = useAppStore((s) => s.selectedAgentId)
+  const changesOpen = useAppStore((s) => sessionId != null && !!s.changesOpen[sessionId])
   // Highlights (sidebar rows, agent cards) read the live ids and paint at once; the heavy center view follows.
   const viewSessionId = useDeferredValue(sessionId)
   const viewAgentId = useDeferredValue(agentId)
@@ -128,11 +130,13 @@ export default function App() {
         </ResizablePanel>
         <ResizableHandle/>
         <ResizablePanel id="right" defaultSize={RIGHT.default} minSize={RIGHT.min}>
-          <ResizablePanelGroup id="fragile-right-v2" orientation="vertical" defaultLayout={right.defaultLayout} onLayoutChanged={right.onLayoutChanged}>
-            <ResizablePanel id="agents" defaultSize="60%" minSize="20%"><AgentsPanel sessionId={sessionId}/></ResizablePanel>
-            <ResizableHandle/>
-            <ResizablePanel id="notes" defaultSize="40%" minSize="15%"><NotesPanel sessionId={sessionId}/></ResizablePanel>
-          </ResizablePanelGroup>
+          {sessionId != null && changesOpen ? <ChangesPanel key={sessionId} sessionId={sessionId}/> : (
+            <ResizablePanelGroup id="fragile-right-v2" orientation="vertical" defaultLayout={right.defaultLayout} onLayoutChanged={right.onLayoutChanged}>
+              <ResizablePanel id="agents" defaultSize="60%" minSize="20%"><AgentsPanel sessionId={sessionId}/></ResizablePanel>
+              <ResizableHandle/>
+              <ResizablePanel id="notes" defaultSize="40%" minSize="15%"><NotesPanel sessionId={sessionId}/></ResizablePanel>
+            </ResizablePanelGroup>
+          )}
         </ResizablePanel>
       </ResizablePanelGroup>
       <DeleteSessionDialog/>

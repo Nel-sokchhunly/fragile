@@ -19,6 +19,23 @@ function highlighter() {
   return hl
 }
 
+// One coloured run of a line; style holds the --shiki-light/--shiki-dark vars (index.css picks one).
+export type Token = {content: string; htmlStyle?: Record<string, string>}
+
+// Per-line tokens for renderers that lay out lines themselves (the diff view), or null when the language is
+// unsupported. Not cached: callers keep the result.
+export async function tokenize(code: string, lang: string): Promise<Token[][] | null> {
+  const load = bundledLanguages[lang.toLowerCase() as keyof typeof bundledLanguages]
+  if (!load) return null
+  const h = await highlighter()
+  await h.loadLanguage(load())
+  return h.codeToTokens(code, {
+    lang: lang.toLowerCase(),
+    themes: {light: 'github-light', dark: 'claude-code-inspired-dark'},
+    defaultColor: false,
+  }).tokens
+}
+
 // ponytail: unbounded cache keyed by lang+code; add an LRU if memory shows up in long sessions.
 const cache = new Map<string, string>()
 

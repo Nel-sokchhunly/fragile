@@ -86,6 +86,17 @@ export type Attachment = {name: string; media_type: string; data: string}
 // What the chat keeps of a sent attachment (Go: AttachmentInfo); size in bytes. Fetch it with api.getAttachment.
 export type AttachmentInfo = {name: string; media_type: string; size: number}
 
+// Uncommitted changes in a session's work dir (Go: app/changes.go). status "?" = untracked.
+// sig changes whenever the file's diff may have, so the UI refetches only those.
+export type ChangeStatus = 'M' | 'A' | 'D' | 'R' | '?'
+export type ChangedFile = {path: string; old_path: string; status: ChangeStatus; added: number; removed: number; binary: boolean; sig: string}
+export type Changes = {is_repo: boolean; files: ChangedFile[]}
+// kind ' ' context, '+' added, '-' removed; 0 = no line on that side.
+export type DiffLine = {kind: ' ' | '+' | '-'; text: string; old_no: number; new_no: number}
+export type Hunk = {old_start: number; old_lines: number; new_start: number; new_lines: number; lines: DiffLine[]}
+// file_lines: the whole working-tree file (empty if deleted); too_large: no hunks and no file_lines.
+export type FileDiff = {path: string; binary: boolean; too_large: boolean; hunks: Hunk[]; file_lines: string[]}
+
 // One row of the orchestrator chat (Go: ChatItem in app/sessions.go). id is the underlying agent_events id,
 // so it is unique and ordered within a session.
 export type ChatItem =

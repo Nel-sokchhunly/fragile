@@ -1,5 +1,5 @@
 import {type DragEvent, type ReactNode, useEffect, useRef, useState} from 'react'
-import {CornerDownLeft, Paperclip, Square, SquareTerminal} from 'lucide-react'
+import {CornerDownLeft, FileDiff, Paperclip, Square, SquareTerminal} from 'lucide-react'
 import {Button} from '@/components/ui/button'
 import {Textarea} from '@/components/ui/textarea'
 import {FileChip, ImageChip} from '@/components/chat/Attachments'
@@ -29,14 +29,16 @@ async function clipboardImage(): Promise<File | undefined> {
 // Files come from the paperclip, drag-and-drop onto the box, or paste; a message may be attachments only.
 // `onInterrupt` (set while the orchestrator works) adds an Interrupt button; data-interrupt lets ChatView's Esc click it.
 // `disabledReason` turns the box off and says why (may hold an action). data-composer lets the global shortcuts focus it.
-// `terminal` adds the terminal pane toggle left of the box (it stays usable while the box is off).
+// `terminal` adds the terminal pane toggle left of the box (it stays usable while the box is off); `changes` likewise
+// toggles the right column between Agents + Notes and Code changes.
 // `sessionId` keeps the draft (text and attachments) in the store per session, so it survives switching; without it
 // the draft is plain local state. `sendDisabled` blocks sending only (typing stays on), e.g. while compacting.
-export function Composer({onSend, onInterrupt, placeholder, label, disabledReason, sendDisabled, sessionId, terminal, allowPDF = true}: {
+export function Composer({onSend, onInterrupt, placeholder, label, disabledReason, sendDisabled, sessionId, terminal, changes, allowPDF = true}: {
   onSend: (text: string, attachments: Attachment[]) => Promise<void>; onInterrupt?: () => Promise<void>
   placeholder: string; label: string; disabledReason?: ReactNode; sendDisabled?: boolean; sessionId?: number
   allowPDF?: boolean
   terminal?: {open: boolean; onToggle: () => void}
+  changes?: {open: boolean; onToggle: () => void}
 }) {
   const stored = useAppStore((s) => (sessionId != null ? s.drafts[sessionId] : undefined))
   const [local, setLocal] = useState(NO_DRAFT)
@@ -128,6 +130,14 @@ export function Composer({onSend, onInterrupt, placeholder, label, disabledReaso
               className={cn('mb-1 shrink-0', terminal.open && 'bg-accent text-foreground')}
             >
               <SquareTerminal/>
+            </Button>
+          )}
+          {changes && (
+            <Button
+              variant="ghost" size="icon-sm" onClick={changes.onToggle} aria-pressed={changes.open} aria-label="Code changes" title="Code changes"
+              className={cn('mb-1 shrink-0', changes.open && 'bg-accent text-foreground')}
+            >
+              <FileDiff/>
             </Button>
           )}
           <div className="relative min-w-0 flex-1">
