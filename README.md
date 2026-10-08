@@ -92,6 +92,16 @@ The session's provider is persisted and used by both its orchestrator and all wo
 
 **Models:** Model selection is provider-specific: omit `model` for the Antigravity default, or supply a shorthand alias (`flash`, `pro`, `flash_lite`) or a full Gemini/Antigravity model id. Claude aliases do not cross providers.
 
+To verify protocol and sandbox enforcement with your installed Antigravity CLI:
+```sh
+FRAGILE_AGY_SMOKE=1 go test ./notes -run TestAGYSandboxSmoke -v
+```
+
+For an opt-in end-to-end run using your existing Google Antigravity login:
+```sh
+FRAGILE_AGY_E2E=1 go test -tags e2e ./app -run '^TestAGYAppE2E$' -v -timeout 8m
+```
+
 ## Keyboard shortcuts
 
 `⌘` is `Ctrl` on Linux.

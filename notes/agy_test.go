@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"os/exec"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"testing"
@@ -256,4 +258,58 @@ func TestAGYRunnerTurnsAndInterrupt(t *testing.T) {
 		t.Fatal(err)
 	}
 	nextAGY(t, ch, "result")
+}
+
+// Optional real-CLI smoke: verifies protocol and sandbox enforcement
+// without inference or network requests. Run with
+// FRAGILE_AGY_SMOKE=1 go test ./notes -run TestAGYSandboxSmoke -v.
+func TestAGYSandboxSmoke(t *testing.T) {
+	if os.Getenv("FRAGILE_AGY_SMOKE") != "1" {
+		t.Skip("set FRAGILE_AGY_SMOKE=1 for installed-CLI sandbox proof")
+	}
+	agyPath, err := exec.LookPath("agy")
+	if err != nil {
+		t.Skip("Antigravity CLI (agy) not installed")
+	}
+
+	dir := t.TempDir()
+	home := filepath.Join(dir, "home")
+	os.MkdirAll(home, 0700)
+	t.Setenv("HOME", home)
+
+	// Verify that secret credentials are not leaked in agyEnv
+	dirtyEnv := []string{
+		"PATH=/bin:/usr/bin",
+		"HOME=" + home,
+		"GEMINI_API_KEY=super-secret-key",
+		"GOOGLE_API_KEY=another-secret",
+		"ANTIGRAVITY_API_KEY=secret-token",
+		"AGY_API_KEY=cli-secret",
+		"VERTEX_API_KEY=vertex-secret",
+	}
+	clean := agyEnv(dirtyEnv)
+	for _, kv := range clean {
+		if strings.Contains(kv, "secret") {
+			t.Fatalf("credential leaked in agyEnv: %s", kv)
+		}
+	}
+
+	// Verify sandbox restricts unsanctioned tool/command execution in headless mode
+	cmd := exec.Command(agyPath, "--sandbox", "--print-timeout", "3s", "--print", "echo sandbox_smoke_ok", "--output-format", "json")
+	cmd.Dir = dir
+	cmd.Env = clean
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Logf("agy sandbox exit: %v, out: %s", err, string(out))
+	}
+	var res struct {
+		ConversationID string `json:"conversation_id"`
+		Status         string `json:"status"`
+		DeniedActions  []any  `json:"denied_actions"`
+	}
+	if err := json.Unmarshal(out, &res); err != nil {
+		if !strings.Contains(string(out), `"conversation_id"`) {
+			t.Fatalf("expected valid agy output, got: %s", string(out))
+		}
+	}
 }

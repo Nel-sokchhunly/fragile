@@ -1,10 +1,13 @@
 package notes
 
 import (
+	"context"
 	"database/sql"
 	"errors"
+	"io/fs"
 	"os"
 	"path/filepath"
+	"sort"
 	"testing"
 )
 
@@ -237,8 +240,8 @@ func TestMigratePhase0Database(t *testing.T) {
 
 	var v int
 	s.db.QueryRow(`PRAGMA user_version`).Scan(&v)
-	if v != 7 {
-		t.Fatalf("user_version = %d, want 7", v)
+	if v != 8 {
+		t.Fatalf("user_version = %d, want 8", v)
 	}
 	sess, err := s.GetSession(1)
 	if err != nil || sess.Title != "old" || sess.Status != SessionDone {
@@ -408,5 +411,73 @@ func TestReopenEscalation(t *testing.T) {
 	}
 	if _, err := s.AnswerEscalation(sess.ID, e.ID, "again"); err != nil { // can be answered again
 		t.Fatal(err)
+	}
+}
+
+func TestMigrateV7ToV8(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "v7.db")
+	db, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	conn, err := db.Conn(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	files, err := fs.Glob(migrationFS, "migrations/*.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	sort.Strings(files)
+	// Apply migrations 1 through 7
+	for i := 0; i < 7; i++ {
+		if err := applyMigration(ctx, conn, files[i], i+1); err != nil {
+			t.Fatalf("migration %s: %v", files[i], err)
+		}
+	}
+	// At v7, inserting 'claude' and 'codex' sessions works
+	if _, err := conn.ExecContext(ctx, `INSERT INTO sessions (id, title, provider) VALUES (1, 'c1', 'claude'), (2, 'c2', 'codex')`); err != nil {
+		t.Fatal(err)
+	}
+	// At v7, inserting 'agy' fails due to CHECK constraint
+	if _, err := conn.ExecContext(ctx, `INSERT INTO sessions (id, title, provider) VALUES (3, 'a1', 'agy')`); err == nil {
+		t.Fatal("v7 should reject agy provider before migration 008")
+	}
+	conn.Close()
+	db.Close()
+
+	// Open with OpenStore which migrates v7 -> v8
+	s, err := OpenStore(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+
+	var v int
+	s.db.QueryRow(`PRAGMA user_version`).Scan(&v)
+	if v != 8 {
+		t.Fatalf("user_version = %d, want 8", v)
+	}
+
+	// Verify old sessions preserved
+	s1, err := s.GetSession(1)
+	if err != nil || s1.Title != "c1" || s1.Provider != ProviderClaude {
+		t.Fatalf("migrated session 1 = %+v, err %v", s1, err)
+	}
+	s2, err := s.GetSession(2)
+	if err != nil || s2.Title != "c2" || s2.Provider != ProviderCodex {
+		t.Fatalf("migrated session 2 = %+v, err %v", s2, err)
+	}
+
+	// Creating agy session works now
+	s3, err := s.CreateSessionWithProvider("a1", t.TempDir(), ProviderAGY)
+	if err != nil || s3.Provider != ProviderAGY {
+		t.Fatalf("create agy session = %+v, err %v", s3, err)
+	}
+
+	// Invalid provider is still rejected
+	if _, err := s.CreateSessionWithProvider("inv", t.TempDir(), "unsupported"); err == nil {
+		t.Fatal("invalid provider should be rejected")
 	}
 }
