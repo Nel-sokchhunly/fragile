@@ -1,5 +1,6 @@
 import {MessageSquare, Terminal} from 'lucide-react'
 import {agentContext, agentState, formatExact, modelName} from '@/lib/format'
+import {Tip} from '@/components/ui/tooltip'
 import {cn} from '@/lib/utils'
 import type {Agent, Task} from '@/lib/types'
 
@@ -27,11 +28,11 @@ export function AgentCard({agent, task, latestLine, elapsed, selected, onSelect}
     `pid ${agent.pid ?? '-'} · started ${formatExact(agent.created_at)}${agent.exited_at ? ` · ended ${formatExact(agent.exited_at)}` : ''}`,
   ].filter(Boolean).join('\n')
   return (
+    <Tip content={tip} side="left">
     <button
       type="button"
       onClick={onSelect}
       aria-pressed={!!selected}
-      title={tip}
       className={cn(
         'flex w-full min-w-0 flex-col rounded-lg border border-border-default px-2.5 py-1.5 text-left transition-colors hover:border-border-strong hover:bg-accent focus-visible:border-border-strong focus-visible:outline-none',
         selected && 'border-border-strong bg-accent',
@@ -40,8 +41,8 @@ export function AgentCard({agent, task, latestLine, elapsed, selected, onSelect}
       <span className="flex w-full justify-between gap-2 leading-5">
         <span className="min-w-0 truncate font-semibold"><span className="font-mono text-xs font-normal text-muted-foreground">#{agent.id}</span> {title}</span>
         <span className="flex shrink-0 gap-2 font-mono text-xs">
-          {agent.model && <span className="text-muted-foreground" title={agent.model}>{modelName(agent.model)}</span>}
-          {ctx && <span className={ctx.cls} title="context used / window">{ctx.text}</span>}
+          {agent.model && <Tip content={agent.model}><span className="text-muted-foreground">{modelName(agent.model)}</span></Tip>}
+          {ctx && <Tip content="context used / window"><span className={ctx.cls}>{ctx.text}</span></Tip>}
           <span className={STATE_CLS[agent.status]}>{agentState(agent)} {elapsed}</span>
         </span>
       </span>
@@ -52,5 +53,6 @@ export function AgentCard({agent, task, latestLine, elapsed, selected, onSelect}
         </span>
       )}
     </button>
+    </Tip>
   )
 }

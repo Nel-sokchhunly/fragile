@@ -50,4 +50,22 @@ function TooltipContent({
   )
 }
 
-export { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger }
+function Tip({
+  content,
+  side,
+  children,
+}: {
+  content?: React.ReactNode
+  side?: React.ComponentProps<typeof TooltipPrimitive.Content>["side"]
+  children: React.ReactElement
+}) {
+  if (!content) return children
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>{children}</TooltipTrigger>
+      <TooltipContent side={side} className="block break-words whitespace-pre-line">{content}</TooltipContent>
+    </Tooltip>
+  )
+}
+
+export { Tip, Tooltip, TooltipContent, TooltipProvider, TooltipTrigger }

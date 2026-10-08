@@ -5,7 +5,7 @@ import {Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, Di
 import {ScrollArea} from '@/components/ui/scroll-area'
 import {Select, SelectContent, SelectItem, SelectTrigger, SelectValue} from '@/components/ui/select'
 import {Textarea} from '@/components/ui/textarea'
-import {Tooltip, TooltipContent, TooltipTrigger} from '@/components/ui/tooltip'
+import {Tip, Tooltip, TooltipContent, TooltipTrigger} from '@/components/ui/tooltip'
 import {formatExact, formatTime} from '@/lib/format'
 import type {Note, NoteType} from '@/lib/types'
 import {cn} from '@/lib/utils'
@@ -78,7 +78,8 @@ function NoteRow({sessionId, note}: {sessionId: number; note: Note}) {
   const resolved = note.status === 'resolved'
   const [open, setOpen] = useState(false)
   return (
-    <li className={cn('group relative flex gap-2 text-[13px] leading-[18px]', resolved && 'opacity-55')} title={`${formatExact(note.created_at)}${resolved ? ' · resolved' : ''}`}>
+    <Tip content={`${formatExact(note.created_at)}${resolved ? ' · resolved' : ''}`} side="left">
+    <li className={cn('group relative flex gap-2 text-[13px] leading-[18px]', resolved && 'opacity-55')}>
       {/* Collapsed to one line by default; click to expand. */}
       <button
         type="button" aria-expanded={open} onClick={() => setOpen(!open)}
@@ -89,13 +90,16 @@ function NoteRow({sessionId, note}: {sessionId: number; note: Note}) {
         {note.content}
       </button>
       <time className="shrink-0 font-mono text-mini text-muted-foreground group-focus-within:opacity-0 group-hover:opacity-0" dateTime={note.created_at}>{formatTime(note.created_at)}</time>
-      <Button
-        variant="ghost" size="icon-xs" className="absolute top-0 right-0 size-[18px] bg-background opacity-0 group-focus-within:opacity-100 group-hover:opacity-100"
-        aria-label={resolved ? 'Reopen note' : 'Resolve note'} title={resolved ? 'Reopen' : 'Resolve'} onClick={() => setStatus(sessionId, note.id, resolved ? 'open' : 'resolved')}
-      >
-        {resolved ? <Undo2/> : <Check/>}
-      </Button>
+      <Tip content={resolved ? 'Reopen' : 'Resolve'}>
+        <Button
+          variant="ghost" size="icon-xs" className="absolute top-0 right-0 size-[18px] bg-background opacity-0 group-focus-within:opacity-100 group-hover:opacity-100"
+          aria-label={resolved ? 'Reopen note' : 'Resolve note'} onClick={() => setStatus(sessionId, note.id, resolved ? 'open' : 'resolved')}
+        >
+          {resolved ? <Undo2/> : <Check/>}
+        </Button>
+      </Tip>
     </li>
+    </Tip>
   )
 }
 

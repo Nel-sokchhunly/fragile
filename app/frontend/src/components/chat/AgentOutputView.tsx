@@ -3,7 +3,7 @@ import {Virtuoso} from 'react-virtuoso'
 import {ArrowLeft, ChevronRight} from 'lucide-react'
 import {Button} from '@/components/ui/button'
 import {Collapsible, CollapsibleContent, CollapsibleTrigger} from '@/components/ui/collapsible'
-import {Tooltip, TooltipContent, TooltipTrigger} from '@/components/ui/tooltip'
+import {Tip, Tooltip, TooltipContent, TooltipTrigger} from '@/components/ui/tooltip'
 import {Markdown} from '@/components/Markdown'
 import {useNow} from '@/hooks/use-now'
 import {agentContext, agentElapsed, agentLabel, agentState, formatElapsed, formatExact} from '@/lib/format'
@@ -38,7 +38,7 @@ const EventRow = memo(function EventRow({ev, start}: {ev: AgentEvent; start: num
   const p = parse(ev.payload)
   return (
     <div className="mx-auto grid max-w-[680px] grid-cols-[40px_minmax(0,1fr)] gap-2 px-6 py-[3px]">
-      <time className="font-mono text-mini leading-5 text-muted-foreground" dateTime={ev.created_at} title={formatExact(ev.created_at)}>{formatElapsed(Date.parse(ev.created_at) - start)}</time>
+      <Tip content={formatExact(ev.created_at)}><time className="font-mono text-mini leading-5 text-muted-foreground" dateTime={ev.created_at}>{formatElapsed(Date.parse(ev.created_at) - start)}</time></Tip>
       <div className="min-w-0">
         {ev.event_type === 'assistant_text' && <div className="leading-5"><Markdown>{String(p.text ?? '')}</Markdown></div>}
         {ev.event_type === 'tool_use' && <Fold title={String(p.name ?? 'tool')} body={JSON.stringify(p.input ?? {}, null, 2)}/>}
@@ -56,9 +56,11 @@ function Meta({agent, count}: {agent: Agent; count: number}) {
   const now = useNow()
   const ctx = agentContext(agent)
   return (
-    <div className="truncate font-mono text-xs leading-4 whitespace-nowrap text-muted-foreground" title={`pid ${agent.pid ?? '-'} · started ${formatExact(agent.created_at)}`}>
-      {ctx && <><span className={ctx.cls} title="context used / window">ctx {ctx.text}</span> · </>}{agentElapsed(agent, now)} · {count.toLocaleString()} ev
-    </div>
+    <Tip content={`pid ${agent.pid ?? '-'} · started ${formatExact(agent.created_at)}`}>
+      <div className="truncate font-mono text-xs leading-4 whitespace-nowrap text-muted-foreground">
+        {ctx && <><Tip content="context used / window"><span className={ctx.cls}>ctx {ctx.text}</span></Tip> · </>}{agentElapsed(agent, now)} · {count.toLocaleString()} ev
+      </div>
+    </Tip>
   )
 }
 
@@ -96,7 +98,7 @@ export function AgentOutputView({sessionId, agentId}: {sessionId: number; agentI
           {agent && <Meta agent={agent} count={events.length}/>}
         </div>
       </header>
-      {task?.description && <p className="truncate border-b px-6 py-1 text-[13px] text-text-secondary" title={task.description}>{task.description}</p>}
+      {task?.description && <Tip content={task.description} side="bottom"><p className="truncate border-b px-6 py-1 text-[13px] text-text-secondary">{task.description}</p></Tip>}
       {/* Absolutely positioned list: its height never depends on percentage resolution inside flex. */}
       <div className="relative min-h-0 flex-1">
         {!loaded ? (

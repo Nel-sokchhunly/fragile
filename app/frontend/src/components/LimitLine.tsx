@@ -1,3 +1,4 @@
+import {Tip} from '@/components/ui/tooltip'
 import {useNow} from '@/hooks/use-now'
 import {formatReset, limitPct, usageCls} from '@/lib/format'
 import type {LimitWindow} from '@/lib/types'
@@ -19,11 +20,13 @@ export function LimitLine({compact}: {compact?: boolean}) {
   const part = (label: string, w: LimitWindow | null) => (
     <span className={usageCls(w?.utilization ?? 0)}>{label} {limitPct(w)}</span>
   )
-  if (isCodex) return <span title="Codex subscription limits are not reported here" className="px-3 font-mono text-xs text-muted-foreground">{compact ? '—' : 'Codex · limits unavailable'}</span>
-  if (compact) return <span title={title} className={cn('font-mono text-mini', usageCls(five?.utilization ?? 0))}>{limitPct(five)}</span>
+  if (isCodex) return <Tip content="Codex subscription limits are not reported here"><span className="px-3 font-mono text-xs text-muted-foreground">{compact ? '—' : 'Codex · limits unavailable'}</span></Tip>
+  if (compact) return <Tip content={title} side="right"><span className={cn('font-mono text-mini', usageCls(five?.utilization ?? 0))}>{limitPct(five)}</span></Tip>
   return (
-    <p title={title} className="truncate px-3 py-1.5 font-mono text-xs whitespace-nowrap text-muted-foreground">
-      {part('5h', five)} · {part('7d', seven)}
-    </p>
+    <Tip content={title} side="top">
+      <p className="truncate px-3 py-1.5 font-mono text-xs whitespace-nowrap text-muted-foreground">
+        {part('5h', five)} · {part('7d', seven)}
+      </p>
+    </Tip>
   )
 }
