@@ -1,7 +1,7 @@
 import {create} from 'zustand'
 import {api} from '@/lib/api'
 import type {PendingAttachment} from '@/lib/attachments'
-import type {Agent, AgentEvent, Attachment, ChatItem,Note, NoteType, RateLimit, Session, SessionStatus, Task} from '@/lib/types'
+import type {Agent, AgentEvent, Attachment, ChatItem, Note, NoteType, RateLimit, Session, SessionProvider, SessionStatus, Task} from '@/lib/types'
 
 // Zustand store fed by the backend: snapshots (lib/api.ts) on first view of a session, then Wails events
 // (lib/events.ts) routed here by session_id. Components only read it via selectors.
@@ -42,7 +42,7 @@ type AppState = {
   setChangesRepo: (sessionId: number, repo: string) => void
   notify: (e: unknown) => void
   // Throw the backend's error string; the caller shows it inline.
-  createSession: (name: string, workDir: string, provider?: 'claude' | 'codex') => Promise<void>
+  createSession: (name: string, workDir: string, provider?: SessionProvider) => Promise<void>
   sendMessage: (sessionId: number, text: string, attachments?: Attachment[]) => Promise<void>
   compactSession: (sessionId: number) => Promise<void>
   // Report failures as toasts.

@@ -3,7 +3,7 @@ import {
   InterruptSession, ListRepos, ListSessions, PickDirectory, ResumeSession, SendMessage, SetSettings, StopSession, TerminalClose, TerminalOpen,
   TerminalResize, TerminalWrite, UpdateNote,
 } from '../../wailsjs/go/main/App'
-import type {Agent, AgentEvent, Attachment, Changes, ChatItem, Escalation, FileDiff, Note, NoteType, RateLimit, Session, Settings, Task} from './types'
+import type {Agent, AgentEvent, Attachment, Changes, ChatItem, Escalation, FileDiff, Note, NoteType, RateLimit, Session, SessionProvider, Settings, Task} from './types'
 
 // Typed wrappers around the generated Wails bindings (wailsjs/go, regenerate with `wails generate module`
 // from app/). The generated typings use classes and plain `string` for enums; the values are plain JSON
@@ -25,7 +25,7 @@ export const api = {
   /** Native directory chooser; '' if cancelled. */
   pickDirectory: (): Promise<string> => PickDirectory(),
   /** Creates an empty session in `workDir` (must exist); `name` '' = the directory's name. The orchestrator starts with the first sendMessage. */
-  createSession: (name: string, workDir: string, provider: 'claude' | 'codex' = 'claude') => as<Session>(CreateSessionWithProvider(name, workDir, provider)),
+  createSession: (name: string, workDir: string, provider: SessionProvider = 'claude') => as<Session>(CreateSessionWithProvider(name, workDir, provider)),
   /** Latest subscription limits seen, null until any agent reported them. */
   getRateLimit: () => as<RateLimit | null>(GetRateLimit()),
   /** User preferences, with defaults for anything never set. */

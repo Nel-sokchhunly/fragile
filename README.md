@@ -36,7 +36,7 @@ Download the latest `build-N` release from [Releases](https://github.com/Nel-sok
   ```
 - **Linux** (`fragile-linux-amd64.tar.gz`): needs `libgtk-3` and `libwebkit2gtk-4.1`. Agents need `bubblewrap` and `socat` (`apt install bubblewrap socat`); without them a session refuses to start.
 
-Requires your selected provider's CLI on `PATH`, logged in: [`claude`](https://docs.claude.com/en/docs/claude-code) for Claude, or [Codex CLI](https://developers.openai.com/codex/cli) for Codex (setup below). Agents use your existing subscription login; no API key needed.
+Requires your selected provider's CLI on `PATH`, logged in: [`claude`](https://docs.claude.com/en/docs/claude-code) for Claude, [Codex CLI](https://developers.openai.com/codex/cli) for Codex, or Antigravity CLI (`agy`) for Antigravity (setup below). Agents use your existing subscription login; no API key needed.
 
 ## Build from source
 
@@ -82,6 +82,29 @@ This exercises the app API and emitted UI events, not desktop clicks. If `CODEX_
 ## Settings
 
 The gear button in the sidebar opens Settings. **Auto-compact at (tokens)** compacts a session's orchestrator (like clicking its context figure) when a turn ends and its context has reached that many tokens. Empty or 0 turns it off (the default); otherwise 20000 to 1000000. It never compacts twice in a row. Settings are stored in the app's database and apply to every session, Claude Code and Codex alike.
+
+## Antigravity (agy) with your Google login
+
+Choose **Antigravity (agy)** in the new-session dialog. Install [Antigravity CLI](https://antigravity.google/docs/cli) (`agy`) on the same machine and log in with your Google Antigravity account. Fragile uses that CLI's existing credential storage; it does not ask for an API key, copy login tokens, or implement its own OAuth flow.
+
+The one-shot notes CLI also accepts:
+```bash
+fragile -provider agy -dir /path/to/project "your task"
+```
+
+The session's provider is persisted and used by both its orchestrator and all workers. Existing sessions stay on their configured provider. Antigravity runs through the CLI's stream adapter: persistent chat turns, Fragile notes/team MCP, escalation answers, text/image input, stop, interrupt, and saved-thread resume.
+
+**Models:** Model selection is provider-specific: omit `model` for the Antigravity default, or supply a shorthand alias (`flash`, `pro`, `flash_lite`) or a full Gemini/Antigravity model id. Claude aliases do not cross providers.
+
+To verify protocol and sandbox enforcement with your installed Antigravity CLI:
+```sh
+FRAGILE_AGY_SMOKE=1 go test ./notes -run TestAGYSandboxSmoke -v
+```
+
+For an opt-in end-to-end run using your existing Google Antigravity login:
+```sh
+FRAGILE_AGY_E2E=1 go test -tags e2e ./app -run '^TestAGYAppE2E$' -v -timeout 8m
+```
 
 ## Keyboard shortcuts
 

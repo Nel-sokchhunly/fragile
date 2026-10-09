@@ -16,7 +16,7 @@ import {api} from '@/lib/api'
 import {agentContext, agentLabel, agentState, agentSummary, formatElapsed, formatExact, formatTime, modelName} from '@/lib/format'
 import {focusComposer} from '@/lib/keys'
 import {isToggleKey} from '@/lib/terminal'
-import type {ChatItem, SessionStatus} from '@/lib/types'
+import {PROVIDER_NAMES, type ChatItem, type SessionStatus} from '@/lib/types'
 import {cn} from '@/lib/utils'
 import {NO_AGENTS, NO_CHAT, orchestratorRunning, useAppStore} from '@/store/app'
 
@@ -315,7 +315,7 @@ export function ChatView({sessionId}: {sessionId: number}) {
         <div className="grid min-w-0 flex-1">
           <div className="flex min-w-0 items-baseline gap-2.5">
             <h1 className="min-w-0 truncate text-title font-semibold">{session?.title}</h1>
-            <span className="shrink-0 text-xs text-muted-foreground">{session?.provider === 'codex' ? 'Codex' : 'Claude'}</span>
+            <span className="shrink-0 text-xs text-muted-foreground">{session ? (PROVIDER_NAMES[session.provider] ?? 'Claude') : ''}</span>
             {st && <StatusLabel sessionId={sessionId} working={session?.status === 'working'} label={st.label} className={cn('shrink-0 font-mono text-xs', st.cls)}/>}
           </div>
           <div className="flex min-w-0 items-baseline gap-2 font-mono text-xs leading-4 text-muted-foreground">

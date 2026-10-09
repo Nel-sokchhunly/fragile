@@ -278,6 +278,7 @@ const (
 // One Runner serves every session of a store; sessions can be stopped
 // individually (StopSession) or together (StopAll).
 type Runner struct {
+	AGYCommand   string   // Antigravity CLI binary; defaults to agy
 	CodexCommand string   // Codex CLI binary; defaults to codex
 	Command      string   // binary to run; "claude" unless a test substitutes a fake
 	PluginDirs   []string // --plugin-dir values for sub-agents (set before use; see UserPluginDirs)
@@ -313,6 +314,7 @@ type proc struct {
 	agentID   int64
 	exited    chan struct{}
 	codex     *codexClient
+	agy       *agyClient
 	stdin     *stdinPipe // nil unless the agent takes messages on stdin
 	killed    bool       // the runner signalled it on purpose (stop); guarded by Runner.mu
 }
@@ -357,7 +359,7 @@ func (r *Runner) workDir(sessionID int64) string {
 }
 
 func NewRunner(cfg Config, store *Store, log *EventLog) *Runner {
-	r := &Runner{Command: "claude", CodexCommand: "codex", cfg: cfg, store: store, log: log,
+	r := &Runner{Command: "claude", CodexCommand: "codex", AGYCommand: "agy", cfg: cfg, store: store, log: log,
 		running: map[int]*proc{}, sessions: map[int64]*sessionRun{}}
 	r.Preflight = func() error { return checkPrereqs(r.Command) }
 	return r
@@ -430,6 +432,12 @@ func (r *Runner) SpawnSubagent(sessionID, parentID int64, title, task, model str
 	}
 	if r.provider(sessionID) == ProviderCodex {
 		if err := validCodexModel(model); err != nil {
+			return Agent{}, err
+		}
+	}
+	if r.provider(sessionID) == ProviderAGY {
+		var err error
+		if model, err = resolveAGYModel(model); err != nil {
 			return Agent{}, err
 		}
 	}
@@ -525,6 +533,8 @@ func (r *Runner) launch(a Agent, taskTitle, prompt, systemPrompt, resume, model 
 	preflight := r.Preflight
 	if r.provider(a.SessionID) == ProviderCodex && preflight != nil {
 		preflight = func() error { return checkCodexPrereqs(r.CodexCommand) }
+	} else if r.provider(a.SessionID) == ProviderAGY && preflight != nil {
+		preflight = func() error { return checkAGYPrereqs(r.AGYCommand) }
 	}
 	if preflight != nil {
 		if err := preflight(); err != nil {
@@ -558,6 +568,9 @@ func (r *Runner) launch(a Agent, taskTitle, prompt, systemPrompt, resume, model 
 func (r *Runner) start(a Agent, mcpConfig, logPath, prompt, systemPrompt, resume, model string) (int, <-chan exit, error) {
 	if r.provider(a.SessionID) == ProviderCodex {
 		return r.startCodex(a, mcpConfig, logPath, prompt, systemPrompt, resume, model)
+	}
+	if r.provider(a.SessionID) == ProviderAGY {
+		return r.startAGY(a, mcpConfig, logPath, prompt, systemPrompt, resume, model)
 	}
 	// Refuse before any file is written; checked again under the lock below.
 	r.mu.Lock()

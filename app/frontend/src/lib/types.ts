@@ -9,8 +9,16 @@ export type NoteType = 'decision' | 'blocker' | 'heads_up' | 'done' | 'question'
 export type NoteStatus = 'open' | 'resolved'
 export type EscalationStatus = 'open' | 'answered'
 
+export type SessionProvider = 'claude' | 'codex' | 'agy'
+
+export const PROVIDER_NAMES: Record<SessionProvider, string> = {
+  claude: 'Claude',
+  codex: 'Codex',
+  agy: 'Antigravity',
+}
+
 export type Session = {
-  provider: 'claude' | 'codex'
+  provider: SessionProvider
   id: number
   title: string
   status: SessionStatus

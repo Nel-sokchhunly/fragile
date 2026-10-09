@@ -242,10 +242,13 @@ func (s *Server) spawnSubagent(_ context.Context, a Agent, in spawnIn) (any, err
 	}
 	model := strings.TrimSpace(in.Model)
 	var err error
-	if s.Runner.provider(a.SessionID) == ProviderClaude {
+	switch s.Runner.provider(a.SessionID) {
+	case ProviderClaude:
 		model, err = resolveModel(model)
-	} else {
+	case ProviderCodex:
 		err = validCodexModel(model)
+	case ProviderAGY:
+		model, err = resolveAGYModel(model)
 	}
 	if err != nil {
 		return nil, err

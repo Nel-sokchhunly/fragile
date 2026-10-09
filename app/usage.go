@@ -58,6 +58,9 @@ func parseContext(line []byte, model string) (c ctxInfo) {
 			if l.Provider == notes.ProviderCodex {
 				c.Window = 0
 			}
+			if l.Provider == notes.ProviderAGY {
+				c.Window = longContextWindow
+			}
 			if strings.HasSuffix(l.Model, "[1m]") {
 				c.Window = longContextWindow
 			}
@@ -186,8 +189,12 @@ func (a *App) trackUsage(ag notes.Agent, line []byte) {
 		window = c.Window
 	}
 	if window == 0 {
-		if se, err := a.store.GetSession(ag.SessionID); err == nil && se.Provider != notes.ProviderCodex {
-			window = defaultWindow
+		if se, err := a.store.GetSession(ag.SessionID); err == nil {
+			if se.Provider == notes.ProviderAGY {
+				window = longContextWindow
+			} else if se.Provider != notes.ProviderCodex {
+				window = defaultWindow
+			}
 		}
 	}
 	changed := false
