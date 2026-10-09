@@ -88,11 +88,18 @@ The one-shot notes CLI also accepts:
 fragile -provider agy -dir /path/to/project "your task"
 ```
 
-The session's provider is persisted and used by both its orchestrator and all workers. Existing sessions stay on their configured provider. Antigravity runs through the CLI's stream adapter: persistent chat turns, Fragile notes/team MCP, escalation answers, text/image input, stop, interrupt, and saved-thread resume.
+The session's provider is persisted and used by both its orchestrator and all workers. Existing sessions stay on their configured provider. Each agent runs `agy --input-format stream-json --output-format stream-json --sandbox` and gets messages on stdin: persistent chat turns, Fragile notes/team MCP, escalation answers, stop, and conversation resume (`--conversation`). Not supported: interrupt (agy has no interrupt message; wait or stop the session), `/compact`, and image/PDF attachments (only the text is sent).
 
-**Models:** Model selection is provider-specific: omit `model` for the Antigravity default, or supply a shorthand alias (`flash`, `pro`, `flash_lite`) or a full Gemini/Antigravity model id. Claude aliases do not cross providers.
+agy reads its configuration only from `~/.gemini`, so Fragile gives every agent its own HOME at `<agent-dir>/agent-N.home`:
+- `.gemini/GEMINI.md`: the agent's Fragile prompt, then your own `~/.gemini/GEMINI.md`.
+- `.gemini/config/mcp_config.json`: only the Fragile MCP server; `.gemini/config/hooks.json`: denies agy's native sub-agent tools.
+- `.gemini/config/config.json`, `.gemini/antigravity` and the entries of `.gemini/antigravity-cli`: links to yours (login, conversations), except `settings.json`, a copy of yours with `permissions.allow` rules added: `command(*)` (run under `--sandbox`), reading and writing the project directory, and the Fragile MCP tools. Headless agy auto-denies anything not allowed; denials show in the chat.
 
-To verify protocol and sandbox enforcement with your installed Antigravity CLI:
+Commands the agents run see that HOME, with `GOPATH`, `XDG_CACHE_HOME` and `GIT_CONFIG_GLOBAL` pointed back at yours unless already set.
+
+**Models:** Model selection is provider-specific: omit `model` for the Antigravity default, or supply a shorthand alias (`flash` = `gemini-3.8-flash-medium`, `pro` = `gemini-3.1-pro-high`, `flash_lite` = `gemini-3.8-flash-low`) or any id from `agy models`. Claude Code aliases (`sonnet`, `opus`, `haiku`) are rejected.
+
+To verify the protocol and the permission rules with your installed Antigravity CLI (runs two short turns on your login):
 ```sh
 FRAGILE_AGY_SMOKE=1 go test ./notes -run TestAGYSandboxSmoke -v
 ```

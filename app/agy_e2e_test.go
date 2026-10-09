@@ -13,7 +13,8 @@ import (
 )
 
 // Uses the operator's existing Google Antigravity login and the real app backend, CLI,
-// worker sandbox and authenticated MCP server. Opt-in: no paid API credential.
+// per-agent HOME (GEMINI.md prompt, MCP config, permission rules, hooks) and
+// authenticated MCP server. Opt-in: no paid API credential.
 // FRAGILE_AGY_E2E=1 go test -tags e2e -run TestAGYAppE2E -v -timeout 8m ./app
 func TestAGYAppE2E(t *testing.T) {
 	if os.Getenv("FRAGILE_AGY_E2E") != "1" {
@@ -71,13 +72,16 @@ func TestAGYAppE2E(t *testing.T) {
 	send("Run only the shell command sleep 30, then reply AGY_SLEEP_DONE. No other work.")
 	wait("running turn", func(s SessionSnapshot) bool { return s.Session.Status == "working" })
 	time.Sleep(time.Second)
-	if err := a.InterruptSession(se.ID); err != nil {
-		t.Fatal(err)
+	// agy has no interrupt message: the request fails and the turn runs on.
+	if err := a.InterruptSession(se.ID); err == nil || !strings.Contains(err.Error(), "not supported for Antigravity") {
+		t.Fatalf("interrupt: %v", err)
 	}
-	wait("interrupt completion", func(s SessionSnapshot) bool { return s.Session.Status == "done" })
-	send("Reply exactly AGY_AFTER_INTERRUPT_OK; no tools.")
-	wait("same-process follow-up after interrupt", func(s SessionSnapshot) bool {
-		return s.Session.Status == "done" && contains(s, "AGY_AFTER_INTERRUPT_OK")
+	wait("sandboxed command turn", func(s SessionSnapshot) bool {
+		return s.Session.Status == "done" && contains(s, "AGY_SLEEP_DONE")
+	})
+	send("Reply exactly AGY_SAME_PROCESS_OK; no tools.")
+	wait("same-process follow-up", func(s SessionSnapshot) bool {
+		return s.Session.Status == "done" && contains(s, "AGY_SAME_PROCESS_OK")
 	})
 	if err := a.StopSession(se.ID); err != nil {
 		t.Fatal(err)
