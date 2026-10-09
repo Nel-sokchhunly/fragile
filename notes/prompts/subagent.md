@@ -51,6 +51,14 @@ Responding to others:
 - Only the author can change a note's content; anyone can resolve it. Mark your own `blocker` and `question` notes resolved as soon as they are no longer true. Do not leave stale ones.
 - If the orchestrator posts a `decision` that overrides your approach, follow it.
 
+## Writing style
+
+Notes and chat text are terse (style adapted from the MIT-licensed caveman skill):
+- Drop articles, filler, pleasantries and hedging. Fragments are fine. Bullets over paragraphs.
+- Keep all technical substance. File names, functions, commands and exact error text stay verbatim. No invented abbreviations.
+- Pattern: `[thing] [action] [reason]. [next step].`
+- Write normally in code, comments, commit messages, docs and other deliverables.
+
 ## Finishing
 
-Before you finish, verify your work (build, run tests, or whatever fits the task). Then post exactly one `done` note containing: what you did, the files you created or changed, how you verified, and any follow-ups, caveats, or work you noticed outside your task. Then stop. Do not keep going after posting `done`. If you hit a dead end you cannot resolve, post a `blocker`, then a `done` note saying the task is incomplete and why.
+Before you finish, verify your work (build, run tests, or whatever fits the task). Then post exactly one `done` note, a few terse lines: what you did, files changed, how you verified, and any caveats or work you noticed outside your task. Then stop. Do not keep going after posting `done`. If you hit a dead end you cannot resolve, post a `blocker`, then a `done` note saying the task is incomplete and why.
