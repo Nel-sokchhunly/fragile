@@ -1,6 +1,6 @@
 import {EventsOn} from '../../wailsjs/runtime/runtime'
 import {upsert, useAppStore, type SessionData} from '@/store/app'
-import type {Agent, AgentEvent, AgentStatus, AgentRole, ChatItem, Escalation, Note, RateLimit, Session, SessionStatus, Task, TaskStatus} from './types'
+import type {Agent, AgentActivity, AgentEvent, AgentStatus, AgentRole, ChatItem, Escalation, Note, RateLimit, Session, SessionStatus, Task, TaskStatus} from './types'
 
 // Go -> Wails events -> Zustand store -> components. Components never poll.
 // Event names and payloads live here; keep in sync with the emitters in app/*.go
@@ -40,12 +40,18 @@ export type EventMap = {
   agent_updated: Envelope<Agent>
   task_updated: Envelope<Task>
 
+  // A running sub-agent's busy / paused flags changed (agent_id in the envelope too).
+  agent_activity: Envelope<AgentActivity & {agent_id: number}>
+
   // New row of an agent's output (assistant_text {text}, tool_use {id,name,input}, tool_result {tool_use_id,content,is_error},
   // user_message {text, attachments?: [{name, media_type, size}]}, escalation {escalation_id}, plus raw system / result). Append to agentEvents[agent_id].
   // May arrive just before that agent's agent_spawned.
   agent_event: Envelope<AgentEvent>
   // Upsert by `id` into the session's orchestrator chat (an answered escalation re-arrives with the same id).
   chat_item: Envelope<ChatItem>
+
+  // The backend started a compaction itself (auto-compact): show the "compacting" state until the orchestrator's next result.
+  session_compacting: Envelope<null>
 
   // Notes board. author_agent_id 0 = the user.
   note_posted: Envelope<Note>
@@ -85,7 +91,9 @@ export function subscribeEvents() {
     on('note_updated', patch((d, n: Note) => ({...d, notes: upsert(d.notes, n)}))),
     // The chat shows escalations through chat_item; this only keeps a displayed one in step.
     on('escalation', patch((d, x: Escalation) => ({...d, chat: d.chat.map((c) => (c.kind === 'escalation' && c.escalation.id === x.id ? {...c, escalation: x} : c))}))),
+    on('session_compacting', (e) => useAppStore.setState((s) => ({compacting: {...s.compacting, [e.session_id]: Date.now()}}))),
     on('agent_event', (e) => st().agentEvent(e.session_id, e.payload)),
+    on('agent_activity', (e) => st().setActivity(e.payload.agent_id, {busy: e.payload.busy, paused: e.payload.paused})),
   ]
   return () => offs.forEach((off) => off())
 }

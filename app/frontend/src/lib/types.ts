@@ -44,9 +44,15 @@ export type Agent = {
   model?: string // e.g. "claude-opus-5-5", from the agent's init line; absent = unknown
 }
 
+// Runtime state of a running sub-agent (Go: AgentActivity): mid-turn, and paused by the user (no automatic wakes).
+export type AgentActivity = {busy: boolean; paused: boolean}
+
 // Account-wide subscription limits; utilization 0..1, resets_at unix seconds. null window = not reported yet.
 export type LimitWindow = {utilization: number; resets_at: number}
 export type RateLimit = {five_hour: LimitWindow | null; seven_day: LimitWindow | null}
+
+// User preferences (Go: Settings). auto_compact_tokens: 0 = off, else 20000..1000000.
+export type Settings = {auto_compact_tokens: number}
 
 export type Task = {
   id: number

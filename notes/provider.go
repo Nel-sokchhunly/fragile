@@ -24,6 +24,9 @@ func CheckProvider(p string) error {
 	return nil
 }
 func (r *Runner) provider(id int64) string {
+	if r.store == nil {
+		return ProviderClaude // arg-only test runners
+	}
 	if s, e := r.store.GetSession(id); e == nil {
 		if s.Provider == ProviderCodex {
 			return ProviderCodex
@@ -144,7 +147,7 @@ func codexPrompt(a Agent, prompt string) string {
 		prompt = strings.ReplaceAll(prompt, "Claude Code", "Codex")
 		prompt = strings.ReplaceAll(prompt, "Each sub-agent is a separate headless Codex process.", "Each sub-agent is a separate Codex app-server process.")
 		start = strings.Index(prompt, "4. **Spawn**")
-		end = strings.Index(prompt, "5. **Wait loop.**")
+		end = strings.Index(prompt, "5. **Wait") // both the one-shot loop and the interactive variant
 		if start >= 0 && end > start {
 			prompt = prompt[:start] + "4. **Spawn** independent sub-agents with spawn_subagent. Omit model to use the installed Codex default; if selecting a model, use a full Codex model id available to your account, never Claude aliases.\n" + prompt[end:]
 		}
@@ -222,7 +225,7 @@ func agyPrompt(a Agent, prompt string) string {
 	prompt = strings.ReplaceAll(prompt, "Claude Code", "Antigravity")
 	if a.Role == roleOrchestrator {
 		start := strings.Index(prompt, "4. **Spawn**")
-		end := strings.Index(prompt, "5. **Wait loop.**")
+		end := strings.Index(prompt, "5. **Wait") // both the one-shot loop and the interactive variant
 		if start >= 0 && end > start {
 			prompt = prompt[:start] + "4. **Spawn** independent sub-agents with spawn_subagent. Omit model to use the Antigravity default, or pass an AGY model id (e.g. \"flash\", \"pro\", \"flash_lite\").\n" + prompt[end:]
 		}
