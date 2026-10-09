@@ -126,3 +126,16 @@ func TestPromptProviders(t *testing.T) {
 		t.Error("OrchestratorPrompt did not substitute {{PROVIDERS}}")
 	}
 }
+
+// Codex and Antigravity orchestrators get the same CLI-neutral spawn guidance.
+func TestNonClaudeOrchestratorPromptKeepsProviders(t *testing.T) {
+	base := OrchestratorPrompt("/w", true, providersText([]string{ProviderClaude, ProviderAGY}, ProviderClaude))
+	orch := Agent{Role: roleOrchestrator}
+	for name, p := range map[string]string{"codex": codexPrompt(orch, base), "agy": agyPrompt(orch, base)} {
+		for _, want := range []string{"spawn_subagent(title, task, scopes, model?, provider?)", providerSpecs[ProviderClaude].hint, providerSpecs[ProviderAGY].hint, "**Easy, well-scoped work**"} {
+			if !strings.Contains(p, want) {
+				t.Errorf("%s orchestrator prompt lacks %q", name, want)
+			}
+		}
+	}
+}

@@ -61,7 +61,7 @@ var providerSpecs = map[string]providerSpec{
 			return nil
 		},
 		model: resolveModel,
-		hint:  "claude (Claude Code; models: sonnet, opus, haiku)",
+		hint:  "claude (Claude; models: sonnet, opus, haiku)",
 	},
 	ProviderCodex: {
 		detect: func() error { return checkCodexPrereqs("codex") },
@@ -201,8 +201,9 @@ func codexArgs(cfg Config, dir, marker string) []string {
 	return args
 }
 
-// Existing prompts describe Claude-specific tool names, permissions and models.
-// Replace those sections, keeping team lifecycle and escalation semantics.
+// Existing prompts describe Claude-specific tool names and permissions.
+// Replace those sections, keeping team lifecycle, escalation and the
+// CLI-neutral spawn guidance.
 func codexPrompt(a Agent, prompt string) string {
 	prompt = strings.ReplaceAll(prompt, "Task/Agent", "spawn_agent")
 	prompt = strings.ReplaceAll(prompt, "The orchestrator is not sandboxed.", "The orchestrator is also sandboxed and may need to escalate a denied action to the user.")
@@ -213,19 +214,6 @@ func codexPrompt(a Agent, prompt string) string {
 			prompt = prompt[:start] + "## Sandbox\n\nAll Codex agents, including you, are sandboxed: project/cache writes only, credential and Fragile-state reads denied, and command networking limited to package registries and GitHub. A denied action must be escalated with its exact command; do not bypass the sandbox.\n\n" + prompt[end:]
 		}
 		prompt = strings.ReplaceAll(prompt, "Claude Code", "Codex")
-		prompt = strings.ReplaceAll(prompt, "Each sub-agent is a separate headless Codex process.", "Each sub-agent is a separate Codex app-server process.")
-		start = strings.Index(prompt, "4. **Spawn**")
-		end = strings.Index(prompt, "5. **Wait") // both the one-shot loop and the interactive variant
-		if start >= 0 && end > start {
-			prompt = prompt[:start] + "4. **Spawn** independent sub-agents with spawn_subagent. Omit model to use the installed Codex default; if selecting a model, use a full Codex model id available to your account, never Claude aliases.\n" + prompt[end:]
-		}
-		lines := strings.Split(prompt, "\n")
-		for i, line := range lines {
-			if strings.HasPrefix(line, "- `spawn_subagent(") {
-				lines[i] = "- `spawn_subagent(title, task, scopes, model?)` - use `scopes: [\"session\"]`. Always provide a short title and a self-contained task. Omit model for the authenticated Codex catalog default, or pass a full available Codex model id. Never use Claude aliases."
-			}
-		}
-		prompt = strings.Join(lines, "\n")
 	}
 	return prompt + "\n\nUse only the Fragile MCP server for team coordination. Native delegation is disabled. Do not spawn agents with shell commands, contact unrelated MCP servers, or read personal skills, hooks, or memories.\n"
 }
@@ -299,24 +287,11 @@ func validAGYModel(model string) error {
 	return err
 }
 
-// agyPrompt tailors system prompts for Antigravity agents.
+// agyPrompt tailors system prompts for Antigravity agents. The orchestrator's
+// spawn and model guidance is CLI-neutral (see providersText), so it stays.
 func agyPrompt(a Agent, prompt string) string {
 	prompt = strings.ReplaceAll(prompt, "Task/Agent", "invoke_subagent")
 	prompt = strings.ReplaceAll(prompt, "Claude Code", "Antigravity")
 	prompt = strings.ReplaceAll(prompt, "The orchestrator is not sandboxed.", "The orchestrator also runs under the Antigravity terminal sandbox and may need to escalate a denied action to the user.")
-	if a.Role == roleOrchestrator {
-		start := strings.Index(prompt, "4. **Spawn**")
-		end := strings.Index(prompt, "5. **Wait") // both the one-shot loop and the interactive variant
-		if start >= 0 && end > start {
-			prompt = prompt[:start] + "4. **Spawn** independent sub-agents with spawn_subagent. Omit model to use the Antigravity default, or pass an AGY model id (e.g. \"flash\", \"pro\", \"flash_lite\").\n" + prompt[end:]
-		}
-		lines := strings.Split(prompt, "\n")
-		for i, line := range lines {
-			if strings.HasPrefix(line, "- `spawn_subagent(") {
-				lines[i] = "- `spawn_subagent(title, task, scopes, model?)` - use `scopes: [\"session\"]`. Always provide a short title and a self-contained task. Omit model for the Antigravity default, or pass an AGY model id (e.g. \"flash\", \"pro\", \"flash_lite\"). Never use Claude aliases."
-			}
-		}
-		prompt = strings.Join(lines, "\n")
-	}
 	return prompt + "\n\nUse only the Fragile MCP server for team coordination. Native delegation is disabled. Do not invoke subagents natively.\n"
 }
