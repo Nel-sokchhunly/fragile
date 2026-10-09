@@ -636,7 +636,7 @@ func (r *Runner) start(a Agent, mcpConfig, logPath, prompt, systemPrompt, resume
 		return r.startCodex(a, mcpConfig, logPath, prompt, systemPrompt, resume, model)
 	}
 	if r.provider(a.SessionID) == ProviderAGY {
-		return r.startAGY(a, mcpConfig, logPath, prompt, systemPrompt, resume, model)
+		return r.startAGY(a, logPath, prompt, systemPrompt, resume, model)
 	}
 	// Refuse before any file is written; checked again under the lock below.
 	r.mu.Lock()

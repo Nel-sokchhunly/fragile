@@ -177,32 +177,44 @@ func checkAGYPrereqs(command string) error {
 	return nil
 }
 
-// agyEnv cleans billing and API key overrides so agy uses standard account authentication.
-func agyEnv(environ []string) []string {
+// agyEnv cleans billing and API key overrides so agy uses standard account
+// authentication, and points HOME at the agent's own tree (see agyHome).
+func agyEnv(environ []string, home string) []string {
 	out := agentEnv(environ, false)
 	out = slices.DeleteFunc(out, func(kv string) bool {
 		k, _, _ := strings.Cut(kv, "=")
 		return slices.Contains([]string{
 			"GEMINI_API_KEY", "GOOGLE_API_KEY", "ANTIGRAVITY_API_KEY",
-			"AGY_API_KEY", "VERTEX_API_KEY", "VERTEXAI_API_KEY",
+			"AGY_API_KEY", "VERTEX_API_KEY", "VERTEXAI_API_KEY", "HOME",
 		}, k)
 	})
-	return out
+	// Commands the agent runs keep the user's caches and git identity instead of
+	// starting empty under the agent's HOME.
+	if user, err := os.UserHomeDir(); err == nil {
+		for k, v := range map[string]string{"GOPATH": filepath.Join(user, "go"), "XDG_CACHE_HOME": filepath.Join(user, ".cache"), "GIT_CONFIG_GLOBAL": filepath.Join(user, ".gitconfig")} {
+			if !slices.ContainsFunc(out, func(kv string) bool { return strings.HasPrefix(kv, k+"=") }) {
+				out = append(out, k+"="+v)
+			}
+		}
+	}
+	return append(out, "HOME="+home)
 }
 
-// agyModelAliases maps shorthand model names to Gemini / Antigravity model IDs.
+// agyModelAliases maps shorthand model names to Antigravity model ids (`agy models`).
 var agyModelAliases = map[string]string{
-	"flash":      "gemini-3.8-flash",
-	"pro":        "gemini-3.8-pro",
-	"flash_lite": "gemini-3.8-flash-lite",
-	"flash-lite": "gemini-3.8-flash-lite",
+	"flash":      "gemini-3.8-flash-medium",
+	"pro":        "gemini-3.1-pro-high",
+	"flash_lite": "gemini-3.8-flash-low",
+	"flash-lite": "gemini-3.8-flash-low",
 }
 
-// resolveAGYModel resolves an AGY model alias to a full model id, or verifies a custom model.
+// resolveAGYModel resolves an AGY model alias to a full model id, or verifies a
+// custom one. Full Claude ids agy serves (claude-sonnet-4-6) are allowed; the
+// Claude Code aliases are not.
 func resolveAGYModel(model string) (string, error) {
 	model = strings.TrimSpace(model)
-	if model == "sonnet" || model == "opus" || model == "haiku" || strings.HasPrefix(model, "claude-") {
-		return "", fmt.Errorf("%s is a Claude model; omit model for the AGY default or pass an AGY model id", strconv.Quote(model))
+	if model == "sonnet" || model == "opus" || model == "haiku" {
+		return "", fmt.Errorf("%s is a Claude Code alias; omit model for the AGY default or pass an AGY model id", strconv.Quote(model))
 	}
 	if id, ok := agyModelAliases[model]; ok {
 		return id, nil
@@ -223,6 +235,7 @@ func validAGYModel(model string) error {
 func agyPrompt(a Agent, prompt string) string {
 	prompt = strings.ReplaceAll(prompt, "Task/Agent", "invoke_subagent")
 	prompt = strings.ReplaceAll(prompt, "Claude Code", "Antigravity")
+	prompt = strings.ReplaceAll(prompt, "The orchestrator is not sandboxed.", "The orchestrator also runs under the Antigravity terminal sandbox and may need to escalate a denied action to the user.")
 	if a.Role == roleOrchestrator {
 		start := strings.Index(prompt, "4. **Spawn**")
 		end := strings.Index(prompt, "5. **Wait") // both the one-shot loop and the interactive variant

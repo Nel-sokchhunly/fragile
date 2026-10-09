@@ -2,6 +2,7 @@ package notes
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strconv"
 	"sync/atomic"
@@ -18,14 +19,18 @@ var interruptSeq atomic.Int64
 func (r *Runner) Interrupt(agentID int64) error {
 	r.mu.Lock()
 	var in *stdinPipe
+	agy := false
 	for _, p := range r.running {
 		if p.agentID == agentID {
-			in = p.stdin
+			in, agy = p.stdin, p.agy != nil
 		}
 	}
 	r.mu.Unlock()
 	if in == nil {
 		return ErrNotRunning
+	}
+	if agy { // agy's stream-json input has no interrupt message
+		return errors.New("interrupt is not supported for Antigravity; wait for the turn to finish or stop the session")
 	}
 	line, err := json.Marshal(map[string]any{
 		"type":       "control_request",

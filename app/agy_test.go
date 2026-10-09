@@ -11,11 +11,12 @@ func TestAGYSessionAppLifecycle(t *testing.T) {
 	dir := t.TempDir()
 	workDir := t.TempDir()
 
+	t.Setenv("HOME", t.TempDir()) // the agent HOME links into ~/.gemini
 	script := `#!/bin/sh
-printf '{"type":"system","subtype":"init","session_id":"agy-init-123","model":"gemini-3.8-flash","provider":"agy"}\n'
 while IFS= read -r line; do
-  printf '{"type":"assistant","message":{"content":[{"type":"text","text":"agy response"}]}}\n'
-  printf '{"type":"result","subtype":"success","is_error":false,"result":"agy response","provider":"agy"}\n'
+  printf '{"event":"init","conversation_id":"agy-init-123","init":{"cwd":"."}}\n'
+  printf '{"event":"step_update","step_update":{"conversation_id":"agy-init-123","step_index":1,"state":"DONE","step_type":"agent_response","text_delta":"agy response"}}\n'
+  printf '{"event":"result","result":{"conversation_id":"agy-init-123","status":"SUCCESS","response":"agy response","num_turns":1}}\n'
 done
 `
 	fakeBin := writeScript(t, script)
