@@ -11,9 +11,10 @@ func TestSpawnSubagentProviderValidation(t *testing.T) {
 	s.Runner = NewRunner(Config{Addr: strings.TrimPrefix(ts.URL, "http://"), AgentDir: dir, WorkDir: dir}, s.Store, s.Log)
 	s.Runner.Preflight = nil
 	s.Runner.Command = writeFake(t, dir, `echo '{"type":"result"}'`)
+	s.Runner.AGYCommand, _ = fakeAGY(t)
 
 	// Session with only claude and agy enabled
-	sess, err := s.Store.CreateSessionWithProviders("multi-cli-test", dir, ProviderClaude, []string{ProviderClaude, ProviderAGY})
+	sess, err := s.Store.CreateSessionWithConfig("multi-cli-test", dir, ProviderClaude, SessionConfig{EnabledProviders: []string{ProviderClaude, ProviderAGY}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -72,7 +73,7 @@ func TestSpawnSubagentModelValidationPerProvider(t *testing.T) {
 	s.Runner.AGYCommand, _ = fakeAGY(t)
 
 	// Session with all 3 providers enabled
-	sess, err := s.Store.CreateSessionWithProviders("all-providers", dir, ProviderClaude, []string{ProviderClaude, ProviderCodex, ProviderAGY})
+	sess, err := s.Store.CreateSessionWithConfig("all-providers", dir, ProviderClaude, SessionConfig{EnabledProviders: []string{ProviderClaude, ProviderCodex, ProviderAGY}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -108,25 +109,20 @@ func TestSpawnSubagentModelValidationPerProvider(t *testing.T) {
 	}
 }
 
-func TestPromptAvailableProviders(t *testing.T) {
-	// FormatAvailableProviders formats descriptions and hints
-	text := FormatAvailableProviders([]string{ProviderClaude, ProviderAGY})
-	if !strings.Contains(text, "claude (Claude Code") {
-		t.Errorf("expected claude in formatted providers: %s", text)
+func TestPromptProviders(t *testing.T) {
+	text := providersText([]string{ProviderClaude, ProviderAGY}, ProviderClaude)
+	for _, want := range []string{providerSpecs[ProviderClaude].hint, providerSpecs[ProviderAGY].hint, "omitted means `claude`"} {
+		if !strings.Contains(text, want) {
+			t.Errorf("providers text missing %q: %s", want, text)
+		}
 	}
-	if !strings.Contains(text, "agy (Antigravity CLI") {
-		t.Errorf("expected agy in formatted providers: %s", text)
+	if strings.Contains(text, "codex") {
+		t.Errorf("disabled provider listed: %s", text)
 	}
-	if !strings.Contains(text, `Use spawn_subagent(..., provider="...") to specify a provider.`) {
-		t.Errorf("expected usage hint in formatted providers: %s", text)
+	if !strings.Contains(providersText(nil, ProviderClaude), "Do not spawn") {
+		t.Error("no providers should forbid spawning")
 	}
-
-	// OrchestratorPrompt injects providers
-	prompt := OrchestratorPrompt("/test/workdir", false, ProviderClaude, ProviderCodex, ProviderAGY)
-	if !strings.Contains(prompt, "Available sub-agent providers in this session:") {
-		t.Errorf("prompt missing available providers line:\n%s", prompt)
-	}
-	if !strings.Contains(prompt, `Use spawn_subagent(..., provider="...") to specify a provider.`) {
-		t.Errorf("prompt missing usage hint:\n%s", prompt)
+	if p := OrchestratorPrompt("/w", false, "PROVIDERS-LINE"); !strings.Contains(p, "PROVIDERS-LINE") || strings.Contains(p, "{{PROVIDERS}}") {
+		t.Error("OrchestratorPrompt did not substitute {{PROVIDERS}}")
 	}
 }

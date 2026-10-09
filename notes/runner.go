@@ -283,6 +283,10 @@ type Runner struct {
 	Command      string   // binary to run; "claude" unless a test substitutes a fake
 	PluginDirs   []string // --plugin-dir values for sub-agents (set before use; see UserPluginDirs)
 
+	// DefaultModel (optional, set before use) gives the model for a sub-agent
+	// spawned without one on the provider; "" leaves it to the CLI.
+	DefaultModel func(provider string) string
+
 	// Interactive (set before use) makes the orchestrator a long-lived process
 	// that reads stream-json user messages from stdin (see SendUser) instead of
 	// taking its prompt as an argument, and uses the interactive prompt.
@@ -386,26 +390,11 @@ func (r *Runner) Forget(sessionID int64) {
 }
 
 func (r *Runner) orchestratorPrompt(sessionID int64) string {
-	var enabled []string
-	if r.store != nil {
-		if se, err := r.store.GetSession(sessionID); err == nil {
-			enabled = se.EnabledProviders
-			if len(enabled) == 0 && se.Provider != "" {
-				enabled = []string{se.Provider}
-			}
-		}
+	var extra string
+	if se, err := r.store.GetSession(sessionID); err == nil {
+		extra = sessionPromptText(se)
 	}
-	if len(enabled) == 0 {
-		enabled = []string{r.provider(sessionID)}
-	}
-	var provs []string
-	for _, info := range AvailableSubagentProviders(enabled) {
-		provs = append(provs, info.Name)
-	}
-	if len(provs) == 0 {
-		provs = enabled
-	}
-	return OrchestratorPrompt(r.workDir(sessionID), r.Interactive, provs...)
+	return OrchestratorPrompt(r.workDir(sessionID), r.Interactive, extra)
 }
 
 // StartOrchestrator registers the session's orchestrator and launches it; task is its prompt.
@@ -447,44 +436,34 @@ func (r *Runner) ResumeOrchestrator(sessionID int64, providerSessionID string) (
 
 // SpawnSubagent creates the task and sub-agent rows in the session and launches
 // the process. title is the task title shown on the agent card (the task's first line if empty). parentID must be the session's orchestrator (one level deep only).
-// model is the full model id it runs with (--model); empty uses the CLI's default.
-// provider specifies the agent CLI (claude, codex, agy); empty uses the session provider.
-func (r *Runner) SpawnSubagent(sessionID, parentID int64, title, task, model string, provider ...string) (Agent, error) {
+// provider is the sub-agent's CLI; it must be enabled for the session, and empty
+// picks the session's first enabled one. model is passed to that CLI (--model,
+// aliases expanded); empty uses DefaultModel, then the CLI's default.
+func (r *Runner) SpawnSubagent(sessionID, parentID int64, title, task, model, provider string) (Agent, error) {
 	if p, err := r.store.GetAgent(sessionID, parentID); err != nil {
 		return Agent{}, err
 	} else if p.Role != "orchestrator" {
 		return Agent{}, errors.New("only an orchestrator can spawn sub-agents")
 	}
-	var prov string
-	if len(provider) > 0 {
-		prov = strings.TrimSpace(provider[0])
-	}
-	if prov == "" {
-		prov = r.provider(sessionID)
-	}
-	if err := CheckProvider(prov); err != nil {
+	se, err := r.store.GetSession(sessionID)
+	if err != nil {
 		return Agent{}, err
 	}
-	var err error
-	if adapter, ok := GetAdapter(prov); ok {
-		if model, err = adapter.ValidateModel(model); err != nil {
-			return Agent{}, err
-		}
-	} else {
-		switch prov {
-		case ProviderCodex:
-			if err := validCodexModel(model); err != nil {
-				return Agent{}, err
-			}
-		case ProviderAGY:
-			if model, err = resolveAGYModel(model); err != nil {
-				return Agent{}, err
-			}
-		case ProviderClaude:
-			if model, err = resolveModel(model); err != nil {
-				return Agent{}, err
-			}
-		}
+	enabled := se.EnabledProviders
+	if provider == "" && len(enabled) > 0 {
+		provider = enabled[0]
+	}
+	if err := CheckProvider(provider); err != nil {
+		return Agent{}, err
+	}
+	if !slices.Contains(enabled, provider) {
+		return Agent{}, fmt.Errorf("provider %q is not enabled for this session (enabled: %s)", provider, strings.Join(enabled, ", "))
+	}
+	if model == "" && r.DefaultModel != nil {
+		model = r.DefaultModel(provider)
+	}
+	if model, err = ValidateModel(provider, model); err != nil {
+		return Agent{}, err
 	}
 	if len(task) > maxTaskBytes {
 		return Agent{}, fmt.Errorf("task is %d bytes; the limit is %d", len(task), maxTaskBytes)
@@ -493,7 +472,7 @@ func (r *Runner) SpawnSubagent(sessionID, parentID int64, title, task, model str
 		title = FirstLine(task)
 	}
 	r.spawnMu.Lock() // the agent row counts as running from CreateAgent on
-	a, err := r.createSubagent(sessionID, parentID, title, task, prov)
+	a, err := r.createSubagent(sessionID, parentID, title, task, provider)
 	r.spawnMu.Unlock()
 	if err != nil {
 		return Agent{}, err
@@ -503,7 +482,7 @@ func (r *Runner) SpawnSubagent(sessionID, parentID int64, title, task, model str
 
 // createSubagent adds the task and sub-agent rows unless the session already
 // has maxRunningSubagents running; the caller holds r.spawnMu.
-func (r *Runner) createSubagent(sessionID, parentID int64, title, task string, provider ...string) (Agent, error) {
+func (r *Runner) createSubagent(sessionID, parentID int64, title, task, provider string) (Agent, error) {
 	if err := r.checkSubagentLimit(sessionID); err != nil {
 		return Agent{}, err
 	}
@@ -511,11 +490,7 @@ func (r *Runner) createSubagent(sessionID, parentID int64, title, task string, p
 	if err != nil {
 		return Agent{}, err
 	}
-	var prov string
-	if len(provider) > 0 {
-		prov = provider[0]
-	}
-	a, err := r.store.CreateAgent(sessionID, "subagent", parentID, t.ID, prov)
+	a, err := r.store.CreateAgentWithProvider(sessionID, "subagent", parentID, t.ID, provider)
 	if err != nil {
 		return Agent{}, err
 	}
@@ -558,7 +533,7 @@ func (r *Runner) ResumeSubagent(sessionID, agentID int64, providerSessionID, mes
 		return Agent{}, errors.New("not a sub-agent")
 	}
 	if r.ProviderForAgent(a) != ProviderClaude {
-		return Agent{}, errors.New("resuming a sub-agent is supported in Claude sessions only")
+		return Agent{}, errors.New("only Claude sub-agents can be resumed")
 	}
 	r.mu.Lock()
 	refused := r.refusing(sessionID)

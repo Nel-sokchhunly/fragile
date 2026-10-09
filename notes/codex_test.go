@@ -182,7 +182,7 @@ func TestCodexRunnerTeamTurnsInterruptAndResume(t *testing.T) {
 	}
 	nextCodex(t, ch, "system")
 	nextCodex(t, ch, "result")
-	sub, e := r.SpawnSubagent(se.ID, a.ID, "worker", "task", "gpt-test")
+	sub, e := r.SpawnSubagent(se.ID, a.ID, "worker", "task", "gpt-test", "")
 	if e != nil {
 		t.Fatal(e)
 	}
@@ -221,7 +221,7 @@ func TestCodexRunnerTeamTurnsInterruptAndResume(t *testing.T) {
 	if !strings.Contains(string(data), `"method":"thread/resume"`) || !strings.Contains(string(data), `"threadId":"test-thread"`) {
 		t.Fatal("resume did not use the saved thread")
 	}
-	if _, e = r.SpawnSubagent(se.ID, a.ID, "bad model", "task", "sonnet"); e == nil {
+	if _, e = r.SpawnSubagent(se.ID, a.ID, "bad model", "task", "sonnet", ""); e == nil {
 		t.Fatal("Claude model accepted for Codex")
 	}
 }

@@ -1,6 +1,9 @@
 package main
 
 import (
+	"reflect"
+
+	"github.com/Nel-sokchhunly/fragile/notes"
 	"os"
 	"path/filepath"
 	"strings"
@@ -36,73 +39,70 @@ func TestSettings(t *testing.T) {
 	}
 }
 
-func TestSubagentProviderSettings(t *testing.T) {
+func TestSettingsTemplate(t *testing.T) {
 	dir := t.TempDir()
 	a, _ := newTestApp(t, dir, "")
 	defer a.close()
 
-	// Default settings reflect detected providers.
-	defaults, err := a.GetSubagentProviderSettings()
+	// Never saved: every detected CLI (or Claude) is enabled.
+	s, err := a.GetSettings()
 	if err != nil {
-		t.Fatalf("GetSubagentProviderSettings defaults error: %v", err)
+		t.Fatal(err)
 	}
-	for _, p := range a.GetProviders() {
-		setting, ok := defaults[p.Name]
-		if !ok {
-			t.Errorf("provider %s missing from default settings", p.Name)
-		}
-		if p.Available && !setting.Enabled {
-			t.Errorf("expected available provider %s to be enabled by default", p.Name)
+	if !s.SubagentProviders[notes.ProviderClaude].Enabled && len(s.sessionConfig().EnabledProviders) == 0 {
+		t.Fatalf("default enables nothing: %+v", s.SubagentProviders)
+	}
+
+	for _, bad := range []Settings{
+		{SubagentProviders: SubagentProvidersSettings{"nope": {Enabled: true}}},
+		{SubagentProviders: SubagentProvidersSettings{notes.ProviderClaude: {Enabled: false}}},
+		{SubagentProviders: SubagentProvidersSettings{notes.ProviderAGY: {Enabled: true, DefaultModel: "sonnet"}}},
+	} {
+		if err := a.SetSettings(bad); err == nil {
+			t.Errorf("SetSettings(%+v) accepted", bad)
 		}
 	}
 
-	// Invalid provider name rejected
-	bad := SubagentProvidersSettings{
-		"invalid-prov": {Enabled: true},
+	// Claude can be turned off as long as another CLI stays on.
+	want := Settings{
+		AutoCompactTokens: 80_000,
+		OrchestratorRules: "gemini flash: docs and tests",
+		SubagentProviders: SubagentProvidersSettings{
+			notes.ProviderClaude: {Enabled: false, DefaultModel: "sonnet"},
+			notes.ProviderAGY:    {Enabled: true, DefaultModel: "flash"},
+		},
 	}
-	if err := a.SetSubagentProviderSettings(bad); err == nil {
-		t.Fatal("expected error for invalid provider name")
+	if err := a.SetSettings(want); err != nil {
+		t.Fatal(err)
 	}
-
-	// Valid settings stored and retrieved
-	updated := SubagentProvidersSettings{
-		"claude": {Enabled: true, DefaultModel: "claude-sonnet-4-6"},
-		"codex":  {Enabled: false},
-		"agy":    {Enabled: true, DefaultModel: "flash"},
+	if m := a.subagentDefaultModel(notes.ProviderAGY); m != "flash" {
+		t.Fatalf("default model = %q", m)
 	}
-	if err := a.SetSubagentProviderSettings(updated); err != nil {
-		t.Fatalf("SetSubagentProviderSettings failed: %v", err)
-	}
-	got, err := a.GetSubagentProviderSettings()
+	se, err := a.CreateSession("", t.TempDir())
 	if err != nil {
-		t.Fatalf("GetSubagentProviderSettings failed: %v", err)
+		t.Fatal(err)
 	}
-	if !got["claude"].Enabled || got["claude"].DefaultModel != "claude-sonnet-4-6" {
-		t.Fatalf("unexpected claude setting: %+v", got["claude"])
-	}
-	if got["codex"].Enabled {
-		t.Fatalf("expected codex to be disabled: %+v", got["codex"])
-	}
-	if !got["agy"].Enabled || got["agy"].DefaultModel != "flash" {
-		t.Fatalf("unexpected agy setting: %+v", got["agy"])
+	if !reflect.DeepEqual(se.SessionConfig, notes.SessionConfig{EnabledProviders: []string{notes.ProviderAGY}, AutoCompactTokens: 80_000, OrchestratorRules: want.OrchestratorRules}) {
+		t.Fatalf("session did not copy the template: %+v", se.SessionConfig)
 	}
 
-	// Persisted after restart
+	// The template does not reach existing sessions.
+	want.AutoCompactTokens = 0
+	if err := a.SetSettings(want); err != nil {
+		t.Fatal(err)
+	}
+	if se, _ = a.store.GetSession(se.ID); se.AutoCompactTokens != 80_000 {
+		t.Fatalf("existing session changed: %+v", se.SessionConfig)
+	}
+
+	// Persisted.
 	a.close()
 	b, _ := newTestApp(t, dir, "")
 	defer b.close()
-	reopened, err := b.GetSubagentProviderSettings()
-	if err != nil {
-		t.Fatalf("reopened GetSubagentProviderSettings failed: %v", err)
-	}
-	if !reopened["claude"].Enabled || reopened["claude"].DefaultModel != "claude-sonnet-4-6" {
-		t.Fatalf("reopened claude setting: %+v", reopened["claude"])
-	}
-	if reopened["codex"].Enabled {
-		t.Fatalf("reopened codex setting: %+v", reopened["codex"])
+	if got, err := b.GetSettings(); err != nil || !reflect.DeepEqual(got, want) {
+		t.Fatalf("after reopen = %+v, %v", got, err)
 	}
 }
-
 
 // autoCompactSession starts an orchestrator that answers /compact and records its stdin.
 func autoCompactSession(t *testing.T, tokens, used int) (a *App, sid int64, stdinLog string) {
@@ -120,7 +120,7 @@ func autoCompactSession(t *testing.T, tokens, used int) (a *App, sid int64, stdi
 	if err := a.store.SetAgentContext(se.ID, orch.ID, used, defaultWindow); err != nil {
 		t.Fatal(err)
 	}
-	if err := a.SetSettings(Settings{AutoCompactTokens: tokens}); err != nil {
+	if err := a.store.SetSessionConfig(se.ID, notes.SessionConfig{EnabledProviders: se.EnabledProviders, AutoCompactTokens: tokens}); err != nil {
 		t.Fatal(err)
 	}
 	return a, se.ID, filepath.Join(work, "stdin.log")

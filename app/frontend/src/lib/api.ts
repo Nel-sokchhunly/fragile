@@ -1,9 +1,10 @@
 import {
-  AddNote, AnswerEscalation, CompactSession, CreateSessionWithProvider, DeleteSession, GetAgentEventTail, GetAgentEvents, GetAttachment, GetChanges, GetFileDiff, GetRateLimit, GetSession, GetSettings,
-  FinishAgent, InterruptSession, ListRepos, ListSessions, PauseAgent, PickDirectory, ResumeAgent, ResumeSession, SendMessage, SetSettings, StopSession, TerminalClose, TerminalOpen,
+  AddNote, AnswerEscalation, CompactSession, CreateSessionWithProvider, DeleteSession, GetAgentEventTail, GetAgentEvents, GetAttachment, GetChanges, GetFileDiff, GetProviders, GetRateLimit, GetSession, GetSettings,
+  FinishAgent, InterruptSession, ListRepos, ListSessions, PauseAgent, PickDirectory, ResumeAgent, ResumeSession, SendMessage, SetSessionConfig, SetSettings, StopSession, TerminalClose, TerminalOpen,
   TerminalResize, TerminalWrite, UpdateNote,
 } from '../../wailsjs/go/main/App'
-import type {Agent, AgentActivity, AgentEvent, Attachment, Changes, ChatItem, Escalation, FileDiff, Note, NoteType, ProviderInfo, RateLimit, Session, SessionProvider, Settings, SubagentProvidersSettings, Task} from './types'
+import {main} from '../../wailsjs/go/models'
+import type {Agent, AgentActivity, AgentEvent, Attachment, Changes, ChatItem, Escalation, FileDiff, Note, NoteType, ProviderInfo, RateLimit, Session, SessionConfig, SessionProvider, Settings, Task} from './types'
 
 // Typed wrappers around the generated Wails bindings (wailsjs/go, regenerate with `wails generate module`
 // from app/). The generated typings use classes and plain `string` for enums; the values are plain JSON
@@ -22,55 +23,21 @@ export type SessionSnapshot = {
 
 const as = <T>(p: Promise<unknown>) => p as Promise<T>
 
-const callApp = <T>(methods: string | string[], defaultVal?: () => T | Promise<T>, ...args: unknown[]): Promise<T> => {
-  const w = typeof window !== 'undefined' ? (window as unknown as {go?: {main?: {App?: Record<string, (...a: unknown[]) => Promise<T>>}}}) : undefined
-  const app = w?.go?.main?.App
-  if (app) {
-    const list = Array.isArray(methods) ? methods : [methods]
-    for (const m of list) {
-      if (typeof app[m] === 'function') {
-        return as<T>(app[m](...args))
-      }
-    }
-  }
-  if (defaultVal) {
-    return Promise.resolve(defaultVal())
-  }
-  return Promise.reject(new Error(`App method not available: ${Array.isArray(methods) ? methods.join('/') : methods}`))
-}
-
 export const api = {
   /** Native directory chooser; '' if cancelled. */
   pickDirectory: (): Promise<string> => PickDirectory(),
   /** Creates an empty session in `workDir` (must exist); `name` '' = the directory's name. The orchestrator starts with the first sendMessage. */
-  createSession: (name: string, workDir: string, provider: SessionProvider = 'claude') => as<Session>(CreateSessionWithProvider(name, workDir, provider)),
+  createSession: (name: string, workDir: string, provider: SessionProvider, cfg: SessionConfig) => as<Session>(CreateSessionWithProvider(name, workDir, provider, cfg)),
+  /** Replaces the session's own settings; a changed CLI list or rules reach its orchestrator as a decision note. */
+  setSessionConfig: (sessionId: number, cfg: SessionConfig) => as<Session>(SetSessionConfig(sessionId, cfg)),
+  /** Detects each sub-agent CLI (runs their --version; call on demand). */
+  getProviders: () => as<ProviderInfo[]>(GetProviders()),
   /** Latest subscription limits seen, null until any agent reported them. */
   getRateLimit: () => as<RateLimit | null>(GetRateLimit()),
   /** User preferences, with defaults for anything never set. */
   getSettings: () => as<Settings>(GetSettings()),
   /** Validates and stores the preferences; rejects with the reason (e.g. an auto-compact threshold out of range). */
-  setSettings: (s: Settings): Promise<void> => SetSettings(s),
-  /** Available CLI providers with detection state. */
-  getProviders: (): Promise<ProviderInfo[]> =>
-    callApp<ProviderInfo[]>('GetProviders', () => [
-      {name: 'claude', available: true, default_model: ''},
-      {name: 'codex', available: false, reason: 'Codex CLI not detected', default_model: ''},
-      {name: 'agy', available: false, reason: 'Antigravity CLI not detected', default_model: ''},
-    ]),
-  /** Sub-agent providers enabled for a session. */
-  getSessionProviders: (sessionID: number): Promise<SessionProvider[]> =>
-    callApp<SessionProvider[]>(['GetSessionProviders', 'GetSessionEnabledProviders'], () => ['claude'], sessionID),
-  /** Sets enabled sub-agent providers for a session. */
-  setSessionProviders: (sessionID: number, providers: SessionProvider[]): Promise<void> =>
-    callApp<void>(['SetSessionProviders', 'SetSessionEnabledProviders'], () => undefined, sessionID, providers),
-  /** Global sub-agent CLI settings (enabled by default, default model). */
-  getSubagentProviderSettings: (): Promise<SubagentProvidersSettings> =>
-    callApp<SubagentProvidersSettings>('GetSubagentProviderSettings', () => ({
-      claude: {enabled: true},
-    })),
-  /** Sets global sub-agent CLI settings. */
-  setSubagentProviderSettings: (settings: SubagentProvidersSettings): Promise<void> =>
-    callApp<void>('SetSubagentProviderSettings', () => undefined, settings),
+  setSettings: (s: Settings): Promise<void> => SetSettings(main.Settings.createFrom(s)),
   /** All sessions, newest first. */
   listSessions: () => as<Session[]>(ListSessions()),
   /** Full state of a session from the database (live or past). */

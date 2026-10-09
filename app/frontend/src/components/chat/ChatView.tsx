@@ -12,6 +12,7 @@ import {Composer} from '@/components/chat/Composer'
 import {TerminalPane} from '@/components/chat/TerminalPane'
 import {Markdown} from '@/components/Markdown'
 import {StatusLabel} from '@/components/StatusLabel'
+import {SessionSettingsDialog} from '@/components/SessionSettingsDialog'
 import {api} from '@/lib/api'
 import {agentContext, agentLabel, agentState, agentSummary, formatElapsed, formatExact, formatTime, modelName} from '@/lib/format'
 import {focusComposer} from '@/lib/keys'
@@ -143,7 +144,7 @@ const Row = memo(function Row({sessionId, item, open, onToggle}: {sessionId: num
         <Tip content={formatExact(item.at)}>
           <div role="note" className="flex items-center gap-3 text-xs text-muted-foreground">
             <span className="h-px flex-1 bg-border" aria-hidden/>
-            <span className="shrink-0">{item.text}</span>
+            <span className="min-w-0 text-center break-words whitespace-pre-line">{item.text}</span>
             <span className="h-px flex-1 bg-border" aria-hidden/>
           </div>
         </Tip>
@@ -329,6 +330,7 @@ export function ChatView({sessionId}: {sessionId: number}) {
             </Tip>
           </div>
         </div>
+        {session && <SessionSettingsDialog session={session}/>}
         {anyRunning && <StopButton sessionId={sessionId}/>}
       </header>
       {compactError && <p role="alert" className="shrink-0 border-b px-6 py-1 text-[13px] text-destructive">{compactError}</p>}

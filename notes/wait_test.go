@@ -168,7 +168,7 @@ func TestOrchestratorWakesOnSubagentExit(t *testing.T) {
 	if out := expectWake(t, callAsync(t, co, "wait_for_notes", map[string]any{"since_id": 0, "finished_subagents": 0})); out.text != `{"notes":[],"finished_subagents":0,"running_subagents":0}` {
 		t.Fatalf("no sub-agents: %s", out.text)
 	}
-	if _, err := r.SpawnSubagent(sess.ID, orch.ID, "", "do it", ""); err != nil {
+	if _, err := r.SpawnSubagent(sess.ID, orch.ID, "", "do it", "", ""); err != nil {
 		t.Fatal(err)
 	}
 	start := time.Now()

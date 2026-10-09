@@ -64,6 +64,28 @@ func run(cfg notes.Config, subagentProviders, task string) error {
 	if err := notes.CheckProvider(provider); err != nil {
 		return err
 	}
+	var enabled []string
+	if subagentProviders != "" {
+		for _, p := range strings.Split(subagentProviders, ",") {
+			p = strings.TrimSpace(p)
+			if p != "" {
+				enabled = append(enabled, p)
+			}
+		}
+	} else {
+		for _, p := range notes.DetectProviders() {
+			if p.Available {
+				enabled = append(enabled, p.Name)
+			}
+		}
+		if len(enabled) == 0 {
+			enabled = []string{provider}
+		}
+	}
+
+	if err := (notes.SessionConfig{EnabledProviders: enabled}).Check(); err != nil {
+		return err
+	}
 	if err := checkLoopback(cfg.Addr); err != nil {
 		return err
 	}
@@ -99,33 +121,11 @@ func run(cfg notes.Config, subagentProviders, task string) error {
 	}
 	defer evlog.Close()
 
-	var enabled []string
-	if subagentProviders != "" {
-		for _, p := range strings.Split(subagentProviders, ",") {
-			p = strings.TrimSpace(p)
-			if p != "" {
-				if err := notes.CheckProvider(p); err != nil {
-					return err
-				}
-				enabled = append(enabled, p)
-			}
-		}
-	} else {
-		for _, p := range notes.DetectProviders() {
-			if p.Available {
-				enabled = append(enabled, p.Name)
-			}
-		}
-		if len(enabled) == 0 {
-			enabled = []string{provider}
-		}
-	}
-
 	title := notes.FirstLine(task)
 	if title == "" {
 		title = "phase0"
 	}
-	session, err := store.CreateSessionWithProviders(title, cfg.WorkDir, provider, enabled)
+	session, err := store.CreateSessionWithConfig(title, cfg.WorkDir, provider, notes.SessionConfig{EnabledProviders: enabled})
 	if err != nil {
 		return err
 	}

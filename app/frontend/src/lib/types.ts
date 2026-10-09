@@ -17,19 +17,14 @@ export const PROVIDER_NAMES: Record<SessionProvider, string> = {
   agy: 'Antigravity',
 }
 
-export interface ProviderInfo {
-  name: SessionProvider;
-  available: boolean;
-  reason?: string;
-  default_model?: string;
-}
+export const PROVIDERS: SessionProvider[] = ['claude', 'codex', 'agy']
 
-export type SubagentProvidersSettings = {
-  [key in SessionProvider]?: {
-    enabled: boolean;
-    default_model?: string;
-  };
-}
+// A CLI's detection result (Go: notes.ProviderInfo); reason says how to fix an unavailable one.
+export type ProviderInfo = {name: SessionProvider; available: boolean; reason?: string}
+
+// A session's own settings (Go: notes.SessionConfig), copied from the Settings template on create.
+// enabled_providers: the CLIs sub-agents may run on, first = default. auto_compact_tokens: 0 = off.
+export type SessionConfig = {enabled_providers: SessionProvider[]; auto_compact_tokens: number; orchestrator_rules: string}
 
 export type Session = {
   provider: SessionProvider
@@ -39,8 +34,7 @@ export type Session = {
   work_dir?: string // directory its agents run in; absent/'' for sessions without one
   created_at: string
   agent_count: number // 0 = new: the orchestrator starts with the first message
-  enabled_providers?: SessionProvider[]
-}
+} & SessionConfig
 
 export type Agent = {
   id: number
@@ -67,8 +61,13 @@ export type AgentActivity = {busy: boolean; paused: boolean}
 export type LimitWindow = {utilization: number; resets_at: number}
 export type RateLimit = {five_hour: LimitWindow | null; seven_day: LimitWindow | null}
 
-// User preferences (Go: Settings). auto_compact_tokens: 0 = off, else 20000..1000000.
-export type Settings = {auto_compact_tokens: number}
+// User preferences (Go: Settings): the template new sessions copy, plus each CLI's default model.
+// auto_compact_tokens: 0 = off, else 20000..1000000.
+export type Settings = {
+  auto_compact_tokens: number
+  orchestrator_rules: string
+  subagent_providers: Partial<Record<SessionProvider, {enabled: boolean; default_model?: string}>>
+}
 
 export type Task = {
   id: number
@@ -134,4 +133,4 @@ export type ChatItem =
   | {id: number; kind: 'assistant'; text: string; at: string}
   | {id: number; kind: 'tool'; name: string; summary: string; at: string}
   | {id: number; kind: 'escalation'; escalation: Escalation; at: string}
-  | {id: number; kind: 'notice'; text: string; at: string} // a context compaction
+  | {id: number; kind: 'notice'; text: string; at: string} // a context compaction, or Fragile waking the orchestrator (one event per line)
