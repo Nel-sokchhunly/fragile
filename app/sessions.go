@@ -231,12 +231,13 @@ func (a *App) GetAttachment(sessionID, chatItemID int64, index int) (string, err
 // SessionSnapshot is everything the UI shows for one session; live changes
 // after it arrive as events.
 type SessionSnapshot struct {
-	Session     notes.Session      `json:"session"`
-	Agents      []notes.Agent      `json:"agents"`
-	Tasks       []notes.Task       `json:"tasks"`
-	Notes       []notes.Note       `json:"notes"`
-	Chat        []ChatItem         `json:"chat"`
-	Escalations []notes.Escalation `json:"escalations"` // the open ones
+	Session     notes.Session           `json:"session"`
+	Agents      []notes.Agent           `json:"agents"`
+	Tasks       []notes.Task            `json:"tasks"`
+	Notes       []notes.Note            `json:"notes"`
+	Chat        []ChatItem              `json:"chat"`
+	Escalations []notes.Escalation      `json:"escalations"` // the open ones
+	Activity    map[int64]AgentActivity `json:"activity"`    // running sub-agents only; agent_activity events update it
 }
 
 // CreateSession creates an empty session in workDir (name defaults to the
@@ -469,6 +470,7 @@ func (a *App) GetSession(sessionID int64) (SessionSnapshot, error) {
 	if s.Agents, err = a.store.ListAgents(sessionID, ""); err != nil {
 		return s, err
 	}
+	s.Activity = a.agentActivity(s.Agents)
 	if s.Tasks, err = a.store.ListTasks(sessionID); err != nil {
 		return s, err
 	}
@@ -918,6 +920,9 @@ func (a *App) react(ev notes.Event) {
 				a.dropSubWakes(ev.AgentID) // it exited: nothing more to wake it with
 				a.queueWake(ev)
 			}
+		} else if p, ok := ev.Payload.(map[string]any); ok && p["role"] == "subagent" {
+			// A (re)launched sub-agent starts on its task or resume message.
+			a.pushEvent(eventAgentActivity, ev.SessionID, ev.AgentID, agentActivityEvent{ev.AgentID, AgentActivity{Busy: true}})
 		}
 		if ag, err := a.store.GetAgent(ev.SessionID, ev.AgentID); err == nil {
 			a.pushEvent(eventAgentUpdated, ev.SessionID, ag.ID, ag)

@@ -1,9 +1,9 @@
 import {
   AddNote, AnswerEscalation, CompactSession, CreateSessionWithProvider, DeleteSession, GetAgentEventTail, GetAgentEvents, GetAttachment, GetChanges, GetFileDiff, GetRateLimit, GetSession, GetSettings,
-  InterruptSession, ListRepos, ListSessions, PickDirectory, ResumeSession, SendMessage, SetSettings, StopSession, TerminalClose, TerminalOpen,
+  FinishAgent, InterruptSession, ListRepos, ListSessions, PauseAgent, PickDirectory, ResumeAgent, ResumeSession, SendMessage, SetSettings, StopSession, TerminalClose, TerminalOpen,
   TerminalResize, TerminalWrite, UpdateNote,
 } from '../../wailsjs/go/main/App'
-import type {Agent, AgentEvent, Attachment, Changes, ChatItem, Escalation, FileDiff, Note, NoteType, RateLimit, Session, SessionProvider, Settings, Task} from './types'
+import type {Agent, AgentActivity, AgentEvent, Attachment, Changes, ChatItem, Escalation, FileDiff, Note, NoteType, RateLimit, Session, SessionProvider, Settings, Task} from './types'
 
 // Typed wrappers around the generated Wails bindings (wailsjs/go, regenerate with `wails generate module`
 // from app/). The generated typings use classes and plain `string` for enums; the values are plain JSON
@@ -17,6 +17,7 @@ export type SessionSnapshot = {
   notes: Note[]
   chat: ChatItem[] // oldest first
   escalations: Escalation[] // the open ones
+  activity?: Record<number, AgentActivity> // running sub-agents by agent id; null/absent = none
 }
 
 const as = <T>(p: Promise<unknown>) => p as Promise<T>
@@ -47,6 +48,12 @@ export const api = {
   interruptSession: (sessionId: number): Promise<void> => InterruptSession(sessionId),
   /** Sends /compact to the orchestrator; rejects if it is not running or mid-turn. The result shows as a notice chat item. */
   compactSession: (sessionId: number): Promise<void> => CompactSession(sessionId),
+  /** Sub-agent: ends its current turn and holds it (no automatic wakes) until resumeAgent. */
+  pauseAgent: (agentId: number): Promise<void> => PauseAgent(agentId),
+  /** Sub-agent: continues a paused or idle one; relaunches one that stopped without a done note. */
+  resumeAgent: (agentId: number): Promise<void> => ResumeAgent(agentId),
+  /** Sub-agent: ends it (recorded as stopped; the orchestrator is told). */
+  finishAgent: (agentId: number): Promise<void> => FinishAgent(agentId),
   /** Data URL ("data:<type>;base64,...") of attachment `index` of the user chat item `chatItemId`. */
   getAttachment: (sessionId: number, chatItemId: number, index: number): Promise<string> => GetAttachment(sessionId, chatItemId, index),
   /** Answer an open escalation; also delivered to the orchestrator. The chat row updates via chat_item. */

@@ -17,6 +17,8 @@ export function CreateSessionWithProvider(arg1:string,arg2:string,arg3:string):P
 
 export function DeleteSession(arg1:number):Promise<void>;
 
+export function FinishAgent(arg1:number):Promise<void>;
+
 export function GetAgentEventTail(arg1:number,arg2:number):Promise<Array<notes.AgentEvent>>;
 
 export function GetAgentEvents(arg1:number,arg2:number,arg3:number):Promise<Array<notes.AgentEvent>>;
@@ -39,7 +41,11 @@ export function ListRepos(arg1:number):Promise<Array<string>>;
 
 export function ListSessions():Promise<Array<notes.Session>>;
 
+export function PauseAgent(arg1:number):Promise<void>;
+
 export function PickDirectory():Promise<string>;
+
+export function ResumeAgent(arg1:number):Promise<void>;
 
 export function ResumeSession(arg1:number):Promise<void>;
 

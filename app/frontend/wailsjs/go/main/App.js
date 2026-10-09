@@ -30,6 +30,10 @@ export function DeleteSession(arg1) {
   return window['go']['main']['App']['DeleteSession'](arg1);
 }
 
+export function FinishAgent(arg1) {
+  return window['go']['main']['App']['FinishAgent'](arg1);
+}
+
 export function GetAgentEventTail(arg1, arg2) {
   return window['go']['main']['App']['GetAgentEventTail'](arg1, arg2);
 }
@@ -74,8 +78,16 @@ export function ListSessions() {
   return window['go']['main']['App']['ListSessions']();
 }
 
+export function PauseAgent(arg1) {
+  return window['go']['main']['App']['PauseAgent'](arg1);
+}
+
 export function PickDirectory() {
   return window['go']['main']['App']['PickDirectory']();
+}
+
+export function ResumeAgent(arg1) {
+  return window['go']['main']['App']['ResumeAgent'](arg1);
 }
 
 export function ResumeSession(arg1) {

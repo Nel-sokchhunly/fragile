@@ -1,7 +1,7 @@
 import {create} from 'zustand'
 import {api} from '@/lib/api'
 import type {PendingAttachment} from '@/lib/attachments'
-import type {Agent, AgentEvent, Attachment, ChatItem, Note, NoteType, RateLimit, Session, SessionProvider, SessionStatus, Task} from '@/lib/types'
+import type {Agent, AgentActivity, AgentEvent, Attachment, ChatItem, Note, NoteType, RateLimit, Session, SessionProvider, SessionStatus, Task} from '@/lib/types'
 
 // Zustand store fed by the backend: snapshots (lib/api.ts) on first view of a session, then Wails events
 // (lib/events.ts) routed here by session_id. Components only read it via selectors.
@@ -18,6 +18,7 @@ type AppState = {
   agentEvents: Record<number, AgentEvent[]> // by agent id; present = history load started (live events then append)
   agentLoaded: Record<number, boolean> // bounded history snapshot loaded
   lastLine: Record<number, {text: string; at: string; sid: number}> // newest assistant_text / tool_use per agent, from live events
+  activity: Record<number, AgentActivity> // by agent id: busy / paused of running sub-agents (snapshot, then agent_activity events)
   busy: Record<number, number> // by session id: when the orchestrator's turn started (ms; set on send, 0 again on its result event)
   compacting: Record<number, number> // by session id: when /compact started (ms; 0 again on the orchestrator's result event)
   drafts: Record<number, Draft> // by session id: unsent composer text and attachments (in memory only)
@@ -49,6 +50,9 @@ type AppState = {
   stopSession: (sessionId: number) => Promise<void>
   deleteSession: (sessionId: number) => Promise<void> // the session_deleted event removes it
   answerEscalation: (escalationId: number, answer: string) => Promise<void>
+  pauseAgent: (agentId: number) => Promise<void>
+  resumeAgent: (agentId: number) => Promise<void>
+  finishAgent: (agentId: number) => Promise<void>
   addNote: (sessionId: number, type: NoteType, content: string) => Promise<boolean>
   setNoteStatus: (sessionId: number, noteId: number, status: 'open' | 'resolved') => Promise<void>
   loadAgentEvents: (agentId: number) => Promise<void>
@@ -60,6 +64,7 @@ type AppState = {
   sessionDeleted: (sessionId: number) => void
   patchSession: (sessionId: number, f: (d: SessionData) => SessionData) => void
   agentEvent: (sessionId: number, ev: AgentEvent) => void
+  setActivity: (agentId: number, a: AgentActivity) => void
 }
 
 // Insert or replace by id in an id-ordered list (appends and replaces of recent rows are the fast path).
@@ -87,10 +92,10 @@ export const useAppStore = create<AppState>((set, get) => {
     if (get().data[id] || loading.has(id)) return
     loading.set(id, [])
     try {
-      const {agents, tasks, notes, chat} = await api.getSession(id)
+      const {agents, tasks, notes, chat, activity} = await api.getSession(id)
       let d: SessionData = {agents, tasks, notes, chat}
       for (const f of loading.get(id)!) d = f(d)
-      set((s) => ({data: {...s.data, [id]: d}}))
+      set((s) => ({data: {...s.data, [id]: d}, activity: {...activity, ...s.activity}})) // events seen meanwhile are newer
     } catch (e) {
       get().notify(e)
     } finally {
@@ -124,6 +129,7 @@ export const useAppStore = create<AppState>((set, get) => {
     agentEvents: {},
     agentLoaded: {},
     lastLine: {},
+    activity: {},
     busy: {},
     compacting: {},
     drafts: {},
@@ -183,6 +189,10 @@ export const useAppStore = create<AppState>((set, get) => {
     stopSession: async (sid) => { await toasting(api.stopSession(sid)) },
     deleteSession: async (sid) => { await toasting(api.deleteSession(sid)) },
     answerEscalation: async (id, answer) => { await toasting(api.answerEscalation(id, answer)) }, // chat_item flips it to answered
+    // State follows via agent_activity / agent_updated events.
+    pauseAgent: async (id) => { await toasting(api.pauseAgent(id)) },
+    resumeAgent: async (id) => { await toasting(api.resumeAgent(id)) },
+    finishAgent: async (id) => { await toasting(api.finishAgent(id)) },
     addNote: async (sid, type, content) => {
       const n = await toasting(api.addNote(sid, type, content))
       if (n) get().patchSession(sid, (d) => ({...d, notes: upsert(d.notes, n)}))
@@ -242,7 +252,7 @@ export const useAppStore = create<AppState>((set, get) => {
       const drop = <T,>(m: Record<number, T>) => Object.fromEntries(Object.entries(m).filter(([k]) => !ids.has(+k))) as Record<number, T>
       set((s) => ({
         sessions: rest, data, busy, compacting, drafts, terminalOpen, changesOpen, changesRepo,
-        agentEvents: drop(s.agentEvents), agentLoaded: drop(s.agentLoaded), lastLine: drop(s.lastLine),
+        agentEvents: drop(s.agentEvents), agentLoaded: drop(s.agentLoaded), lastLine: drop(s.lastLine), activity: drop(s.activity),
         selectedAgentId: s.selectedAgentId != null && ids.has(s.selectedAgentId) ? null : s.selectedAgentId,
       }))
       if (selectedSessionId === sid) select(rest[Math.min(i, rest.length - 1)]?.id ?? null) // the next one, else the last
@@ -251,6 +261,7 @@ export const useAppStore = create<AppState>((set, get) => {
       if (get().data[sid]) set((s) => ({data: {...s.data, [sid]: f(s.data[sid])}}))
       else loading.get(sid)?.push(f)
     },
+    setActivity: (agentId, a) => set((s) => ({activity: {...s.activity, [agentId]: a}})),
     agentEvent: (sid, ev) => {
       let text = ''
       try {
