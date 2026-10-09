@@ -93,7 +93,7 @@ export function subscribeEvents() {
     on('escalation', patch((d, x: Escalation) => ({...d, chat: d.chat.map((c) => (c.kind === 'escalation' && c.escalation.id === x.id ? {...c, escalation: x} : c))}))),
     on('session_compacting', (e) => useAppStore.setState((s) => ({compacting: {...s.compacting, [e.session_id]: Date.now()}}))),
     on('agent_event', (e) => st().agentEvent(e.session_id, e.payload)),
-    on('agent_activity', (e) => st().setActivity(e.payload.agent_id, {busy: e.payload.busy, paused: e.payload.paused})),
+    on('agent_activity', (e) => st().setActivity(e.payload.agent_id, {busy: e.payload.busy, paused: e.payload.paused, live: st().activity[e.payload.agent_id]?.live})),
   ]
   return () => offs.forEach((off) => off())
 }

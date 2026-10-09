@@ -319,6 +319,13 @@ func (a *App) SetSessionConfig(sessionID int64, cfg notes.SessionConfig) (notes.
 		}
 		changes = append(changes, "The user's rules for this session are now, replacing any earlier ones:\n\n"+rules)
 	}
+	if old.EscalationThreshold != cfg.EscalationThreshold {
+		thresh := strings.TrimSpace(cfg.EscalationThreshold)
+		if thresh == "" {
+			thresh = "(none; the defaults apply)"
+		}
+		changes = append(changes, "When to escalate to the user is now, replacing any earlier threshold:\n\n"+thresh)
+	}
 	if len(changes) > 0 {
 		board, err := a.store.SessionBoard(sessionID)
 		if err != nil {
@@ -519,11 +526,7 @@ func (a *App) GetSession(sessionID int64) (SessionSnapshot, error) {
 	if s.Tasks, err = a.store.ListTasks(sessionID); err != nil {
 		return s, err
 	}
-	board, err := a.store.SessionBoard(sessionID)
-	if err != nil {
-		return s, err
-	}
-	if s.Notes, err = a.store.ListNotes(sessionID, board, notes.NoteFilter{}); err != nil {
+	if s.Notes, err = a.store.ListNotes(sessionID, 0, notes.NoteFilter{}); err != nil { // every scope
 		return s, err
 	}
 	escs, err := a.store.ListEscalations(sessionID)
@@ -576,6 +579,11 @@ func (a *App) GetSession(sessionID int64) (SessionSnapshot, error) {
 		s.Notes = []notes.Note{}
 	}
 	return s, nil
+}
+
+// ListOpenEscalations returns the open escalations of every session (the inbox).
+func (a *App) ListOpenEscalations() ([]notes.Escalation, error) {
+	return a.store.ListOpenEscalations()
 }
 
 // AnswerEscalation stores the user's answer, delivers it to the orchestrator as

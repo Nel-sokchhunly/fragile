@@ -12,6 +12,7 @@ import (
 	"io/fs"
 	"net/url"
 	"slices"
+	"strings"
 
 	_ "modernc.org/sqlite" // pure-Go driver, registers "sqlite"
 )
@@ -163,26 +164,28 @@ type Session struct {
 	WorkDir   string `json:"work_dir"` // "" = none recorded; the runner's configured WorkDir applies
 	CreatedAt string `json:"created_at"`
 	Agents    int    `json:"agent_count"` // 0 = new: the orchestrator starts with the first message
+	Mode      string `json:"mode"`        // ModeOrchestra (default) or ModeNormal
 	SessionConfig
 }
 
 // SessionConfig is a session's own settings. New sessions copy them from the
 // global template (the app's Settings); changing one never affects another.
 type SessionConfig struct {
-	EnabledProviders  []string `json:"enabled_providers"`   // CLIs sub-agents may run on; the first is spawn_subagent's default
-	AutoCompactTokens int      `json:"auto_compact_tokens"` // compact the orchestrator after a turn once its context reaches this; 0 = off
-	OrchestratorRules string   `json:"orchestrator_rules"`  // the user's extra instructions, appended to the orchestrator prompt
+	EnabledProviders    []string `json:"enabled_providers"`   // CLIs sub-agents may run on; the first is spawn_subagent's default
+	AutoCompactTokens   int      `json:"auto_compact_tokens"` // compact the orchestrator after a turn once its context reaches this; 0 = off
+	OrchestratorRules   string   `json:"orchestrator_rules"`  // the user's extra instructions, appended to the orchestrator prompt
+	EscalationThreshold string   `json:"escalation_threshold"`
 }
 
 const (
-	sessionCols       = `id, title, status, provider, work_dir, created_at, (SELECT COUNT(*) FROM agent_instances WHERE session_id = sessions.id), ` + sessionConfigCols
-	sessionConfigCols = `enabled_providers, auto_compact_tokens, orchestrator_rules`
+	sessionCols       = `id, title, status, provider, work_dir, created_at, (SELECT COUNT(*) FROM agent_instances WHERE session_id = sessions.id), ` + sessionConfigCols + `, mode`
+	sessionConfigCols = `enabled_providers, auto_compact_tokens, orchestrator_rules, escalation_threshold`
 )
 
 func scanSession(r scanner) (se Session, err error) {
 	var enabled string
 	err = r.Scan(&se.ID, &se.Title, &se.Status, &se.Provider, &se.WorkDir, &se.CreatedAt, &se.Agents,
-		&enabled, &se.AutoCompactTokens, &se.OrchestratorRules)
+		&enabled, &se.AutoCompactTokens, &se.OrchestratorRules, &se.EscalationThreshold, &se.Mode)
 	if err != nil {
 		return se, one(err)
 	}
@@ -217,8 +220,8 @@ func (s *Store) CreateSessionWithConfig(title, workDir, provider string, cfg Ses
 		return Session{}, err
 	}
 	defer tx.Rollback()
-	se, err := scanSession(tx.QueryRow(`INSERT INTO sessions (title, work_dir, provider, enabled_providers, auto_compact_tokens, orchestrator_rules)
-		VALUES (?, ?, ?, ?, ?, ?) RETURNING id, title, status, provider, work_dir, created_at, 0, `+sessionConfigCols, title, workDir, provider, enabled, cfg.AutoCompactTokens, cfg.OrchestratorRules))
+	se, err := scanSession(tx.QueryRow(`INSERT INTO sessions (title, work_dir, provider, enabled_providers, auto_compact_tokens, orchestrator_rules, escalation_threshold)
+		VALUES (?, ?, ?, ?, ?, ?, ?) RETURNING id, title, status, provider, work_dir, created_at, 0, `+sessionConfigCols+`, mode`, title, workDir, provider, enabled, cfg.AutoCompactTokens, cfg.OrchestratorRules, cfg.EscalationThreshold))
 	if err != nil {
 		return Session{}, err
 	}
@@ -228,14 +231,22 @@ func (s *Store) CreateSessionWithConfig(title, workDir, provider string, cfg Ses
 	return se, tx.Commit()
 }
 
+// SetSessionMode stores the session's mode (ModeNormal or ModeOrchestra).
+func (s *Store) SetSessionMode(sessionID int64, mode string) error {
+	if err := CheckMode(mode); err != nil {
+		return err
+	}
+	return affected(s.db.Exec(`UPDATE sessions SET mode = ? WHERE id = ?`, mode, sessionID))
+}
+
 // SetSessionConfig replaces the session's settings.
 func (s *Store) SetSessionConfig(sessionID int64, cfg SessionConfig) error {
 	enabled, err := cfg.check()
 	if err != nil {
 		return err
 	}
-	return affected(s.db.Exec(`UPDATE sessions SET enabled_providers = ?, auto_compact_tokens = ?, orchestrator_rules = ? WHERE id = ?`,
-		enabled, cfg.AutoCompactTokens, cfg.OrchestratorRules, sessionID))
+	return affected(s.db.Exec(`UPDATE sessions SET enabled_providers = ?, auto_compact_tokens = ?, orchestrator_rules = ?, escalation_threshold = ? WHERE id = ?`,
+		enabled, cfg.AutoCompactTokens, cfg.OrchestratorRules, cfg.EscalationThreshold, sessionID))
 }
 
 const (
@@ -268,6 +279,9 @@ func (c SessionConfig) check() (string, error) {
 	}
 	if len(c.OrchestratorRules) > maxRulesBytes {
 		return "", fmt.Errorf("orchestrator rules are %d bytes; the limit is %d", len(c.OrchestratorRules), maxRulesBytes)
+	}
+	if len(c.EscalationThreshold) > maxRulesBytes {
+		return "", fmt.Errorf("escalation threshold is %d bytes; the limit is %d", len(c.EscalationThreshold), maxRulesBytes)
 	}
 	b, err := json.Marshal(c.EnabledProviders)
 	return string(b), err
@@ -337,6 +351,73 @@ func (s *Store) SessionBoard(sessionID int64) (int64, error) {
 	var id int64
 	err := s.db.QueryRow(`SELECT id FROM boards WHERE session_id = ? AND scope_type = 'session'`, sessionID).Scan(&id)
 	return id, one(err)
+}
+
+// Scopes: the session board ("session", everyone) and named boards
+// ("private:<name>") whose members are the sub-agents spawned with that scope.
+// The orchestrator and the user reach every board of the session.
+
+// Scope is a named board of a session.
+type Scope struct {
+	Name    string `json:"name"`
+	BoardID int64  `json:"board_id"`
+}
+
+const scopeNameSQL = `CASE WHEN name = '' THEN 'session' ELSE name END`
+
+// ListScopes returns the session's boards, "session" first.
+func (s *Store) ListScopes(sessionID int64) ([]Scope, error) {
+	return s.queryScopes(`SELECT id, `+scopeNameSQL+` FROM boards WHERE session_id = ? ORDER BY name <> '', id`, sessionID)
+}
+
+// AgentScopes returns the boards the agent may use: "session" and those it is a member of.
+func (s *Store) AgentScopes(sessionID, agentID int64) ([]Scope, error) {
+	return s.queryScopes(`SELECT id, `+scopeNameSQL+` FROM boards WHERE session_id = ?
+		AND (name = '' OR id IN (SELECT board_id FROM board_members WHERE agent_id = ?)) ORDER BY name <> '', id`, sessionID, agentID)
+}
+
+func (s *Store) queryScopes(q string, args ...any) ([]Scope, error) {
+	rows, err := s.db.Query(q, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []Scope{}
+	for rows.Next() {
+		var sc Scope
+		if err := rows.Scan(&sc.BoardID, &sc.Name); err != nil {
+			return nil, err
+		}
+		out = append(out, sc)
+	}
+	return out, rows.Err()
+}
+
+// JoinScopes makes the agent a member of each named scope, creating missing
+// boards. "session" needs no membership.
+func (s *Store) JoinScopes(sessionID, agentID int64, names []string) error {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	for _, name := range names {
+		if err := CheckScope(name); err != nil {
+			return err
+		}
+		if name == ScopeSession {
+			continue
+		}
+		if _, err := tx.Exec(`INSERT OR IGNORE INTO boards (session_id, scope_type, name) VALUES (?, 'shared', ?)`, sessionID, name); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(`INSERT OR IGNORE INTO board_members (board_id, agent_id)
+			SELECT b.id, a.id FROM boards b, agent_instances a
+			WHERE b.session_id = ?1 AND b.name = ?2 AND a.id = ?3 AND a.session_id = ?1`, sessionID, name, agentID); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
 }
 
 // Agents
@@ -570,6 +651,7 @@ func (s *Store) SetTaskStatus(sessionID, taskID int64, status string) error {
 type Note struct {
 	ID        int64  `json:"id"`
 	BoardID   int64  `json:"board_id"`
+	Scope     string `json:"scope"`           // "session" or "private:<name>"
 	AuthorID  int64  `json:"author_agent_id"` // 0 = the user
 	Type      string `json:"type"`
 	Content   string `json:"content"`
@@ -586,13 +668,14 @@ type NoteFilter struct {
 	Limit        int   // max newest notes to return (ordered oldest first)
 }
 
-const noteCols = `id, board_id, COALESCE(author_agent_id,0), type, content, status, created_at, updated_at`
+const noteCols = `id, board_id, (SELECT CASE WHEN b.name = '' THEN 'session' ELSE b.name END FROM boards b WHERE b.id = notes.board_id),
+	COALESCE(author_agent_id,0), type, content, status, created_at, updated_at`
 
 // inSession restricts a notes query to boards of the given session (one ? arg).
 const inSession = `board_id IN (SELECT id FROM boards WHERE session_id = ?)`
 
 func scanNote(r scanner) (n Note, err error) {
-	err = r.Scan(&n.ID, &n.BoardID, &n.AuthorID, &n.Type, &n.Content, &n.Status, &n.CreatedAt, &n.UpdatedAt)
+	err = r.Scan(&n.ID, &n.BoardID, &n.Scope, &n.AuthorID,&n.Type, &n.Content, &n.Status, &n.CreatedAt, &n.UpdatedAt)
 	return n, one(err)
 }
 
@@ -609,12 +692,28 @@ func (s *Store) GetNote(sessionID, id int64) (Note, error) {
 	return scanNote(s.db.QueryRow(`SELECT `+noteCols+` FROM notes WHERE id = ? AND `+inSession, id, sessionID))
 }
 
+// ListNotes lists one board's notes; boardID 0 means every board of the session.
 func (s *Store) ListNotes(sessionID, boardID int64, f NoteFilter) ([]Note, error) {
+	if boardID == 0 {
+		return s.ListNotesIn(sessionID, nil, f)
+	}
+	return s.ListNotesIn(sessionID, []int64{boardID}, f)
+}
+
+// ListNotesIn lists the notes of the given boards of the session (nil = all of them).
+func (s *Store) ListNotesIn(sessionID int64, boardIDs []int64, f NoteFilter) ([]Note, error) {
+	boards := ``
+	args := []any{sessionID, f.Type, f.Type, f.Status, f.Status, f.AuthorID, f.AuthorID, f.SinceID}
+	if boardIDs != nil {
+		boards = ` AND board_id IN (` + strings.TrimSuffix(strings.Repeat("?,", len(boardIDs)), ",") + `)`
+		for _, id := range boardIDs {
+			args = append(args, id)
+		}
+	}
 	base := `SELECT ` + noteCols + ` FROM notes
-		WHERE board_id = ? AND ` + inSession + `
+		WHERE ` + inSession + `
 		AND (? = '' OR type = ?) AND (? = '' OR status = ?)
-		AND (? = 0 OR author_agent_id = ?) AND id > ?`
-	args := []any{boardID, sessionID, f.Type, f.Type, f.Status, f.Status, f.AuthorID, f.AuthorID, f.SinceID}
+		AND (? = 0 OR author_agent_id = ?) AND id > ?` + boards
 	q := base + ` ORDER BY id`
 	if f.Limit > 0 { // newest N, returned oldest first
 		q = `SELECT * FROM (` + base + ` ORDER BY id DESC LIMIT ?) ORDER BY id`
@@ -686,6 +785,24 @@ func (s *Store) ListEscalations(sessionID int64) ([]Escalation, error) {
 	}
 	defer rows.Close()
 	var out []Escalation
+	for rows.Next() {
+		e, err := scanEscalation(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, e)
+	}
+	return out, rows.Err()
+}
+
+// ListOpenEscalations returns the open escalations of all sessions, oldest first.
+func (s *Store) ListOpenEscalations() ([]Escalation, error) {
+	rows, err := s.db.Query(`SELECT ` + escalationCols + ` FROM escalations WHERE status = 'open' ORDER BY id`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []Escalation{}
 	for rows.Next() {
 		e, err := scanEscalation(rows)
 		if err != nil {

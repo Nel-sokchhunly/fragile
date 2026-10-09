@@ -1,10 +1,10 @@
 import {
-  AddNote, AnswerEscalation, CompactSession, CreateSessionWithProvider, DeleteSession, GetAgentEventTail, GetAgentEvents, GetAttachment, GetChanges, GetFileDiff, GetProviders, GetRateLimit, GetSession, GetSettings,
-  FinishAgent, InterruptSession, ListRepos, ListSessions, ListUserPlugins, PauseAgent, PickDirectory, ResumeAgent, ResumeSession, SendMessage, SetSessionConfig, SetSettings, StopSession, TerminalClose, TerminalOpen,
+  AddNote, AddScopedNote, AnswerEscalation, CompactSession, CreateSessionWithProvider, DeleteSession, GetAgentEventTail, GetAgentEvents, GetAttachment, GetChanges, GetFileDiff, GetProviders, GetRateLimit, GetSession, GetSettings,
+  FinishAgent, InterruptSession, ListOpenEscalations, ListRepos, ListSessions, ListUserPlugins, MessageAgent, PauseAgent, PickDirectory, RestartAgent, ResumeAgent, ResumeSession, SendMessage, SetSessionConfig, SetSessionMode, SetSettings, StopSession, TerminalClose, TerminalOpen,
   TerminalResize, TerminalWrite, UpdateNote,
 } from '../../wailsjs/go/main/App'
 import {main} from '../../wailsjs/go/models'
-import type {Agent, AgentActivity, AgentEvent, Attachment, Changes, ChatItem, Escalation, FileDiff, Note, NoteType, ProviderInfo, RateLimit, Session, SessionConfig, SessionProvider, Settings, Task} from './types'
+import type {Agent, AgentActivity, AgentEvent, Attachment, Changes, ChatItem, Escalation, FileDiff, Note, NoteType, ProviderInfo, RateLimit, Session, SessionConfig, SessionMode, SessionProvider, Settings, Task} from './types'
 
 // Typed wrappers around the generated Wails bindings (wailsjs/go, regenerate with `wails generate module`
 // from app/). The generated typings use classes and plain `string` for enums; the values are plain JSON
@@ -30,6 +30,8 @@ export const api = {
   createSession: (name: string, workDir: string, provider: SessionProvider, cfg: SessionConfig) => as<Session>(CreateSessionWithProvider(name, workDir, provider, cfg)),
   /** Replaces the session's own settings; a changed CLI list or rules reach its orchestrator as a decision note. */
   setSessionConfig: (sessionId: number, cfg: SessionConfig) => as<Session>(SetSessionConfig(sessionId, cfg)),
+  /** Normal to orchestra keeps the conversation (the agent is relaunched resuming it); orchestra to normal only before the first message. Rejects while the agent is replying. */
+  setSessionMode: (sessionId: number, mode: SessionMode) => as<Session>(SetSessionMode(sessionId, mode)),
   /** Detects each sub-agent CLI (runs their --version; call on demand). */
   getProviders: () => as<ProviderInfo[]>(GetProviders()),
   /** Latest subscription limits seen, null until any agent reported them. */
@@ -55,18 +57,25 @@ export const api = {
   interruptSession: (sessionId: number): Promise<void> => InterruptSession(sessionId),
   /** Sends /compact to the orchestrator; rejects if it is not running or mid-turn. The result shows as a notice chat item. */
   compactSession: (sessionId: number): Promise<void> => CompactSession(sessionId),
+  /** Sub-agent: sends the user's message to a live one (resuming it if idle or paused); posts a heads_up note for the orchestrator. */
+  messageAgent: (agentId: number, text: string): Promise<void> => MessageAgent(agentId, text),
   /** Sub-agent: ends its current turn and holds it (no automatic wakes) until resumeAgent. */
   pauseAgent: (agentId: number): Promise<void> => PauseAgent(agentId),
   /** Sub-agent: continues a paused or idle one; relaunches one that stopped without a done note. */
   resumeAgent: (agentId: number): Promise<void> => ResumeAgent(agentId),
   /** Sub-agent: ends it (recorded as stopped; the orchestrator is told). */
   finishAgent: (agentId: number): Promise<void> => FinishAgent(agentId),
+  /** Sub-agent: stops it if running and starts a fresh one on the same task; resolves to the new agent id. */
+  restartAgent: (agentId: number): Promise<number> => RestartAgent(agentId),
   /** Data URL ("data:<type>;base64,...") of attachment `index` of the user chat item `chatItemId`. */
   getAttachment: (sessionId: number, chatItemId: number, index: number): Promise<string> => GetAttachment(sessionId, chatItemId, index),
   /** Answer an open escalation; also delivered to the orchestrator. The chat row updates via chat_item. */
   answerEscalation: (escalationId: number, answer: string): Promise<void> => AnswerEscalation(escalationId, answer),
+  /** Open escalations of all sessions, oldest first (the inbox). */
+  listOpenEscalations: () => as<Escalation[]>(ListOpenEscalations()),
   /** Post a note as the user (author_agent_id 0). */
-  addNote: (sessionId: number, type: NoteType, content: string) => as<Note>(AddNote(sessionId, type, content)),
+  addNote: (sessionId: number, type: NoteType, content: string, scope = 'session') =>
+    as<Note>(scope === 'session' ? AddNote(sessionId, type, content) : AddScopedNote(sessionId, scope, type, content)),
   /** Edit a note as the user; '' leaves content / status unchanged. */
   updateNote: (sessionId: number, noteId: number, content: string, status: '' | 'open' | 'resolved') =>
     as<Note>(UpdateNote(sessionId, noteId, content, status)),

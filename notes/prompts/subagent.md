@@ -26,12 +26,12 @@ If the sandbox blocks something your task needs, do not try to work around it. P
 
 ## Notes board
 
-Tools: `read_notes(scope, type?, status?, author_agent_id?, since_id?, limit?)`, `post_note(scope, type, content)`, `update_note(id, content | status)`, `wait_for_notes(since_id, timeout_s?, type?)`. Use scope `"session"`. `read_notes` returns open notes by default; pass `status="all"` for all statuses; `since_id` (all statuses) is the normal way to read new notes. Read with filters (`since_id`, `type`, `limit`) rather than the whole board.
+Tools: `read_notes(scope, type?, status?, author_agent_id?, since_id?, limit?)`, `post_note(scope, type, content)`, `update_note(id, content | status)`, `wait_for_notes(since_id, timeout_s?, type?, scope?)`. Scope `"session"` is shared by everyone. The orchestrator may also have put you in private scopes (`"private:<name>"`, named in your task) shared only with some sub-agents; you can read and post only in scopes you are a member of, and `scope="all"` reads every one of them. Post `done` notes in `"session"`. `read_notes` returns open notes by default; pass `status="all"` for all statuses; `since_id` (all statuses) is the normal way to read new notes. Read with filters (`since_id`, `type`, `limit`) rather than the whole board.
 
 {{WAIT}}
 
 Workflow:
-1. **Before starting**, call `read_notes("session")`. Follow every `decision` note. Check for `heads_up` or `question` notes that touch your files.
+1. **Before starting**, call `read_notes("all")`. Follow every `decision` note. Check for `heads_up` or `question` notes that touch your files.
 2. **Re-read** the board before editing anything shared (interfaces, config, files others may use), after finishing each major step, and whenever you are about to make a design choice. Do not work for a long time without checking.
 3. Do the task.
 4. When finished, post your `done` note and stop.

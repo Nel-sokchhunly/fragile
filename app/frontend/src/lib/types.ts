@@ -24,10 +24,14 @@ export type ProviderInfo = {name: SessionProvider; available: boolean; reason?: 
 
 // A session's own settings (Go: notes.SessionConfig), copied from the Settings template on create.
 // enabled_providers: the CLIs sub-agents may run on, first = default. auto_compact_tokens: 0 = off.
-export type SessionConfig = {enabled_providers: SessionProvider[]; auto_compact_tokens: number; orchestrator_rules: string}
+export type SessionConfig = {enabled_providers: SessionProvider[]; auto_compact_tokens: number; orchestrator_rules: string; escalation_threshold: string}
+
+// normal: one agent, no Fragile tools; orchestra: the agent orchestrates sub-agents. Normal can be switched to orchestra.
+export type SessionMode = 'normal' | 'orchestra'
 
 export type Session = {
   provider: SessionProvider
+  mode?: SessionMode // absent = orchestra
   id: number
   title: string
   status: SessionStatus
@@ -55,7 +59,7 @@ export type Agent = {
 }
 
 // Runtime state of a running sub-agent (Go: AgentActivity): mid-turn, and paused by the user (no automatic wakes).
-export type AgentActivity = {busy: boolean; paused: boolean}
+export type AgentActivity = {busy: boolean; paused: boolean; live?: boolean} // live: takes messages on stdin (snapshot only; false disables the message box)
 
 // Account-wide subscription limits; utilization 0..1, resets_at unix seconds. null window = not reported yet.
 export type LimitWindow = {utilization: number; resets_at: number}
@@ -66,6 +70,7 @@ export type RateLimit = {five_hour: LimitWindow | null; seven_day: LimitWindow |
 export type Settings = {
   auto_compact_tokens: number
   orchestrator_rules: string
+  escalation_threshold: string
   subagent_providers: Partial<Record<SessionProvider, {enabled: boolean; default_model?: string}>>
   /** Plugin names newly spawned sub-agents do not load (global, not per session). */
   subagent_disabled_plugins: string[] | null
@@ -84,6 +89,7 @@ export type Task = {
 export type Note = {
   id: number
   board_id: number
+  scope: string // 'session' or 'private:<name>'
   author_agent_id: number
   type: NoteType
   content: string

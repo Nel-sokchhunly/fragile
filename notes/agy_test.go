@@ -203,6 +203,26 @@ func TestAGYParseText(t *testing.T) {
 	}
 }
 
+func TestAGYContextUsage(t *testing.T) {
+	var out []map[string]any
+	c := &agyClient{
+		emit:     func(v map[string]any) { out = append(out, v) },
+		text:     map[int]string{},
+		tools:    map[int]bool{},
+		turnDone: make(chan struct{}),
+	}
+	c.line([]byte(`{"event":"step_update","step_update":{"conversation_id":"c","step_index":1,"state":"DONE","step_type":"agent_response","text_delta":"done","usage":{"input_tokens":2000,"cache_read_tokens":10000,"output_tokens":300}}}`))
+	var used any
+	for _, v := range out {
+		if v["subtype"] == "context_usage" {
+			used = v["context_used"]
+		}
+	}
+	if used != 12300 {
+		t.Fatalf("context_used = %v, want 12300; events = %v", used, out)
+	}
+}
+
 func TestAGYParseError(t *testing.T) {
 	var out []map[string]any
 	c := &agyClient{emit: func(v map[string]any) { out = append(out, v) }, text: map[int]string{}, tools: map[int]bool{}, turnDone: make(chan struct{})}

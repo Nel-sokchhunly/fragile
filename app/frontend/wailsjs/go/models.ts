@@ -3,6 +3,7 @@ export namespace main {
 	export class AgentActivity {
 	    busy: boolean;
 	    paused: boolean;
+	    live?: boolean;
 	
 	    static createFrom(source: any = {}) {
 	        return new AgentActivity(source);
@@ -12,6 +13,7 @@ export namespace main {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.busy = source["busy"];
 	        this.paused = source["paused"];
+	        this.live = source["live"];
 	    }
 	}
 	export class Attachment {
@@ -346,9 +348,10 @@ export namespace main {
 	export class Settings {
 	    auto_compact_tokens: number;
 	    orchestrator_rules: string;
+	    escalation_threshold: string;
 	    subagent_providers: Record<string, SubagentProviderSetting>;
 	    subagent_disabled_plugins: string[];
-
+	
 	    static createFrom(source: any = {}) {
 	        return new Settings(source);
 	    }
@@ -357,6 +360,7 @@ export namespace main {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.auto_compact_tokens = source["auto_compact_tokens"];
 	        this.orchestrator_rules = source["orchestrator_rules"];
+	        this.escalation_threshold = source["escalation_threshold"];
 	        this.subagent_providers = this.convertValues(source["subagent_providers"], SubagentProviderSetting, true);
 	        this.subagent_disabled_plugins = source["subagent_disabled_plugins"];
 	    }
@@ -471,6 +475,7 @@ export namespace notes {
 	export class Note {
 	    id: number;
 	    board_id: number;
+	    scope: string;
 	    author_agent_id: number;
 	    type: string;
 	    content: string;
@@ -486,6 +491,7 @@ export namespace notes {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.id = source["id"];
 	        this.board_id = source["board_id"];
+	        this.scope = source["scope"];
 	        this.author_agent_id = source["author_agent_id"];
 	        this.type = source["type"];
 	        this.content = source["content"];
@@ -518,9 +524,11 @@ export namespace notes {
 	    work_dir: string;
 	    created_at: string;
 	    agent_count: number;
+	    mode: string;
 	    enabled_providers: string[];
 	    auto_compact_tokens: number;
 	    orchestrator_rules: string;
+	    escalation_threshold: string;
 	
 	    static createFrom(source: any = {}) {
 	        return new Session(source);
@@ -535,15 +543,18 @@ export namespace notes {
 	        this.work_dir = source["work_dir"];
 	        this.created_at = source["created_at"];
 	        this.agent_count = source["agent_count"];
+	        this.mode = source["mode"];
 	        this.enabled_providers = source["enabled_providers"];
 	        this.auto_compact_tokens = source["auto_compact_tokens"];
 	        this.orchestrator_rules = source["orchestrator_rules"];
+	        this.escalation_threshold = source["escalation_threshold"];
 	    }
 	}
 	export class SessionConfig {
 	    enabled_providers: string[];
 	    auto_compact_tokens: number;
 	    orchestrator_rules: string;
+	    escalation_threshold: string;
 	
 	    static createFrom(source: any = {}) {
 	        return new SessionConfig(source);
@@ -554,6 +565,7 @@ export namespace notes {
 	        this.enabled_providers = source["enabled_providers"];
 	        this.auto_compact_tokens = source["auto_compact_tokens"];
 	        this.orchestrator_rules = source["orchestrator_rules"];
+	        this.escalation_threshold = source["escalation_threshold"];
 	    }
 	}
 	export class Task {

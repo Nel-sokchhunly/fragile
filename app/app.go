@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"syscall"
@@ -259,17 +260,26 @@ func (a *App) GetAgentEventTail(agentID int64, limit int) ([]notes.AgentEvent, e
 
 // AddNote posts a note to the session's board as the user (author_agent_id 0).
 func (a *App) AddNote(sessionID int64, noteType, content string) (notes.Note, error) {
+	return a.AddScopedNote(sessionID, notes.ScopeSession, noteType, content)
+}
+
+// AddScopedNote is AddNote in the given scope ("session" or an existing "private:<name>").
+func (a *App) AddScopedNote(sessionID int64, scope, noteType, content string) (notes.Note, error) {
 	if err := notes.CheckNoteType(noteType); err != nil {
 		return notes.Note{}, err
 	}
 	if strings.TrimSpace(content) == "" {
 		return notes.Note{}, errors.New("content must not be empty")
 	}
-	board, err := a.store.SessionBoard(sessionID)
+	scopes, err := a.store.ListScopes(sessionID)
 	if err != nil {
 		return notes.Note{}, err
 	}
-	n, err := a.store.PostNote(sessionID, board, 0, noteType, content)
+	i := slices.IndexFunc(scopes, func(sc notes.Scope) bool { return sc.Name == scope })
+	if i < 0 {
+		return notes.Note{}, fmt.Errorf("unknown scope %q", scope)
+	}
+	n, err := a.store.PostNote(sessionID, scopes[i].BoardID, 0, noteType, content)
 	if err != nil {
 		return notes.Note{}, err
 	}

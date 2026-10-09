@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/Nel-sokchhunly/fragile/notes"
 )
@@ -25,6 +26,9 @@ const (
 type AgentActivity struct {
 	Busy   bool `json:"busy"`
 	Paused bool `json:"paused"`
+	// Live: the sub-agent takes messages on stdin (see liveSubagent). Only the
+	// snapshot sets it; it cannot change while the agent runs.
+	Live bool `json:"live,omitempty"`
 }
 
 type agentActivityEvent struct {
@@ -56,6 +60,7 @@ func (a *App) agentActivity(agents []notes.Agent) map[int64]AgentActivity {
 		if q := a.wq.subs[ag.ID]; q != nil {
 			act = AgentActivity{Busy: !q.idle, Paused: q.paused}
 		}
+		act.Live = a.runner.Running(ag.ID)
 		out[ag.ID] = act
 	}
 	return out
@@ -162,6 +167,59 @@ func (a *App) ResumeAgent(agentID int64) error {
 	return a.sendSub(ag.SessionID, ag.ID, msg)
 }
 
+// MessageAgent sends the user's message to a running interactive sub-agent and
+// tells the orchestrator with a heads_up note. It goes out at once: Claude Code
+// queues stdin messages that arrive mid-turn for the next turn boundary. An idle
+// or paused agent is resumed by it and gets its queued wakes with it.
+func (a *App) MessageAgent(agentID int64, text string) error {
+	text = strings.TrimSpace(text)
+	if text == "" {
+		return errors.New("message must not be empty")
+	}
+	ag, err := a.subagent(agentID)
+	if err != nil {
+		return err
+	}
+	if err := a.liveSubagent(ag); err != nil {
+		return err
+	}
+	a.wq.mu.Lock()
+	q := a.subQueue(ag.SessionID, ag.ID)
+	msg := text
+	if q.idle || q.paused {
+		if q.timer != nil {
+			q.timer.Stop()
+			q.timer = nil
+		}
+		if len(q.lines) > 0 {
+			msg += "\n\n" + wakeMessage(q.lines)
+		}
+		q.lines = nil
+		a.setActivity(ag.ID, q, false, false)
+	}
+	a.wq.mu.Unlock()
+	if err := a.sendSub(ag.SessionID, ag.ID, msg); err != nil {
+		return err
+	}
+	first := []rune(text)
+	preview := string(first)
+	if len(first) > wakeLineMax {
+		preview = string(first[:wakeLineMax]) + "..."
+	}
+	_, err = a.AddNote(ag.SessionID, "heads_up", fmt.Sprintf("User messaged sub-agent #%d (%s): %s", ag.ID, a.agentTitle(ag), preview))
+	return err
+}
+
+// agentTitle names a sub-agent for a note: its task title, else its role.
+func (a *App) agentTitle(ag notes.Agent) string {
+	if ag.TaskID != 0 {
+		if t, err := a.store.GetTask(ag.SessionID, ag.TaskID); err == nil && t.Title != "" {
+			return t.Title
+		}
+	}
+	return "sub-agent"
+}
+
 // relaunchAgent resumes a sub-agent that is no longer running.
 func (a *App) relaunchAgent(ag notes.Agent) error {
 	board, err := a.store.SessionBoard(ag.SessionID)
@@ -196,6 +254,43 @@ func (a *App) relaunchAgent(ag notes.Agent) error {
 	b, _ := json.Marshal(userMessage{Text: resumedAfterStopMessage})
 	_, err = a.record(ag, evUserMessage, string(b)) // shown in its output; the runner sent it
 	return err
+}
+
+// RestartAgent relaunches a sub-agent's task as a new sub-agent: a fresh
+// process and conversation (nothing resumed) with the old one's task text,
+// title, provider, model and private scopes, under the same orchestrator. A
+// running agent is stopped first. The new agent gets its own task record, which
+// repeats the old one's text; the heads_up note links the two agents.
+func (a *App) RestartAgent(agentID int64) (int64, error) {
+	ag, err := a.subagent(agentID)
+	if err != nil {
+		return 0, err
+	}
+	t, err := a.store.GetTask(ag.SessionID, ag.TaskID)
+	if err != nil {
+		return 0, fmt.Errorf("agent %d has no task to restart: %w", ag.ID, err)
+	}
+	if ag.Status == "running" {
+		if err := a.FinishAgent(ag.ID); err != nil {
+			return 0, err
+		}
+	}
+	scopes, err := a.store.AgentScopes(ag.SessionID, ag.ID)
+	if err != nil {
+		return 0, err
+	}
+	var private []string
+	for _, sc := range scopes {
+		if sc.Name != "session" {
+			private = append(private, sc.Name)
+		}
+	}
+	n, err := a.runner.SpawnSubagentScoped(ag.SessionID, ag.ParentID, t.Title, t.Description, ag.Model, ag.Provider, private)
+	if err != nil {
+		return 0, err
+	}
+	_, err = a.AddNote(ag.SessionID, "heads_up", fmt.Sprintf("User restarted sub-agent #%d as #%d (%s)", ag.ID, n.ID, t.Title))
+	return n.ID, err
 }
 
 // FinishAgent ends a running sub-agent: an idle one by closing its stdin, a

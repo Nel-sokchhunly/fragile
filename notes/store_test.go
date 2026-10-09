@@ -268,8 +268,9 @@ func TestMigratePhase0Database(t *testing.T) {
 
 	var v int
 	s.db.QueryRow(`PRAGMA user_version`).Scan(&v)
-	if v != 10 {
-		t.Fatalf("user_version = %d, want 10", v)
+	files, _ := fs.Glob(migrationFS, "migrations/*.sql")
+	if v != len(files) {
+		t.Fatalf("user_version = %d, want %d", v, len(files))
 	}
 	if _, err := s.GetSetting("k"); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("unset setting: %v", err)
@@ -421,6 +422,30 @@ func TestMarkRunningAgentsCrashed(t *testing.T) {
 	}
 }
 
+func TestListOpenEscalations(t *testing.T) {
+	s, err := OpenStore(filepath.Join(t.TempDir(), "e.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	if got, err := s.ListOpenEscalations(); err != nil || got == nil || len(got) != 0 {
+		t.Fatalf("empty = %v, %v; want empty non-nil", got, err)
+	}
+	s1, _ := s.CreateSession("a")
+	s2, _ := s.CreateSession("b")
+	o1, _ := s.CreateAgent(s1.ID, "orchestrator", 0, 0)
+	o2, _ := s.CreateAgent(s2.ID, "orchestrator", 0, 0)
+	e1, _ := s.CreateEscalation(s1.ID, o1.ID, "q1", "")
+	e2, _ := s.CreateEscalation(s2.ID, o2.ID, "q2", "ctx")
+	if _, err := s.AnswerEscalation(s1.ID, e1.ID, "a"); err != nil {
+		t.Fatal(err)
+	}
+	got, err := s.ListOpenEscalations()
+	if err != nil || len(got) != 1 || got[0].ID != e2.ID || got[0].SessionID != s2.ID {
+		t.Fatalf("open = %+v, %v; want only %d", got, err, e2.ID)
+	}
+}
+
 func TestReopenEscalation(t *testing.T) {
 	s, err := OpenStore(filepath.Join(t.TempDir(), "e.db"))
 	if err != nil {
@@ -495,8 +520,9 @@ func TestMigrateV7ToV8(t *testing.T) {
 
 	var v int
 	s.db.QueryRow(`PRAGMA user_version`).Scan(&v)
-	if v != 10 {
-		t.Fatalf("user_version = %d, want 10", v)
+	files, _ = fs.Glob(migrationFS, "migrations/*.sql")
+	if v != len(files) {
+		t.Fatalf("user_version = %d, want %d", v, len(files))
 	}
 
 	// Verify old sessions preserved
@@ -577,7 +603,7 @@ func TestMultiCLIMigrationAndProviders(t *testing.T) {
 	defer s.Close()
 
 	// 1. Session config round-trips through create, get, list and set.
-	cfg := SessionConfig{EnabledProviders: []string{ProviderClaude, ProviderCodex}, AutoCompactTokens: 50_000, OrchestratorRules: "agy: docs only"}
+	cfg := SessionConfig{EnabledProviders: []string{ProviderClaude, ProviderCodex}, AutoCompactTokens: 50_000, OrchestratorRules: "agy: docs only", EscalationThreshold: "only when blocked"}
 	sess, err := s.CreateSessionWithConfig("test-session", t.TempDir(), ProviderClaude, cfg)
 	if err != nil {
 		t.Fatal(err)
@@ -608,6 +634,7 @@ func TestMultiCLIMigrationAndProviders(t *testing.T) {
 		{EnabledProviders: []string{ProviderAGY, ProviderAGY}},
 		{EnabledProviders: []string{ProviderClaude}, AutoCompactTokens: 5},
 		{EnabledProviders: []string{ProviderClaude}, OrchestratorRules: strings.Repeat("x", maxRulesBytes+1)},
+		{EnabledProviders: []string{ProviderClaude}, EscalationThreshold: strings.Repeat("x", maxRulesBytes+1)},
 	} {
 		if err := s.SetSessionConfig(sess.ID, bad); err == nil {
 			t.Errorf("SetSessionConfig(%+v) should fail", bad)

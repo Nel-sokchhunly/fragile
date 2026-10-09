@@ -1,4 +1,5 @@
 import type {ReactNode} from 'react'
+import {Input} from '@/components/ui/input'
 import {Textarea} from '@/components/ui/textarea'
 import {PROVIDER_NAMES, PROVIDERS, type ProviderInfo, type SessionConfig, type SessionProvider, type Settings} from '@/lib/types'
 
@@ -18,6 +19,7 @@ export const templateConfig = (s: Settings): SessionConfig => ({
   enabled_providers: PROVIDERS.filter((p) => s.subagent_providers?.[p]?.enabled),
   auto_compact_tokens: s.auto_compact_tokens,
   orchestrator_rules: s.orchestrator_rules,
+  escalation_threshold: s.escalation_threshold ?? '',
 })
 
 // The fields of a SessionConfig: the session dialogs edit one, Settings edits the template.
@@ -66,6 +68,14 @@ export function SessionConfigFields({value, onChange, providers, disabled, cliEx
           {COMPACT_STOPS.map((n) => <span key={n}>{n ? tokens(n) : 'off'}</span>)}
         </span>
         <span className="text-xs text-muted-foreground">Compact the orchestrator after a turn once its context passes this.</span>
+      </label>
+      <label className="flex flex-col gap-1.5 text-[13px]">
+        When to escalate
+        <Input
+          value={value.escalation_threshold} disabled={disabled} placeholder="only when blocked"
+          className="font-mono text-xs" onChange={(e) => onChange({...value, escalation_threshold: e.target.value})}
+        />
+        <span className="text-xs text-muted-foreground">Overrides when to escalate to you, e.g. "only when blocked" or "anything architectural".</span>
       </label>
       <label className="flex flex-col gap-1.5 text-[13px]">
         Orchestrator rules
