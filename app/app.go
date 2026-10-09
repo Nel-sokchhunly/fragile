@@ -162,7 +162,7 @@ func (a *App) open(dir string, emit func(string, any)) (err error) {
 	a.runner = notes.NewRunner(notes.Config{Addr: ln.Addr().String(), AgentDir: agentDir, DBPath: dbPath, LogPath: logPath}, a.store, a.log)
 	a.runner.Interactive = true
 	a.runner.DefaultModel = a.subagentDefaultModel
-	a.runner.PluginDirs = notes.UserPluginDirs(agentDir)
+	a.runner.PluginDirs = a.subagentPluginDirs
 	a.runner.OnLine = a.onLine
 	srv := &notes.Server{Store: a.store, Log: a.log, Runner: a.runner, OnEscalation: a.onEscalation}
 	a.httpSrv = &http.Server{Handler: srv.Handler()}

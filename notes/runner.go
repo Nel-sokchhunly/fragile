@@ -49,13 +49,26 @@ var isolationArgs = []string{"--setting-sources", "project"}
 
 const isolationEnv = "CLAUDE_CODE_DISABLE_AUTO_MEMORY=1"
 
-// UserPluginDirs returns the --plugin-dir values that give a sub-agent the
+// Plugin is one plugin offered to sub-agents. Name is the enabledPlugins key
+// (e.g. "caveman@caveman") or "user" for the personal-skills plugin.
+type Plugin struct{ Name, Dir string }
+
+// UserPluginDirs returns the --plugin-dir values of all UserPlugins.
+func UserPluginDirs(agentDir string) []string {
+	var dirs []string
+	for _, p := range UserPlugins(agentDir) {
+		dirs = append(dirs, p.Dir)
+	}
+	return dirs
+}
+
+// UserPlugins returns the plugins that can be given to a sub-agent: the
 // user's enabled plugins (settings.json enabledPlugins, resolved through
 // plugins/installed_plugins.json) and personal skills. Skills have no flag, so
 // they are wrapped in a synthetic plugin "user" at agentDir/user-skills with a
 // symlink to <claude dir>/skills (they show up as user:<skill>). Missing or
 // unparseable files just mean fewer plugins.
-func UserPluginDirs(agentDir string) []string {
+func UserPlugins(agentDir string) []Plugin {
 	dir := os.Getenv("CLAUDE_CONFIG_DIR")
 	if dir == "" {
 		home, err := os.UserHomeDir()
@@ -64,7 +77,7 @@ func UserPluginDirs(agentDir string) []string {
 		}
 		dir = filepath.Join(home, ".claude")
 	}
-	var dirs []string
+	var dirs []Plugin
 	var settings struct{ EnabledPlugins map[string]bool }
 	var installed struct {
 		Plugins map[string][]struct{ InstallPath string }
@@ -80,7 +93,7 @@ func UserPluginDirs(agentDir string) []string {
 				continue
 			}
 			if st, err := os.Stat(e[0].InstallPath); err == nil && st.IsDir() {
-				dirs = append(dirs, e[0].InstallPath)
+				dirs = append(dirs, Plugin{name, e[0].InstallPath})
 			}
 		}
 	}
@@ -97,7 +110,7 @@ func UserPluginDirs(agentDir string) []string {
 					return dirs
 				}
 			}
-			dirs = append(dirs, p)
+			dirs = append(dirs, Plugin{"user", p})
 		}
 	}
 	return dirs
@@ -278,10 +291,13 @@ const (
 // One Runner serves every session of a store; sessions can be stopped
 // individually (StopSession) or together (StopAll).
 type Runner struct {
-	AGYCommand   string   // Antigravity CLI binary; defaults to agy
-	CodexCommand string   // Codex CLI binary; defaults to codex
-	Command      string   // binary to run; "claude" unless a test substitutes a fake
-	PluginDirs   []string // --plugin-dir values for sub-agents (set before use; see UserPluginDirs)
+	AGYCommand   string // Antigravity CLI binary; defaults to agy
+	CodexCommand string // Codex CLI binary; defaults to codex
+	Command      string // binary to run; "claude" unless a test substitutes a fake
+
+	// PluginDirs (optional, set before use) gives the --plugin-dir values for
+	// each newly spawned sub-agent (see UserPluginDirs).
+	PluginDirs func() []string
 
 	// DefaultModel (optional, set before use) gives the model for a sub-agent
 	// spawned without one on the provider; "" leaves it to the CLI.
@@ -586,8 +602,10 @@ func (r *Runner) args(a Agent, workDir, mcpConfig, prompt, systemPrompt, resume,
 	} else {
 		args = append(args, "--allowedTools", allowedTools)
 		args = append(args, isolationArgs...)
-		for _, d := range r.PluginDirs {
-			args = append(args, "--plugin-dir", d)
+		if r.PluginDirs != nil {
+			for _, d := range r.PluginDirs() {
+				args = append(args, "--plugin-dir", d)
+			}
 		}
 		args = append(args, "--settings", sandboxSettings(r.cfg, workDir))
 	}

@@ -82,6 +82,10 @@ export function ListSessions() {
   return window['go']['main']['App']['ListSessions']();
 }
 
+export function ListUserPlugins() {
+  return window['go']['main']['App']['ListUserPlugins']();
+}
+
 export function PauseAgent(arg1) {
   return window['go']['main']['App']['PauseAgent'](arg1);
 }

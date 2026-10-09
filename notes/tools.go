@@ -36,7 +36,9 @@ const scopeHelp = `Only "session" (the board shared by all agents in this sessio
 // not registered for sub-agents.
 func (s *Server) newMCPServer(a Agent, cache *mcp.SchemaCache) *mcp.Server {
 	srv := mcp.NewServer(&mcp.Implementation{Name: "fragile-notes", Version: "0.1.0"}, &mcp.ServerOptions{SchemaCache: cache})
-	addTool(srv, a, "read_notes", "Read notes from the shared board, oldest first. "+scopeHelp+" All filters are optional. "+noteTypeHelp, false, s.readNotes)
+	addTool(srv, a, "read_notes", "Read notes from the shared board, oldest first. "+scopeHelp+
+		" Returns open notes by default; pass since_id to read what is new (all statuses), or status=\"all\" for every status. "+
+		"Optional limit returns newest matching notes. All filters are optional. "+noteTypeHelp, false, s.readNotes)
 	addTool(srv, a, "post_note", "Post a note to the shared board; you are recorded as the author. "+scopeHelp+" "+noteTypeHelp, false, s.postNote)
 	addTool(srv, a, "update_note", "Change a note's status (open or resolved; any agent may do this) and/or its content (only the note's author may). "+
 		"Resolve a question or blocker once it has been answered.", false, s.updateNote)
@@ -47,7 +49,7 @@ func (s *Server) newMCPServer(a Agent, cache *mcp.SchemaCache) *mcp.Server {
 	addTool(srv, a, "spawn_subagent", "Orchestrator only. Start a new sub-agent process for a self-contained task and create its task record. "+
 		"Returns the new agent id and task id.", true, s.spawnSubagent)
 	addTool(srv, a, "get_subagent_status", "Orchestrator only. Status of one sub-agent (pass id), or of all sub-agents in the session (omit id): "+
-		"agent and task status, pid, times, exit code, its latest note, and whether it posted a done note.", true, s.subagentStatus)
+		"agent and task status, pid, times, exit code, its latest note (short summary; full note via read_notes), and whether it posted a done note.", true, s.subagentStatus)
 	addTool(srv, a, "escalate_to_user", "Orchestrator only. Raise a product decision you cannot reasonably make yourself to the user. "+
 		"It returns at once. In the desktop app the user's answer arrives later as a new user message; in the one-shot CLI it is only logged and no answer comes back.", true, s.escalate)
 	return srv
@@ -103,12 +105,15 @@ func checkEnum(what, v string, valid []string) error {
 
 // Notes
 
+var readNoteStatuses = []string{"open", "resolved", "all"}
+
 type readNotesIn struct {
 	Scope         string `json:"scope" jsonschema:"must be \"session\""`
 	Type          string `json:"type,omitempty" jsonschema:"only notes of this type"`
-	Status        string `json:"status,omitempty" jsonschema:"only notes with this status: open or resolved"`
+	Status        string `json:"status,omitempty" jsonschema:"filter by status: \"open\" (default when since_id omitted), \"resolved\", or \"all\""`
 	AuthorAgentID int64  `json:"author_agent_id,omitempty" jsonschema:"only notes written by this agent id"`
-	SinceID       int64  `json:"since_id,omitempty" jsonschema:"only notes with an id greater than this (to fetch what is new)"`
+	SinceID       int64  `json:"since_id,omitempty" jsonschema:"only notes with an id greater than this; normal way to read what is new (defaults to all statuses)"`
+	Limit         int    `json:"limit,omitempty" jsonschema:"optional limit (>0) returning only the newest notes matching filters, oldest first"`
 }
 
 func (s *Server) readNotes(_ context.Context, a Agent, in readNotesIn) (any, error) {
@@ -120,16 +125,31 @@ func (s *Server) readNotes(_ context.Context, a Agent, in readNotesIn) (any, err
 			return nil, err
 		}
 	}
+	filterStatus := in.Status
 	if in.Status != "" {
-		if err := checkEnum("status", in.Status, noteStatuses); err != nil {
+		if err := checkEnum("status", in.Status, readNoteStatuses); err != nil {
 			return nil, err
 		}
+		if in.Status == "all" {
+			filterStatus = ""
+		}
+	} else if in.SinceID == 0 {
+		filterStatus = "open"
+	}
+	if in.Limit < 0 {
+		return nil, errors.New("limit must be greater than 0")
 	}
 	board, err := s.Store.SessionBoard(a.SessionID)
 	if err != nil {
 		return nil, err
 	}
-	notes, err := s.Store.ListNotes(a.SessionID, board, NoteFilter{Type: in.Type, Status: in.Status, AuthorID: in.AuthorAgentID, SinceID: in.SinceID})
+	notes, err := s.Store.ListNotes(a.SessionID, board, NoteFilter{
+		Type:     in.Type,
+		Status:   filterStatus,
+		AuthorID: in.AuthorAgentID,
+		SinceID:  in.SinceID,
+		Limit:    in.Limit,
+	})
 	if notes == nil {
 		notes = []Note{}
 	}
@@ -252,17 +272,33 @@ type statusIn struct {
 	ID int64 `json:"id,omitempty" jsonschema:"sub-agent id; omit to list all sub-agents in the session"`
 }
 
+type noteSummary struct {
+	ID      int64  `json:"id"`
+	Type    string `json:"type"`
+	Status  string `json:"status"`
+	Content string `json:"content"`
+}
+
+func noteSummaryContent(content string) string {
+	line, _, _ := strings.Cut(strings.TrimSpace(content), "\n")
+	line = strings.TrimSpace(line)
+	if rs := []rune(line); len(rs) > 200 {
+		return string(rs[:200]) + "…"
+	}
+	return line
+}
+
 type subagentStatus struct {
-	AgentID     int64  `json:"agent_id"`
-	TaskTitle   string `json:"task_title"`
-	AgentStatus string `json:"agent_status"`
-	TaskStatus  string `json:"task_status"`
-	PID         int    `json:"pid,omitempty"`
-	CreatedAt   string `json:"created_at"`
-	ExitedAt    string `json:"exited_at,omitempty"`
-	ExitCode    *int   `json:"exit_code,omitempty"`
-	LatestNote  *Note  `json:"latest_note"`
-	HasDoneNote bool   `json:"has_done_note"`
+	AgentID     int64        `json:"agent_id"`
+	TaskTitle   string       `json:"task_title"`
+	AgentStatus string       `json:"agent_status"`
+	TaskStatus  string       `json:"task_status"`
+	PID         int          `json:"pid,omitempty"`
+	CreatedAt   string       `json:"created_at"`
+	ExitedAt    string       `json:"exited_at,omitempty"`
+	ExitCode    *int         `json:"exit_code,omitempty"`
+	LatestNote  *noteSummary `json:"latest_note"`
+	HasDoneNote bool         `json:"has_done_note"`
 }
 
 func (s *Server) subagentStatus(_ context.Context, caller Agent, in statusIn) (any, error) {
@@ -298,7 +334,13 @@ func (s *Server) subagentStatus(_ context.Context, caller Agent, in statusIn) (a
 			return nil, err
 		}
 		if len(notes) > 0 {
-			st.LatestNote = &notes[len(notes)-1]
+			last := notes[len(notes)-1]
+			st.LatestNote = &noteSummary{
+				ID:      last.ID,
+				Type:    last.Type,
+				Status:  last.Status,
+				Content: noteSummaryContent(last.Content),
+			}
 		}
 		for _, n := range notes {
 			st.HasDoneNote = st.HasDoneNote || n.Type == "done"

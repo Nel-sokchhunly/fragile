@@ -123,6 +123,88 @@ func TestMCPRolesAndNotes(t *testing.T) {
 	}
 }
 
+func TestMCPReadNotesDefaultsAndLimit(t *testing.T) {
+	s, ts := newTestServer(t)
+	sess, _ := s.Store.CreateSession("test")
+	orch, _ := s.Store.CreateAgent(sess.ID, "orchestrator", 0, 0)
+	co := connect(t, ts, orch.Token)
+
+	for _, c := range []string{"n1", "n2", "n3", "n4"} {
+		if out, isErr := call(t, co, "post_note", map[string]any{"scope": "session", "type": "heads_up", "content": c}); isErr {
+			t.Fatal(out)
+		}
+	}
+	if out, isErr := call(t, co, "update_note", map[string]any{"id": 2, "status": "resolved"}); isErr {
+		t.Fatal(out)
+	}
+	read := func(args map[string]any) []Note {
+		t.Helper()
+		args["scope"] = "session"
+		out, isErr := call(t, co, "read_notes", args)
+		if isErr {
+			t.Fatalf("read_notes(%v) = %s", args, out)
+		}
+		var got []Note
+		if err := json.Unmarshal([]byte(out), &got); err != nil {
+			t.Fatal(err)
+		}
+		return got
+	}
+	contents := func(ns []Note) string {
+		var cs []string
+		for _, n := range ns {
+			cs = append(cs, n.Content)
+		}
+		return strings.Join(cs, ",")
+	}
+
+	if got := contents(read(map[string]any{})); got != "n1,n3,n4" {
+		t.Fatalf("default read = %s, want open notes only", got)
+	}
+	if got := contents(read(map[string]any{"status": "all"})); got != "n1,n2,n3,n4" {
+		t.Fatalf("status all = %s", got)
+	}
+	if got := contents(read(map[string]any{"since_id": 1})); got != "n2,n3,n4" {
+		t.Fatalf("since_id without status = %s, want all statuses", got)
+	}
+	if got := contents(read(map[string]any{"status": "all", "limit": 2})); got != "n3,n4" {
+		t.Fatalf("limit 2 = %s, want newest two oldest first", got)
+	}
+	if out, isErr := call(t, co, "read_notes", map[string]any{"scope": "session", "limit": -1}); !isErr {
+		t.Fatalf("negative limit accepted: %s", out)
+	}
+}
+
+func TestMCPSubagentStatusLatestNoteTruncated(t *testing.T) {
+	s, ts := newTestServer(t)
+	sess, _ := s.Store.CreateSession("test")
+	orch, _ := s.Store.CreateAgent(sess.ID, "orchestrator", 0, 0)
+	a, _ := s.Store.CreateAgent(sess.ID, "subagent", orch.ID, 0)
+	ca, co := connect(t, ts, a.Token), connect(t, ts, orch.Token)
+
+	long := strings.Repeat("x", 500) + "\nSECOND-LINE " + strings.Repeat("y", 5000)
+	if out, isErr := call(t, ca, "post_note", map[string]any{"scope": "session", "type": "done", "content": long}); isErr {
+		t.Fatal(out)
+	}
+	out, isErr := call(t, co, "get_subagent_status", map[string]any{"id": a.ID})
+	if isErr {
+		t.Fatal(out)
+	}
+	var st struct {
+		LatestNote *noteSummary `json:"latest_note"`
+	}
+	if err := json.Unmarshal([]byte(out), &st); err != nil {
+		t.Fatal(err)
+	}
+	want := strings.Repeat("x", 200) + "…"
+	if st.LatestNote == nil || st.LatestNote.Content != want || st.LatestNote.Type != "done" {
+		t.Fatalf("latest_note = %+v, want content of 200 x + ellipsis", st.LatestNote)
+	}
+	if strings.Contains(out, "SECOND-LINE") || len(out) > 1000 {
+		t.Fatalf("status output not compact (%d bytes): %s", len(out), out)
+	}
+}
+
 func TestMCPUnknownAgent(t *testing.T) {
 	s, ts := newTestServer(t)
 	sess, _ := s.Store.CreateSession("test")

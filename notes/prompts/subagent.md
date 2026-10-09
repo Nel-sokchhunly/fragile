@@ -26,7 +26,7 @@ If the sandbox blocks something your task needs, do not try to work around it. P
 
 ## Notes board
 
-Tools: `read_notes(scope, type?, status?, author_agent_id?, since_id?)`, `post_note(scope, type, content)`, `update_note(id, content | status)`, `wait_for_notes(since_id, timeout_s?, type?)`. Use scope `"session"`.
+Tools: `read_notes(scope, type?, status?, author_agent_id?, since_id?, limit?)`, `post_note(scope, type, content)`, `update_note(id, content | status)`, `wait_for_notes(since_id, timeout_s?, type?)`. Use scope `"session"`. `read_notes` returns open notes by default; pass `status="all"` for all statuses; `since_id` (all statuses) is the normal way to read new notes. Read with filters (`since_id`, `type`, `limit`) rather than the whole board.
 
 {{WAIT}}
 

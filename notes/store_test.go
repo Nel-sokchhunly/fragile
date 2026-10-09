@@ -68,6 +68,32 @@ func TestStoreNoteRoundTrip(t *testing.T) {
 	}
 }
 
+func TestStoreListNotesLimit(t *testing.T) {
+	s, err := OpenStore(filepath.Join(t.TempDir(), "f.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+
+	sess, _ := s.CreateSession("t")
+	board, _ := s.SessionBoard(sess.ID)
+	orch, _ := s.CreateAgent(sess.ID, "orchestrator", 0, 0)
+
+	for _, text := range []string{"note 1", "note 2", "note 3", "note 4", "note 5"} {
+		if _, err := s.PostNote(sess.ID, board, orch.ID, "decision", text); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	got, err := s.ListNotes(sess.ID, board, NoteFilter{Limit: 2})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 2 || got[0].Content != "note 4" || got[1].Content != "note 5" {
+		t.Fatalf("ListNotes limit 2 = %+v, want note 4 and note 5", got)
+	}
+}
+
 // A path with URI metacharacters must reach SQLite unchanged.
 func TestStoreSpecialCharsInPath(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "a#b?c%d")

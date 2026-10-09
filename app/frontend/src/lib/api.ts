@@ -1,6 +1,6 @@
 import {
   AddNote, AnswerEscalation, CompactSession, CreateSessionWithProvider, DeleteSession, GetAgentEventTail, GetAgentEvents, GetAttachment, GetChanges, GetFileDiff, GetProviders, GetRateLimit, GetSession, GetSettings,
-  FinishAgent, InterruptSession, ListRepos, ListSessions, PauseAgent, PickDirectory, ResumeAgent, ResumeSession, SendMessage, SetSessionConfig, SetSettings, StopSession, TerminalClose, TerminalOpen,
+  FinishAgent, InterruptSession, ListRepos, ListSessions, ListUserPlugins, PauseAgent, PickDirectory, ResumeAgent, ResumeSession, SendMessage, SetSessionConfig, SetSettings, StopSession, TerminalClose, TerminalOpen,
   TerminalResize, TerminalWrite, UpdateNote,
 } from '../../wailsjs/go/main/App'
 import {main} from '../../wailsjs/go/models'
@@ -38,6 +38,8 @@ export const api = {
   getSettings: () => as<Settings>(GetSettings()),
   /** Validates and stores the preferences; rejects with the reason (e.g. an auto-compact threshold out of range). */
   setSettings: (s: Settings): Promise<void> => SetSettings(main.Settings.createFrom(s)),
+  /** Names of the plugins sub-agents can load (enabled Claude Code plugins, plus "user" for personal skills). */
+  listUserPlugins: (): Promise<string[]> => ListUserPlugins(),
   /** All sessions, newest first. */
   listSessions: () => as<Session[]>(ListSessions()),
   /** Full state of a session from the database (live or past). */

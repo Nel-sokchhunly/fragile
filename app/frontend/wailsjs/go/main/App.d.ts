@@ -43,6 +43,8 @@ export function ListRepos(arg1:number):Promise<Array<string>>;
 
 export function ListSessions():Promise<Array<notes.Session>>;
 
+export function ListUserPlugins():Promise<Array<string>>;
+
 export function PauseAgent(arg1:number):Promise<void>;
 
 export function PickDirectory():Promise<string>;

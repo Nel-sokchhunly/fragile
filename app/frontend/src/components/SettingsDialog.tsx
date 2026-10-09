@@ -12,6 +12,7 @@ export function SettingsDialog({side = 'bottom'}: {side?: 'bottom' | 'right'}) {
   const [open, setOpen] = useState(false)
   const [prefs, setPrefs] = useState<Prefs | null>(null)
   const [providers, setProviders] = useState<ProviderInfo[] | null>(null)
+  const [plugins, setPlugins] = useState<string[]>([])
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
 
@@ -24,9 +25,15 @@ export function SettingsDialog({side = 'bottom'}: {side?: 'bottom' | 'right'}) {
     setError('')
     api.getSettings().then(setPrefs, (e) => setError(String(e)))
     api.getProviders().then(setProviders, (e) => setError(String(e)))
+    api.listUserPlugins().then(setPlugins, (e) => setError(String(e)))
   }
+  const togglePlugin = (name: string, on: boolean) => setPrefs((p) => p && {
+    ...p,
+    subagent_disabled_plugins: [...(p.subagent_disabled_plugins ?? []).filter((x) => x !== name), ...(on ? [] : [name])],
+  })
   // The template's enabled flags live in subagent_providers next to the default models.
   const setTemplate = (c: SessionConfig) => setPrefs((p) => p && {
+    ...p,
     auto_compact_tokens: c.auto_compact_tokens,
     orchestrator_rules: c.orchestrator_rules,
     subagent_providers: Object.fromEntries(PROVIDERS.map((x) => [x, {...p.subagent_providers[x], enabled: c.enabled_providers.includes(x)}])),
@@ -69,6 +76,22 @@ export function SettingsDialog({side = 'bottom'}: {side?: 'bottom' | 'right'}) {
               )}
             />
           ) : !error && <p className="text-[13px] text-muted-foreground">Loading...</p>}
+          {prefs && plugins.length > 0 && (
+            <fieldset className="flex flex-col gap-1.5 text-[13px]" disabled={busy}>
+              <legend className="mb-1.5">Plugins for sub-agents</legend>
+              {plugins.map((name) => (
+                <label key={name} className="flex items-center gap-2">
+                  <input
+                    type="checkbox" className="size-3.5 accent-primary"
+                    checked={!(prefs.subagent_disabled_plugins ?? []).includes(name)}
+                    onChange={(e) => togglePlugin(name, e.target.checked)}
+                  />
+                  <span className="font-mono text-xs">{name}</span>
+                </label>
+              ))}
+              <span className="text-xs text-muted-foreground">Unchecked plugins are not loaded by newly spawned sub-agents.</span>
+            </fieldset>
+          )}
           {error && <p role="alert" className="text-xs text-destructive">{error}</p>}
           <DialogFooter><Button type="submit" disabled={!prefs || busy}>{busy ? 'Saving...' : 'Save'}</Button></DialogFooter>
         </form>

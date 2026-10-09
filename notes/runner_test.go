@@ -324,12 +324,15 @@ func TestUserPluginDirs(t *testing.T) {
 		t.Errorf("skills symlink -> %q", l)
 	}
 	r := NewRunner(Config{AgentDir: agents}, nil, nil)
-	r.PluginDirs = want
+	r.PluginDirs = func() []string { return want }
 	args := r.args(Agent{Role: "subagent"}, "/w", "/x", "p", "SYS", "", "")
 	for _, d := range want {
 		if i := slices.Index(args, d); i < 1 || args[i-1] != "--plugin-dir" {
 			t.Errorf("args missing --plugin-dir %s: %v", d, args)
 		}
+	}
+	if ps := UserPlugins(agents); len(ps) != 2 || ps[0].Name != "on@m" || ps[1].Name != "user" {
+		t.Errorf("UserPlugins = %v", ps)
 	}
 	// Unparseable files mean no plugins, and no skills dir means no synthetic plugin.
 	write("settings.json", `{nope`)
