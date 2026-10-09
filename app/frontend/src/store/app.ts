@@ -1,7 +1,7 @@
 import {create} from 'zustand'
 import {api} from '@/lib/api'
 import type {PendingAttachment} from '@/lib/attachments'
-import type {Agent, AgentActivity, AgentEvent, Attachment, ChatItem, Note, NoteType, RateLimit, Session, SessionProvider, SessionStatus, Task} from '@/lib/types'
+import type {Agent, AgentActivity, AgentEvent, Attachment, ChatItem, Note, NoteType, RateLimit, Session, SessionConfig, SessionProvider, SessionStatus, Task} from '@/lib/types'
 
 // Zustand store fed by the backend: snapshots (lib/api.ts) on first view of a session, then Wails events
 // (lib/events.ts) routed here by session_id. Components only read it via selectors.
@@ -43,7 +43,7 @@ type AppState = {
   setChangesRepo: (sessionId: number, repo: string) => void
   notify: (e: unknown) => void
   // Throw the backend's error string; the caller shows it inline.
-  createSession: (name: string, workDir: string, provider?: SessionProvider, enabledProviders?: SessionProvider[]) => Promise<void>
+  createSession: (name: string, workDir: string, provider: SessionProvider, cfg: SessionConfig) => Promise<void>
   sendMessage: (sessionId: number, text: string, attachments?: Attachment[]) => Promise<void>
   compactSession: (sessionId: number) => Promise<void>
   // Report failures as toasts.
@@ -59,6 +59,7 @@ type AppState = {
 
   // Event sinks (lib/events.ts).
   sessionCreated: (s: Session) => void
+  sessionUpdated: (s: Session) => void
   sessionStatus: (sessionId: number, status: SessionStatus) => void
   agentSeen: (sessionId: number) => void
   sessionDeleted: (sessionId: number) => void
@@ -169,16 +170,8 @@ export const useAppStore = create<AppState>((set, get) => {
       setTimeout(() => set((s) => ({toasts: s.toasts.filter((t) => t.id !== id)})), 6000)
     },
 
-    createSession: async (name, workDir, provider = 'claude', enabledProviders?: SessionProvider[]) => {
-      const se = await api.createSession(name, workDir, provider)
-      if (enabledProviders && enabledProviders.length > 0) {
-        try {
-          await api.setSessionProviders(se.id, enabledProviders)
-          se.enabled_providers = enabledProviders
-        } catch {
-          // ignore error if backend doesn't support setting mid-creation
-        }
-      }
+    createSession: async (name, workDir, provider, cfg) => {
+      const se = await api.createSession(name, workDir, provider, cfg)
       get().sessionCreated(se)
       select(se.id)
     },
@@ -237,6 +230,7 @@ export const useAppStore = create<AppState>((set, get) => {
     },
 
     sessionCreated: (se) => set((s) => (s.sessions.some((x) => x.id === se.id) ? s : {sessions: [se, ...s.sessions]})),
+    sessionUpdated: (se) => set((s) => ({sessions: s.sessions.map((x) => (x.id === se.id ? se : x))})),
     // A status other than done means the orchestrator exists, so the session is no longer new.
     sessionStatus: (sid, status) => set((s) => ({sessions: s.sessions.map((x) => (x.id === sid ? {...x, status, agent_count: x.agent_count || (status === 'done' ? 0 : 1)} : x))})),
     // Any agent row (even a crashed orchestrator) means the session is no longer new.

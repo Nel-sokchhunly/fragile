@@ -13,7 +13,7 @@ export function CompactSession(arg1:number):Promise<void>;
 
 export function CreateSession(arg1:string,arg2:string):Promise<notes.Session>;
 
-export function CreateSessionWithProvider(arg1:string,arg2:string,arg3:string):Promise<notes.Session>;
+export function CreateSessionWithProvider(arg1:string,arg2:string,arg3:string,arg4:notes.SessionConfig):Promise<notes.Session>;
 
 export function DeleteSession(arg1:number):Promise<void>;
 
@@ -28,6 +28,8 @@ export function GetAttachment(arg1:number,arg2:number,arg3:number):Promise<strin
 export function GetChanges(arg1:number,arg2:string):Promise<main.Changes>;
 
 export function GetFileDiff(arg1:number,arg2:string,arg3:string):Promise<main.FileDiff>;
+
+export function GetProviders():Promise<Array<notes.ProviderInfo>>;
 
 export function GetRateLimit():Promise<main.RateLimit>;
 
@@ -50,6 +52,8 @@ export function ResumeAgent(arg1:number):Promise<void>;
 export function ResumeSession(arg1:number):Promise<void>;
 
 export function SendMessage(arg1:number,arg2:string,arg3:Array<main.Attachment>):Promise<void>;
+
+export function SetSessionConfig(arg1:number,arg2:notes.SessionConfig):Promise<notes.Session>;
 
 export function SetSettings(arg1:main.Settings):Promise<void>;
 

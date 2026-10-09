@@ -206,7 +206,7 @@ type spawnIn struct {
 	Task     string   `json:"task" jsonschema:"self-contained task: goal, files owned, constraints, what done looks like"`
 	Scopes   []string `json:"scopes,omitempty" jsonschema:"note scopes the sub-agent gets; only [\"session\"] (default)"`
 	Model    string   `json:"model,omitempty" jsonschema:"optional model id for this sub-agent provider. Claude accepts sonnet, opus, haiku or a full claude- id; Codex accepts a full Codex model id; AGY accepts flash, pro, flash_lite or an AGY model id. Omit to use the provider default."`
-	Provider string   `json:"provider,omitempty" jsonschema:"optional provider CLI for this sub-agent (\"claude\", \"codex\", \"agy\"); empty uses session orchestrator provider"`
+	Provider string   `json:"provider,omitempty" jsonschema:"optional CLI for this sub-agent: claude, codex or agy; must be enabled for the session. Omit for the session's first enabled CLI."`
 }
 
 // modelAliases maps the spawn_subagent model aliases to full model ids.
@@ -241,50 +241,7 @@ func (s *Server) spawnSubagent(_ context.Context, a Agent, in spawnIn) (any, err
 	if s.Runner == nil {
 		return nil, errors.New("sub-agent runner not configured")
 	}
-	prov := strings.TrimSpace(in.Provider)
-	if prov != "" {
-		if err := CheckProvider(prov); err != nil {
-			return nil, err
-		}
-		var enabled []string
-		if s.Store != nil {
-			if se, err := s.Store.GetSession(a.SessionID); err == nil {
-				enabled = se.EnabledProviders
-				if len(enabled) == 0 && se.Provider != "" {
-					enabled = []string{se.Provider}
-				}
-			}
-		}
-		if len(enabled) == 0 {
-			enabled = []string{s.Runner.ProviderForAgent(a)}
-		}
-		if !slices.Contains(enabled, prov) {
-			return nil, fmt.Errorf("provider %q is not enabled for this session (enabled: %s)", prov, strings.Join(enabled, ", "))
-		}
-	} else {
-		prov = s.Runner.ProviderForAgent(a)
-	}
-
-	model := strings.TrimSpace(in.Model)
-	var err error
-	if adapter, ok := GetAdapter(prov); ok {
-		model, err = adapter.ValidateModel(model)
-	} else {
-		switch prov {
-		case ProviderClaude:
-			model, err = resolveModel(model)
-		case ProviderCodex:
-			err = validCodexModel(model)
-		case ProviderAGY:
-			model, err = resolveAGYModel(model)
-		default:
-			err = fmt.Errorf("unknown provider %q", prov)
-		}
-	}
-	if err != nil {
-		return nil, err
-	}
-	sub, err := s.Runner.SpawnSubagent(a.SessionID, a.ID, in.Title, in.Task, model, prov)
+	sub, err := s.Runner.SpawnSubagent(a.SessionID, a.ID, in.Title, in.Task, strings.TrimSpace(in.Model), strings.TrimSpace(in.Provider))
 	if err != nil {
 		return nil, err
 	}

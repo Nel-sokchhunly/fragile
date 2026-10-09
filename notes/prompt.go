@@ -1,60 +1,44 @@
 package notes
 
 import (
-	"fmt"
+	"slices"
 	"strings"
 )
 
-// AvailableSubagentProviders returns provider info for providers that are both
-// enabled in the session and detected on the host. If enabled is empty, it uses the
-// detected providers; if none are detected, it falls back to claude.
-func AvailableSubagentProviders(enabled []string) []ProviderInfo {
-	detected := DetectProviders()
-	detectedMap := make(map[string]ProviderInfo, len(detected))
-	for _, p := range detected {
-		if p.Available {
-			detectedMap[p.Name] = p
-		}
-	}
-
-	if len(enabled) == 0 {
-		for _, name := range []string{ProviderClaude, ProviderCodex, ProviderAGY} {
-			if info, ok := detectedMap[name]; ok {
-				enabled = append(enabled, info.Name)
-			}
-		}
-		if len(enabled) == 0 {
-			enabled = []string{ProviderClaude}
-		}
-	}
-
-	var out []ProviderInfo
-	for _, name := range enabled {
-		if info, ok := detectedMap[name]; ok {
-			out = append(out, info)
+// availableProviders keeps the enabled CLIs that are installed and usable now.
+func availableProviders(enabled []string) []string {
+	var out []string
+	for _, p := range DetectProviders() {
+		if p.Available && slices.Contains(enabled, p.Name) {
+			out = append(out, p.Name)
 		}
 	}
 	return out
 }
 
-// FormatAvailableProviders formats a descriptive list and usage hint for the
-// enabled and detected sub-agent providers.
-func FormatAvailableProviders(providers []string) string {
+// sessionPromptText is the orchestrator prompt's {{PROVIDERS}} part: the
+// session's usable sub-agent CLIs (enabled and installed) and the user's rules.
+func sessionPromptText(se Session) string {
+	def := ""
+	if len(se.EnabledProviders) > 0 {
+		def = se.EnabledProviders[0]
+	}
+	text := providersText(availableProviders(se.EnabledProviders), def)
+	if rules := strings.TrimSpace(se.OrchestratorRules); rules != "" {
+		text += "\n\n**The user's rules for this session** (they override the defaults above, including which CLI and model to pick):\n\n" + rules
+	}
+	return text
+}
+
+// providersText lists the sub-agent CLIs; def is the CLI spawn_subagent uses
+// when provider is omitted.
+func providersText(providers []string, def string) string {
 	if len(providers) == 0 {
-		return "Available sub-agent providers in this session: none. Use spawn_subagent(..., provider=\"...\") to specify a provider."
+		return "No sub-agent CLI enabled in this session is installed and logged in. Do not spawn sub-agents; escalate to the user to enable or install one."
 	}
-	var descs []string
+	var hints []string
 	for _, p := range providers {
-		switch p {
-		case ProviderClaude:
-			descs = append(descs, "claude (Claude Code; models: sonnet, opus, haiku)")
-		case ProviderCodex:
-			descs = append(descs, "codex (Codex CLI)")
-		case ProviderAGY:
-			descs = append(descs, "agy (Antigravity CLI; models: flash, pro, flash_lite)")
-		default:
-			descs = append(descs, p)
-		}
+		hints = append(hints, "`"+providerSpecs[p].hint+"`")
 	}
-	return fmt.Sprintf("Available sub-agent providers in this session: %s. Use spawn_subagent(..., provider=\"...\") to specify a provider.", strings.Join(descs, ", "))
+	return "Enabled in this session: " + strings.Join(hints, ", ") + ". Pick one with `spawn_subagent(provider=...)`; omitted means " + "`" + def + "`" + ". Any other CLI is rejected; if a CLI fails to start, use another one from this list."
 }

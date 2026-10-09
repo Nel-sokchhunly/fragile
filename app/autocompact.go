@@ -7,7 +7,7 @@ import "log"
 // it on the orchestrator's next result, as for a manual compact.
 const eventSessionCompacting = "session_compacting"
 
-// maybeAutoCompact runs when an orchestrator turn ends. If the auto-compact
+// maybeAutoCompact runs when an orchestrator turn ends. If the session's auto-compact
 // threshold is set and the orchestrator's context has reached it, it starts a
 // compaction (CompactSession) and returns true; the compact's own result ends a
 // turn too, and that check is skipped so it can never compact twice in a row.
@@ -20,7 +20,7 @@ func (a *App) maybeAutoCompact(sessionID int64) bool {
 	}
 	a.prefs.mu.Unlock()
 
-	s, err := a.GetSettings()
+	s, err := a.store.GetSession(sessionID)
 	if err != nil {
 		log.Printf("session %d: auto-compact: reading settings: %v", sessionID, err)
 		return false

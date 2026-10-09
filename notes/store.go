@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"io/fs"
 	"net/url"
+	"slices"
 
 	_ "modernc.org/sqlite" // pure-Go driver, registers "sqlite"
 )
@@ -155,32 +156,37 @@ const (
 )
 
 type Session struct {
-	ID               int64    `json:"id"`
-	Title            string   `json:"title"`
-	Status           string   `json:"status"`
-	Provider         string   `json:"provider"` // claude (legacy/default), codex or agy
-	WorkDir          string   `json:"work_dir"` // "" = none recorded; the runner's configured WorkDir applies
-	CreatedAt        string   `json:"created_at"`
-	EnabledProviders []string `json:"enabled_providers,omitempty"`
-	Agents           int      `json:"agent_count"` // 0 = new: the orchestrator starts with the first message
+	ID        int64  `json:"id"`
+	Title     string `json:"title"`
+	Status    string `json:"status"`
+	Provider  string `json:"provider"` // claude (legacy/default), codex or agy
+	WorkDir   string `json:"work_dir"` // "" = none recorded; the runner's configured WorkDir applies
+	CreatedAt string `json:"created_at"`
+	Agents    int    `json:"agent_count"` // 0 = new: the orchestrator starts with the first message
+	SessionConfig
 }
 
-const sessionCols = `id, title, status, provider, work_dir, created_at, enabled_providers, (SELECT COUNT(*) FROM agent_instances WHERE session_id = sessions.id)`
+// SessionConfig is a session's own settings. New sessions copy them from the
+// global template (the app's Settings); changing one never affects another.
+type SessionConfig struct {
+	EnabledProviders  []string `json:"enabled_providers"`   // CLIs sub-agents may run on; the first is spawn_subagent's default
+	AutoCompactTokens int      `json:"auto_compact_tokens"` // compact the orchestrator after a turn once its context reaches this; 0 = off
+	OrchestratorRules string   `json:"orchestrator_rules"`  // the user's extra instructions, appended to the orchestrator prompt
+}
+
+const (
+	sessionCols       = `id, title, status, provider, work_dir, created_at, (SELECT COUNT(*) FROM agent_instances WHERE session_id = sessions.id), ` + sessionConfigCols
+	sessionConfigCols = `enabled_providers, auto_compact_tokens, orchestrator_rules`
+)
 
 func scanSession(r scanner) (se Session, err error) {
-	var rawEnabled sql.NullString
-	err = r.Scan(&se.ID, &se.Title, &se.Status, &se.Provider, &se.WorkDir, &se.CreatedAt, &rawEnabled, &se.Agents)
+	var enabled string
+	err = r.Scan(&se.ID, &se.Title, &se.Status, &se.Provider, &se.WorkDir, &se.CreatedAt, &se.Agents,
+		&enabled, &se.AutoCompactTokens, &se.OrchestratorRules)
 	if err != nil {
 		return se, one(err)
 	}
-	se.EnabledProviders = []string{}
-	if rawEnabled.Valid && rawEnabled.String != "" {
-		var ep []string
-		if err := json.Unmarshal([]byte(rawEnabled.String), &ep); err == nil && ep != nil {
-			se.EnabledProviders = ep
-		}
-	}
-	return se, nil
+	return se, json.Unmarshal([]byte(enabled), &se.EnabledProviders)
 }
 
 // CreateSession starts a session in the working state together with its
@@ -192,12 +198,18 @@ func (s *Store) CreateSessionIn(title, workDir string) (Session, error) {
 	return s.CreateSessionWithProvider(title, workDir, ProviderClaude)
 }
 
+// CreateSessionWithProvider is CreateSessionWithConfig with sub-agents on the
+// session's own CLI only and no other settings.
 func (s *Store) CreateSessionWithProvider(title, workDir, provider string) (Session, error) {
-	return s.CreateSessionWithProviders(title, workDir, provider, nil)
+	return s.CreateSessionWithConfig(title, workDir, provider, SessionConfig{EnabledProviders: []string{provider}})
 }
 
-func (s *Store) CreateSessionWithProviders(title, workDir, provider string, enabledProviders []string) (Session, error) {
+func (s *Store) CreateSessionWithConfig(title, workDir, provider string, cfg SessionConfig) (Session, error) {
 	if err := CheckProvider(provider); err != nil {
+		return Session{}, err
+	}
+	enabled, err := cfg.check()
+	if err != nil {
 		return Session{}, err
 	}
 	tx, err := s.db.Begin()
@@ -205,15 +217,8 @@ func (s *Store) CreateSessionWithProviders(title, workDir, provider string, enab
 		return Session{}, err
 	}
 	defer tx.Rollback()
-	var rawProviders any = nil
-	if len(enabledProviders) > 0 {
-		b, err := json.Marshal(enabledProviders)
-		if err != nil {
-			return Session{}, err
-		}
-		rawProviders = string(b)
-	}
-	se, err := scanSession(tx.QueryRow(`INSERT INTO sessions (title, work_dir, provider, enabled_providers) VALUES (?, ?, ?, ?) RETURNING id, title, status, provider, work_dir, created_at, enabled_providers, 0`, title, workDir, provider, rawProviders))
+	se, err := scanSession(tx.QueryRow(`INSERT INTO sessions (title, work_dir, provider, enabled_providers, auto_compact_tokens, orchestrator_rules)
+		VALUES (?, ?, ?, ?, ?, ?) RETURNING id, title, status, provider, work_dir, created_at, 0, `+sessionConfigCols, title, workDir, provider, enabled, cfg.AutoCompactTokens, cfg.OrchestratorRules))
 	if err != nil {
 		return Session{}, err
 	}
@@ -223,15 +228,49 @@ func (s *Store) CreateSessionWithProviders(title, workDir, provider string, enab
 	return se, tx.Commit()
 }
 
-func (s *Store) SetSessionEnabledProviders(sessionID int64, providers []string) error {
-	if providers == nil {
-		providers = []string{}
-	}
-	data, err := json.Marshal(providers)
+// SetSessionConfig replaces the session's settings.
+func (s *Store) SetSessionConfig(sessionID int64, cfg SessionConfig) error {
+	enabled, err := cfg.check()
 	if err != nil {
 		return err
 	}
-	return affected(s.db.Exec(`UPDATE sessions SET enabled_providers = ? WHERE id = ?`, string(data), sessionID))
+	return affected(s.db.Exec(`UPDATE sessions SET enabled_providers = ?, auto_compact_tokens = ?, orchestrator_rules = ? WHERE id = ?`,
+		enabled, cfg.AutoCompactTokens, cfg.OrchestratorRules, sessionID))
+}
+
+const (
+	MinAutoCompactTokens = 20_000
+	MaxAutoCompactTokens = 1_000_000
+	maxRulesBytes        = 8 << 10
+)
+
+// Check validates the config.
+func (c SessionConfig) Check() error {
+	_, err := c.check()
+	return err
+}
+
+// check validates the config and returns EnabledProviders as stored (JSON).
+func (c SessionConfig) check() (string, error) {
+	if len(c.EnabledProviders) == 0 {
+		return "", errors.New("enable at least one sub-agent CLI")
+	}
+	for i, p := range c.EnabledProviders {
+		if err := CheckProvider(p); err != nil {
+			return "", err
+		}
+		if slices.Contains(c.EnabledProviders[:i], p) {
+			return "", fmt.Errorf("sub-agent CLI %q listed twice", p)
+		}
+	}
+	if n := c.AutoCompactTokens; n != 0 && (n < MinAutoCompactTokens || n > MaxAutoCompactTokens) {
+		return "", fmt.Errorf("auto-compact threshold must be 0 (off) or between %d and %d tokens", MinAutoCompactTokens, MaxAutoCompactTokens)
+	}
+	if len(c.OrchestratorRules) > maxRulesBytes {
+		return "", fmt.Errorf("orchestrator rules are %d bytes; the limit is %d", len(c.OrchestratorRules), maxRulesBytes)
+	}
+	b, err := json.Marshal(c.EnabledProviders)
+	return string(b), err
 }
 
 // DeleteSession removes the session and everything keyed by it, in one
@@ -324,7 +363,7 @@ type Agent struct {
 }
 
 const agentCols = `id, session_id, COALESCE(parent_id,0), role, token, COALESCE(task_id,0), status,
-	COALESCE(pid,0), COALESCE(log_path,''), exit_code, created_at, COALESCE(exited_at,''), context_used, context_window, model, COALESCE(provider, 'claude')`
+	COALESCE(pid,0), COALESCE(log_path,''), exit_code, created_at, COALESCE(exited_at,''), context_used, context_window, model, provider`
 
 func scanAgent(r scanner) (a Agent, err error) {
 	err = r.Scan(&a.ID, &a.SessionID, &a.ParentID, &a.Role, &a.Token, &a.TaskID, &a.Status,
@@ -343,14 +382,14 @@ func nullable(id int64) any {
 // CreateAgent registers an agent instance in the session. parentID and taskID
 // 0 mean none; otherwise they must belong to the same session (else ErrNotFound).
 // Each agent gets a random token that authenticates its MCP URL.
-// If provider is empty, fallback to the session's provider.
-func (s *Store) CreateAgent(sessionID int64, role string, parentID, taskID int64, provider ...string) (Agent, error) {
-	var prov string
-	if len(provider) > 0 {
-		prov = provider[0]
-	}
-	if prov != "" {
-		if err := CheckProvider(prov); err != nil {
+func (s *Store) CreateAgent(sessionID int64, role string, parentID, taskID int64) (Agent, error) {
+	return s.CreateAgentWithProvider(sessionID, role, parentID, taskID, "")
+}
+
+// CreateAgentWithProvider is CreateAgent for an agent on its own CLI; "" uses the session's.
+func (s *Store) CreateAgentWithProvider(sessionID int64, role string, parentID, taskID int64, provider string) (Agent, error) {
+	if provider != "" {
+		if err := CheckProvider(provider); err != nil {
 			return Agent{}, err
 		}
 	}
@@ -359,10 +398,10 @@ func (s *Store) CreateAgent(sessionID int64, role string, parentID, taskID int64
 		return Agent{}, err
 	}
 	return scanAgent(s.db.QueryRow(`INSERT INTO agent_instances (session_id, parent_id, role, token, task_id, provider)
-		SELECT id, ?2, ?3, ?4, ?5, CASE WHEN ?6 != '' THEN ?6 ELSE provider END FROM sessions WHERE id = ?1
+		SELECT id, ?2, ?3, ?4, ?5, COALESCE(NULLIF(?6, ''), provider) FROM sessions WHERE id = ?1
 		AND (?2 IS NULL OR EXISTS (SELECT 1 FROM agent_instances WHERE id = ?2 AND session_id = ?1))
 		AND (?5 IS NULL OR EXISTS (SELECT 1 FROM tasks WHERE id = ?5 AND session_id = ?1))
-		RETURNING `+agentCols, sessionID, nullable(parentID), role, hex.EncodeToString(tok), nullable(taskID), prov))
+		RETURNING `+agentCols, sessionID, nullable(parentID), role, hex.EncodeToString(tok), nullable(taskID), provider))
 }
 
 // GetAgentByToken resolves an agent from its secret; the agent carries its SessionID.

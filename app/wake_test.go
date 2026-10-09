@@ -87,7 +87,7 @@ func TestWakeDebounceBatches(t *testing.T) {
 	if strings.Contains(w, "more detail") {
 		t.Errorf("wake carries more than the first line: %s", w)
 	}
-	waitFor(t, "chat shows the wake", func() bool { return hasChat(a, se.ID, "user: [Fragile] Board update") })
+	waitFor(t, "chat shows the wake", func() bool { return hasChat(a, se.ID, "notice: #") })
 	time.Sleep(wakeDebounce + 500*time.Millisecond)
 	if n := len(wakes(in)); n != 1 {
 		t.Fatalf("%d wake messages, want 1", n)
@@ -168,7 +168,7 @@ func TestWakeOneShotUnaffected(t *testing.T) {
 	if queued != 0 {
 		t.Fatal("one-shot session queued a wake")
 	}
-	if p := notes.OrchestratorPrompt("/w", false); !strings.Contains(p, "**Wait loop.**") || strings.Contains(p, "[Fragile]") {
+	if p := notes.OrchestratorPrompt("/w", false, ""); !strings.Contains(p, "**Wait loop.**") || strings.Contains(p, "[Fragile]") {
 		t.Fatal("one-shot prompt changed")
 	}
 }
@@ -176,7 +176,7 @@ func TestWakeOneShotUnaffected(t *testing.T) {
 // spawnSub launches a sub-agent on the wakeSetup fake; its stdin lines go to in+".sub".
 func spawnSub(t *testing.T, a *App, se notes.Session, orch notes.Agent, task, in string) notes.Agent {
 	t.Helper()
-	sub, err := a.runner.SpawnSubagent(se.ID, orch.ID, "", task, "")
+	sub, err := a.runner.SpawnSubagent(se.ID, orch.ID, "", task, "", "")
 	if err != nil {
 		t.Fatal(err)
 	}

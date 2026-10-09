@@ -24,7 +24,7 @@ done
 	a, ev := newTestApp(t, dir, "")
 	a.runner.AGYCommand = fakeBin
 
-	se, err := a.CreateSessionWithProvider("Test AGY App", workDir, notes.ProviderAGY)
+	se, err := a.CreateSessionWithProvider("Test AGY App", workDir, notes.ProviderAGY, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

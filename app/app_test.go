@@ -544,6 +544,19 @@ func TestChatItemResult(t *testing.T) {
 	}
 }
 
+func TestChatItemWakeIsNotice(t *testing.T) {
+	a := NewApp()
+	b, _ := json.Marshal(userMessage{Text: wakeMessage([]string{"#3 done from agent 2: API ready", "agent 4 exited (crashed)"})})
+	item, ok := a.chatItem(1, notes.AgentEvent{ID: 5, Type: evUserMessage, Payload: string(b)})
+	if !ok || item.Kind != "notice" || item.Text != "#3 done from agent 2: API ready\nagent 4 exited (crashed)" {
+		t.Fatalf("wake item = %+v", item)
+	}
+	b, _ = json.Marshal(userMessage{Text: "hello [Fragile]"})
+	if item, _ := a.chatItem(1, notes.AgentEvent{ID: 6, Type: evUserMessage, Payload: string(b)}); item.Kind != "user" {
+		t.Fatalf("user item = %+v", item)
+	}
+}
+
 func b64(s string) string { return base64.StdEncoding.EncodeToString([]byte(s)) }
 
 // stdinLines returns the lines a recordingOrchestrator wrote to path.

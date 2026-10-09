@@ -1,13 +1,13 @@
 export namespace main {
-
+	
 	export class AgentActivity {
 	    busy: boolean;
 	    paused: boolean;
-
+	
 	    static createFrom(source: any = {}) {
 	        return new AgentActivity(source);
 	    }
-
+	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.busy = source["busy"];
@@ -54,11 +54,11 @@ export namespace main {
 	    removed: number;
 	    binary: boolean;
 	    sig: string;
-
+	
 	    static createFrom(source: any = {}) {
 	        return new ChangedFile(source);
 	    }
-
+	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.path = source["path"];
@@ -73,17 +73,17 @@ export namespace main {
 	export class Changes {
 	    is_repo: boolean;
 	    files: ChangedFile[];
-
+	
 	    static createFrom(source: any = {}) {
 	        return new Changes(source);
 	    }
-
+	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.is_repo = source["is_repo"];
 	        this.files = this.convertValues(source["files"], ChangedFile);
 	    }
-
+	
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
 		    if (!a) {
 		        return a;
@@ -151,11 +151,11 @@ export namespace main {
 	    text: string;
 	    old_no: number;
 	    new_no: number;
-
+	
 	    static createFrom(source: any = {}) {
 	        return new DiffLine(source);
 	    }
-
+	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.kind = source["kind"];
@@ -170,11 +170,11 @@ export namespace main {
 	    new_start: number;
 	    new_lines: number;
 	    lines: DiffLine[];
-
+	
 	    static createFrom(source: any = {}) {
 	        return new Hunk(source);
 	    }
-
+	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.old_start = source["old_start"];
@@ -183,7 +183,7 @@ export namespace main {
 	        this.new_lines = source["new_lines"];
 	        this.lines = this.convertValues(source["lines"], DiffLine);
 	    }
-
+	
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
 		    if (!a) {
 		        return a;
@@ -208,11 +208,11 @@ export namespace main {
 	    too_large: boolean;
 	    hunks: Hunk[];
 	    file_lines: string[];
-
+	
 	    static createFrom(source: any = {}) {
 	        return new FileDiff(source);
 	    }
-
+	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.path = source["path"];
@@ -221,7 +221,7 @@ export namespace main {
 	        this.hunks = this.convertValues(source["hunks"], Hunk);
 	        this.file_lines = source["file_lines"];
 	    }
-
+	
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
 		    if (!a) {
 		        return a;
@@ -240,6 +240,7 @@ export namespace main {
 		    return a;
 		}
 	}
+	
 	export class LimitWindow {
 	    utilization: number;
 	    resets_at: number;
@@ -294,11 +295,11 @@ export namespace main {
 	    chat: ChatItem[];
 	    escalations: notes.Escalation[];
 	    activity: Record<number, AgentActivity>;
-
+	
 	    static createFrom(source: any = {}) {
 	        return new SessionSnapshot(source);
 	    }
-
+	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.session = this.convertValues(source["session"], notes.Session);
@@ -328,17 +329,53 @@ export namespace main {
 		    return a;
 		}
 	}
+	export class SubagentProviderSetting {
+	    enabled: boolean;
+	    default_model?: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new SubagentProviderSetting(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.enabled = source["enabled"];
+	        this.default_model = source["default_model"];
+	    }
+	}
 	export class Settings {
 	    auto_compact_tokens: number;
-
+	    orchestrator_rules: string;
+	    subagent_providers: Record<string, SubagentProviderSetting>;
+	
 	    static createFrom(source: any = {}) {
 	        return new Settings(source);
 	    }
-
+	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.auto_compact_tokens = source["auto_compact_tokens"];
+	        this.orchestrator_rules = source["orchestrator_rules"];
+	        this.subagent_providers = this.convertValues(source["subagent_providers"], SubagentProviderSetting, true);
 	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
 	}
 
 }
@@ -360,6 +397,7 @@ export namespace notes {
 	    context_used?: number;
 	    context_window?: number;
 	    model?: string;
+	    provider: string;
 	
 	    static createFrom(source: any = {}) {
 	        return new Agent(source);
@@ -381,6 +419,7 @@ export namespace notes {
 	        this.context_used = source["context_used"];
 	        this.context_window = source["context_window"];
 	        this.model = source["model"];
+	        this.provider = source["provider"];
 	    }
 	}
 	export class AgentEvent {
@@ -453,14 +492,33 @@ export namespace notes {
 	        this.updated_at = source["updated_at"];
 	    }
 	}
+	export class ProviderInfo {
+	    name: string;
+	    available: boolean;
+	    reason?: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new ProviderInfo(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.name = source["name"];
+	        this.available = source["available"];
+	        this.reason = source["reason"];
+	    }
+	}
 	export class Session {
-	    provider: string;
 	    id: number;
 	    title: string;
 	    status: string;
+	    provider: string;
 	    work_dir: string;
 	    created_at: string;
 	    agent_count: number;
+	    enabled_providers: string[];
+	    auto_compact_tokens: number;
+	    orchestrator_rules: string;
 	
 	    static createFrom(source: any = {}) {
 	        return new Session(source);
@@ -471,10 +529,29 @@ export namespace notes {
 	        this.id = source["id"];
 	        this.title = source["title"];
 	        this.status = source["status"];
-	        this.work_dir = source["work_dir"];
 	        this.provider = source["provider"];
+	        this.work_dir = source["work_dir"];
 	        this.created_at = source["created_at"];
 	        this.agent_count = source["agent_count"];
+	        this.enabled_providers = source["enabled_providers"];
+	        this.auto_compact_tokens = source["auto_compact_tokens"];
+	        this.orchestrator_rules = source["orchestrator_rules"];
+	    }
+	}
+	export class SessionConfig {
+	    enabled_providers: string[];
+	    auto_compact_tokens: number;
+	    orchestrator_rules: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new SessionConfig(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.enabled_providers = source["enabled_providers"];
+	        this.auto_compact_tokens = source["auto_compact_tokens"];
+	        this.orchestrator_rules = source["orchestrator_rules"];
 	    }
 	}
 	export class Task {

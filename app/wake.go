@@ -25,10 +25,11 @@ import (
 // Notes posted while it is mid-turn are held until its turn ends.
 
 const (
-	wakePrefix  = "[Fragile] Board update (automatic, not from the user):"
-	wakeSuffix  = "Read the board for details."
-	wakeLineMax = 200  // runes of a note's first line
-	wakeMsgMax  = 4000 // bytes of all event lines together
+	fragilePrefix = "[Fragile] " // starts every message Fragile itself sends an agent
+	wakePrefix    = fragilePrefix + "Board update (automatic, not from the user):"
+	wakeSuffix    = "Read the board for details."
+	wakeLineMax   = 200  // runes of a note's first line
+	wakeMsgMax    = 4000 // bytes of all event lines together
 
 	wakeDebounce = 2 * time.Second // batches a burst of events into one message
 )

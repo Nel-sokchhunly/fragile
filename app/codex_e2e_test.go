@@ -21,7 +21,7 @@ func TestCodexAppE2E(t *testing.T) {
 	}
 	a, ev := newTestApp(t, t.TempDir(), "")
 	work := t.TempDir()
-	se, err := a.CreateSessionWithProvider("Codex E2E", work, notes.ProviderCodex)
+	se, err := a.CreateSessionWithProvider("Codex E2E", work, notes.ProviderCodex, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

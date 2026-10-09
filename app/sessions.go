@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"syscall"
@@ -240,51 +241,16 @@ type SessionSnapshot struct {
 	Activity    map[int64]AgentActivity `json:"activity"`    // running sub-agents only; agent_activity events update it
 }
 
-// defaultEnabledProviders returns the enabled providers for new sessions based on global settings.
-func (a *App) defaultEnabledProviders() []string {
-	settings, err := a.GetSubagentProviderSettings()
-	if err != nil {
-		return []string{notes.ProviderClaude}
-	}
-	var enabled []string
-	for _, name := range []string{notes.ProviderClaude, notes.ProviderCodex, notes.ProviderAGY} {
-		if s, ok := settings[name]; ok && s.Enabled {
-			enabled = append(enabled, name)
-		}
-	}
-	if len(enabled) == 0 {
-		return []string{notes.ProviderClaude}
-	}
-	return enabled
-}
-
 // CreateSession creates an empty session in workDir (name defaults to the
 // directory's base name). Its orchestrator starts with the first SendMessage.
 // A directory holds at most one session, live or past; deleting it frees the directory.
-// enabledProviders can optionally specify enabled sub-agent CLI providers; if omitted/empty,
-// it is populated from global default settings.
-func (a *App) CreateSession(name, workDir string, enabledProviders ...[]string) (notes.Session, error) {
-	var ep []string
-	if len(enabledProviders) > 0 {
-		ep = enabledProviders[0]
-	}
-	return a.CreateSessionWithProviders(name, workDir, notes.ProviderClaude, ep)
+func (a *App) CreateSession(name, workDir string) (notes.Session, error) {
+	return a.CreateSessionWithProvider(name, workDir, notes.ProviderClaude, nil)
 }
 
-// CreateSessionWithProvider fixes the CLI provider for this conversation and its team.
-// enabledProviders can optionally specify enabled sub-agent CLI providers; if omitted/empty,
-// it is populated from global default settings.
-func (a *App) CreateSessionWithProvider(name, workDir, provider string, enabledProviders ...[]string) (notes.Session, error) {
-	var ep []string
-	if len(enabledProviders) > 0 {
-		ep = enabledProviders[0]
-	}
-	return a.CreateSessionWithProviders(name, workDir, provider, ep)
-}
-
-// CreateSessionWithProviders creates an empty session with the specified provider and enabled sub-agent providers.
-// If enabledProviders is nil or empty, it is populated from global default settings.
-func (a *App) CreateSessionWithProviders(name, workDir, provider string, enabledProviders []string) (notes.Session, error) {
+// CreateSessionWithProvider fixes the CLI provider for this conversation and
+// its team. cfg is the session's own settings; nil copies the global template.
+func (a *App) CreateSessionWithProvider(name, workDir, provider string, cfg *notes.SessionConfig) (notes.Session, error) {
 	if err := notes.CheckProvider(provider); err != nil {
 		return notes.Session{}, err
 	}
@@ -299,14 +265,13 @@ func (a *App) CreateSessionWithProviders(name, workDir, provider string, enabled
 	if name == "" {
 		name = filepath.Base(dir)
 	}
-	if len(enabledProviders) == 0 {
-		enabledProviders = a.defaultEnabledProviders()
-	} else {
-		for _, p := range enabledProviders {
-			if err := notes.CheckProvider(p); err != nil {
-				return notes.Session{}, err
-			}
+	if cfg == nil {
+		s, err := a.GetSettings()
+		if err != nil {
+			return notes.Session{}, err
 		}
+		c := s.sessionConfig()
+		cfg = &c
 	}
 	a.startMu.Lock() // racing creates for one directory must not both pass the check
 	all, err := a.store.ListSessions()
@@ -320,7 +285,7 @@ func (a *App) CreateSessionWithProviders(name, workDir, provider string, enabled
 			return notes.Session{}, fmt.Errorf("a session for this directory already exists: %q; open it from the sidebar instead", other.Title)
 		}
 	}
-	se, err := a.store.CreateSessionWithProviders(name, dir, provider, enabledProviders)
+	se, err := a.store.CreateSessionWithConfig(name, dir, provider, *cfg)
 	a.startMu.Unlock()
 	if err != nil {
 		return notes.Session{}, err
@@ -333,66 +298,39 @@ func (a *App) CreateSessionWithProviders(name, workDir, provider string, enabled
 	return se, nil
 }
 
-// UpdateSessionProviders updates the session's enabled sub-agent CLI providers and
-// posts a decision note to the session board announcing the change.
-func (a *App) UpdateSessionProviders(sessionID int64, enabledProviders []string) error {
-	if _, err := a.store.GetSession(sessionID); err != nil {
-		return err
+// SetSessionConfig changes the session's own settings. Running sub-agents keep
+// going; a changed CLI list or rules reach the orchestrator as a decision note.
+func (a *App) SetSessionConfig(sessionID int64, cfg notes.SessionConfig) (notes.Session, error) {
+	old, err := a.store.GetSession(sessionID)
+	if err != nil {
+		return notes.Session{}, err
 	}
-	if enabledProviders == nil {
-		enabledProviders = []string{}
+	if err := a.store.SetSessionConfig(sessionID, cfg); err != nil {
+		return notes.Session{}, err
 	}
-	for _, p := range enabledProviders {
-		if err := notes.CheckProvider(p); err != nil {
-			return err
+	var changes []string
+	if !slices.Equal(old.EnabledProviders, cfg.EnabledProviders) {
+		changes = append(changes, "Sub-agent CLIs are now: "+strings.Join(cfg.EnabledProviders, ", ")+" (the first is the default). New spawn_subagent calls must use one of them; running sub-agents are unaffected.")
+	}
+	if old.OrchestratorRules != cfg.OrchestratorRules {
+		rules := strings.TrimSpace(cfg.OrchestratorRules)
+		if rules == "" {
+			rules = "(none; the defaults apply)"
 		}
+		changes = append(changes, "The user's rules for this session are now, replacing any earlier ones:\n\n"+rules)
 	}
-	if err := a.store.SetSessionEnabledProviders(sessionID, enabledProviders); err != nil {
-		return err
+	if len(changes) > 0 {
+		board, err := a.store.SessionBoard(sessionID)
+		if err != nil {
+			return notes.Session{}, err
+		}
+		n, err := a.store.PostNote(sessionID, board, 0, "decision", "The user changed this session's settings. "+strings.Join(changes, "\n\n"))
+		if err != nil {
+			return notes.Session{}, err
+		}
+		a.log.Write(notes.EventNotePosted, sessionID, 0, n)
 	}
-	board, err := a.store.SessionBoard(sessionID)
-	if err != nil {
-		return err
-	}
-	var content string
-	if len(enabledProviders) == 0 {
-		content = "Enabled sub-agent CLI providers updated: none"
-	} else {
-		content = fmt.Sprintf("Enabled sub-agent CLI providers updated: %s", strings.Join(enabledProviders, ", "))
-	}
-	n, err := a.store.PostNote(sessionID, board, 0, "decision", content)
-	if err != nil {
-		return err
-	}
-	a.log.Write(notes.EventNotePosted, sessionID, 0, n)
-	return nil
-}
-
-// SetSessionProviders is an alias for UpdateSessionProviders for frontend Wails bindings.
-func (a *App) SetSessionProviders(sessionID int64, enabledProviders []string) error {
-	return a.UpdateSessionProviders(sessionID, enabledProviders)
-}
-
-// SetSessionEnabledProviders is an alias for UpdateSessionProviders for frontend Wails bindings.
-func (a *App) SetSessionEnabledProviders(sessionID int64, enabledProviders []string) error {
-	return a.UpdateSessionProviders(sessionID, enabledProviders)
-}
-
-// GetSessionProviders returns the enabled sub-agent CLI providers for the session.
-func (a *App) GetSessionProviders(sessionID int64) ([]string, error) {
-	se, err := a.store.GetSession(sessionID)
-	if err != nil {
-		return nil, err
-	}
-	if se.EnabledProviders == nil {
-		return []string{}, nil
-	}
-	return se.EnabledProviders, nil
-}
-
-// GetSessionEnabledProviders is an alias for GetSessionProviders for frontend Wails bindings.
-func (a *App) GetSessionEnabledProviders(sessionID int64) ([]string, error) {
-	return a.GetSessionProviders(sessionID)
+	return a.store.GetSession(sessionID)
 }
 
 // SendMessage sends a chat message to the session's orchestrator, starting it
@@ -840,6 +778,10 @@ func chatItemWithEscalationLookup(sessionID int64, ev notes.AgentEvent, findEsca
 	}
 	switch ev.Type {
 	case evUserMessage:
+		if text, ok := strings.CutPrefix(p.Text, fragilePrefix); ok { // Fragile's own wake-up, not the user's
+			item.Kind, item.Text = "notice", fragileNotice(text)
+			break
+		}
 		item.Kind, item.Text, item.Attachments = "user", p.Text, p.Attachments
 	case evAssistantText:
 		item.Kind, item.Text = "assistant", p.Text
@@ -870,6 +812,18 @@ func chatItemWithEscalationLookup(sessionID int64, ev notes.AgentEvent, findEsca
 		return item, false
 	}
 	return item, true
+}
+
+// fragileNotice shortens a Fragile message to its events, one per line.
+func fragileNotice(text string) string {
+	text = strings.TrimSuffix(strings.TrimPrefix(text, strings.TrimPrefix(wakePrefix, fragilePrefix)), wakeSuffix)
+	var lines []string
+	for _, l := range strings.Split(text, "\n") {
+		if l = strings.TrimSpace(strings.TrimPrefix(l, "- ")); l != "" {
+			lines = append(lines, l)
+		}
+	}
+	return strings.Join(lines, "\n")
 }
 
 // toolSummary picks the most telling argument of a tool call as a one-line summary.

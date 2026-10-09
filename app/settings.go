@@ -4,174 +4,139 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"strconv"
+	"maps"
 	"sync"
 
 	"github.com/Nel-sokchhunly/fragile/notes"
 )
 
+// Each field of Settings is one row of the settings table, holding its JSON value.
 const (
-	minAutoCompactTokens = 20_000
-	maxAutoCompactTokens = 1_000_000
-	keyAutoCompact       = "auto_compact_tokens" // each field is one row of the settings table, holding its JSON value
+	keyAutoCompact       = "auto_compact_tokens"
+	keyOrchestratorRules = "orchestrator_rules"
 	keySubagentProviders = "subagent_providers"
 )
 
-// SubagentProviderSetting specifies whether a sub-agent CLI provider is enabled
-// and what default model to use for it.
+// SubagentProviderSetting is one CLI in the global template: whether new
+// sessions enable it, and the model its sub-agents get when spawned without one.
 type SubagentProviderSetting struct {
 	Enabled      bool   `json:"enabled"`
 	DefaultModel string `json:"default_model,omitempty"`
 }
 
-// SubagentProvidersSettings maps provider name to its setting.
+// SubagentProvidersSettings maps a CLI (notes.Providers) to its setting.
 type SubagentProvidersSettings map[string]SubagentProviderSetting
 
-// Settings are the user's app-wide preferences.
+// Settings are the user's app-wide preferences. Apart from the default models,
+// they are a template: a new session copies them into its notes.SessionConfig,
+// and changing them never affects existing sessions.
 type Settings struct {
-	AutoCompactTokens int `json:"auto_compact_tokens"` // compact the orchestrator after a turn once its context reaches this; 0 = off (default)
+	AutoCompactTokens int                       `json:"auto_compact_tokens"` // 0 = off (default)
+	OrchestratorRules string                    `json:"orchestrator_rules"`
+	SubagentProviders SubagentProvidersSettings `json:"subagent_providers"` // nil = never saved: GetSettings enables every detected CLI
 }
 
-// prefs caches the settings so per-turn checks don't hit the DB; it also holds
-// which sessions' last turn was an auto-compact.
-type prefs struct {
-	mu                sync.Mutex
-	loaded            bool
-	cur               Settings
-	lastAuto          map[int64]bool
-	subagentLoaded    bool
-	subagentProviders SubagentProvidersSettings
+// sessionConfig is the template for a new session.
+func (s Settings) sessionConfig() notes.SessionConfig {
+	c := notes.SessionConfig{AutoCompactTokens: s.AutoCompactTokens, OrchestratorRules: s.OrchestratorRules}
+	for _, p := range notes.Providers {
+		if s.SubagentProviders[p].Enabled {
+			c.EnabledProviders = append(c.EnabledProviders, p)
+		}
+	}
+	return c
 }
 
 func (s Settings) validate() error {
-	if n := s.AutoCompactTokens; n != 0 && (n < minAutoCompactTokens || n > maxAutoCompactTokens) {
-		return fmt.Errorf("auto-compact threshold must be 0 (off) or between %d and %d tokens", minAutoCompactTokens, maxAutoCompactTokens)
+	for name, v := range s.SubagentProviders {
+		if v.DefaultModel == "" {
+			continue
+		}
+		if _, err := notes.ValidateModel(name, v.DefaultModel); err != nil {
+			return fmt.Errorf("%s default model: %w", name, err)
+		}
 	}
-	return nil
+	c := s.sessionConfig()
+	if s.SubagentProviders == nil {
+		c.EnabledProviders = []string{notes.ProviderClaude}
+	}
+	return c.Check()
 }
 
-// GetSettings returns the settings, with defaults for anything never set.
-func (a *App) GetSettings() (Settings, error) {
+// prefs caches the settings so per-spawn lookups don't hit the DB; it also
+// holds which sessions' last turn was an auto-compact.
+type prefs struct {
+	mu       sync.Mutex
+	loaded   bool
+	cur      Settings
+	lastAuto map[int64]bool
+}
+
+// settings returns the stored settings, without detecting CLIs.
+func (a *App) settings() (Settings, error) {
 	a.prefs.mu.Lock()
 	defer a.prefs.mu.Unlock()
 	if a.prefs.loaded {
 		return a.prefs.cur, nil
 	}
 	var s Settings
-	switch v, err := a.store.GetSetting(keyAutoCompact); {
-	case errors.Is(err, notes.ErrNotFound):
-	case err != nil:
-		return Settings{}, err
-	default:
-		n, err := strconv.Atoi(v)
-		if err != nil {
-			return Settings{}, fmt.Errorf("stored %s: %w", keyAutoCompact, err)
+	for key, dst := range map[string]any{keyAutoCompact: &s.AutoCompactTokens, keyOrchestratorRules: &s.OrchestratorRules, keySubagentProviders: &s.SubagentProviders} {
+		v, err := a.store.GetSetting(key)
+		if errors.Is(err, notes.ErrNotFound) {
+			continue
 		}
-		s.AutoCompactTokens = n
+		if err != nil {
+			return Settings{}, err
+		}
+		if err := json.Unmarshal([]byte(v), dst); err != nil {
+			return Settings{}, fmt.Errorf("stored %s: %w", key, err)
+		}
 	}
 	a.prefs.cur, a.prefs.loaded = s, true
 	return s, nil
 }
 
-// SetSettings validates and stores the settings; they apply from the next turn.
+// GetSettings returns the settings, with defaults for anything never set.
+// Until the CLI list is saved, every detected CLI is enabled (Claude if none is).
+func (a *App) GetSettings() (Settings, error) {
+	s, err := a.settings()
+	if err != nil || s.SubagentProviders != nil {
+		return s, err
+	}
+	s.SubagentProviders = SubagentProvidersSettings{notes.ProviderClaude: {Enabled: true}}
+	for _, p := range notes.DetectProviders() {
+		if p.Available {
+			s.SubagentProviders[p.Name] = SubagentProviderSetting{Enabled: true}
+		}
+	}
+	return s, nil
+}
+
+// SetSettings validates and stores the settings. They apply to sessions
+// created afterwards; default models apply from the next spawn.
 func (a *App) SetSettings(s Settings) error {
 	if err := s.validate(); err != nil {
 		return err
 	}
-	b, _ := json.Marshal(s.AutoCompactTokens)
+	s.SubagentProviders = maps.Clone(s.SubagentProviders)
 	a.prefs.mu.Lock()
 	defer a.prefs.mu.Unlock()
-	if err := a.store.PutSetting(keyAutoCompact, string(b)); err != nil {
-		return err
+	for key, v := range map[string]any{keyAutoCompact: s.AutoCompactTokens, keyOrchestratorRules: s.OrchestratorRules, keySubagentProviders: s.SubagentProviders} {
+		b, _ := json.Marshal(v)
+		if err := a.store.PutSetting(key, string(b)); err != nil {
+			a.prefs.loaded = false // some rows may be written; reload them
+			return err
+		}
 	}
 	a.prefs.cur, a.prefs.loaded = s, true
 	return nil
 }
 
-// DefaultSubagentProviderSettings returns sub-agent provider settings with
-// detected providers enabled by default. If no providers are detected on PATH,
-// Claude is enabled as a fallback.
-func DefaultSubagentProviderSettings() SubagentProvidersSettings {
-	res := make(SubagentProvidersSettings)
-	hasAny := false
-	for _, p := range notes.DetectProviders() {
-		res[p.Name] = SubagentProviderSetting{
-			Enabled:      p.Available,
-			DefaultModel: p.DefaultModel,
-		}
-		if p.Available {
-			hasAny = true
-		}
-	}
-	if !hasAny {
-		s := res[notes.ProviderClaude]
-		s.Enabled = true
-		res[notes.ProviderClaude] = s
-	}
-	return res
-}
-
-func cloneSubagentProvidersSettings(in SubagentProvidersSettings) SubagentProvidersSettings {
-	if in == nil {
-		return nil
-	}
-	out := make(SubagentProvidersSettings, len(in))
-	for k, v := range in {
-		out[k] = v
-	}
-	return out
-}
-
-// GetSubagentProviderSettings returns global sub-agent CLI settings with defaults.
-func (a *App) GetSubagentProviderSettings() (SubagentProvidersSettings, error) {
-	a.prefs.mu.Lock()
-	defer a.prefs.mu.Unlock()
-	if a.prefs.subagentLoaded {
-		return cloneSubagentProvidersSettings(a.prefs.subagentProviders), nil
-	}
-	val, err := a.store.GetSetting(keySubagentProviders)
-	switch {
-	case errors.Is(err, notes.ErrNotFound):
-		defaults := DefaultSubagentProviderSettings()
-		a.prefs.subagentProviders = defaults
-		a.prefs.subagentLoaded = true
-		return cloneSubagentProvidersSettings(defaults), nil
-	case err != nil:
-		return nil, err
-	default:
-		var s SubagentProvidersSettings
-		if err := json.Unmarshal([]byte(val), &s); err != nil {
-			return nil, fmt.Errorf("stored %s: %w", keySubagentProviders, err)
-		}
-		if s == nil {
-			s = make(SubagentProvidersSettings)
-		}
-		a.prefs.subagentProviders = s
-		a.prefs.subagentLoaded = true
-		return cloneSubagentProvidersSettings(s), nil
-	}
-}
-
-// SetSubagentProviderSettings validates and stores global sub-agent CLI settings.
-func (a *App) SetSubagentProviderSettings(s SubagentProvidersSettings) error {
-	if s == nil {
-		s = make(SubagentProvidersSettings)
-	}
-	for name := range s {
-		if err := notes.CheckProvider(name); err != nil {
-			return err
-		}
-	}
-	b, err := json.Marshal(s)
+// subagentDefaultModel is the Runner's DefaultModel: the template's model for the CLI.
+func (a *App) subagentDefaultModel(provider string) string {
+	s, err := a.settings()
 	if err != nil {
-		return err
+		return ""
 	}
-	a.prefs.mu.Lock()
-	defer a.prefs.mu.Unlock()
-	if err := a.store.PutSetting(keySubagentProviders, string(b)); err != nil {
-		return err
-	}
-	a.prefs.subagentProviders = cloneSubagentProvidersSettings(s)
-	a.prefs.subagentLoaded = true
-	return nil
+	return s.SubagentProviders[provider].DefaultModel
 }

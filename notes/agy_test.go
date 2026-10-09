@@ -421,7 +421,7 @@ func TestAGYRunnerTurns(t *testing.T) {
 func TestAGYWorkerOneTurn(t *testing.T) {
 	r, s, se, ch, _ := agyRunner(t)
 	orch, _ := s.CreateAgent(se.ID, "orchestrator", 0, 0)
-	w, err := r.SpawnSubagent(se.ID, orch.ID, "", "do it", "flash")
+	w, err := r.SpawnSubagent(se.ID, orch.ID, "", "do it", "flash", "")
 	if err != nil {
 		t.Fatal(err)
 	}

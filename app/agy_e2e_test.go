@@ -22,7 +22,7 @@ func TestAGYAppE2E(t *testing.T) {
 	}
 	a, ev := newTestApp(t, t.TempDir(), "")
 	work := t.TempDir()
-	se, err := a.CreateSessionWithProvider("AGY E2E", work, notes.ProviderAGY)
+	se, err := a.CreateSessionWithProvider("AGY E2E", work, notes.ProviderAGY, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

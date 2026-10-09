@@ -22,8 +22,8 @@ export function CreateSession(arg1, arg2) {
   return window['go']['main']['App']['CreateSession'](arg1, arg2);
 }
 
-export function CreateSessionWithProvider(arg1, arg2, arg3) {
-  return window['go']['main']['App']['CreateSessionWithProvider'](arg1, arg2, arg3);
+export function CreateSessionWithProvider(arg1, arg2, arg3, arg4) {
+  return window['go']['main']['App']['CreateSessionWithProvider'](arg1, arg2, arg3, arg4);
 }
 
 export function DeleteSession(arg1) {
@@ -52,6 +52,10 @@ export function GetChanges(arg1, arg2) {
 
 export function GetFileDiff(arg1, arg2, arg3) {
   return window['go']['main']['App']['GetFileDiff'](arg1, arg2, arg3);
+}
+
+export function GetProviders() {
+  return window['go']['main']['App']['GetProviders']();
 }
 
 export function GetRateLimit() {
@@ -96,6 +100,10 @@ export function ResumeSession(arg1) {
 
 export function SendMessage(arg1, arg2, arg3) {
   return window['go']['main']['App']['SendMessage'](arg1, arg2, arg3);
+}
+
+export function SetSessionConfig(arg1, arg2) {
+  return window['go']['main']['App']['SetSessionConfig'](arg1, arg2);
 }
 
 export function SetSettings(arg1) {

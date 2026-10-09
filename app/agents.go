@@ -16,8 +16,8 @@ import (
 const (
 	eventAgentActivity = "agent_activity" // payload agentActivityEvent: a running sub-agent's busy or paused changed
 
-	resumedMessage          = "[Fragile] Resumed by the user. Continue your task."
-	resumedAfterStopMessage = "[Fragile] Resumed by the user after it stopped. Continue your task; read_notes for what changed."
+	resumedMessage          = fragilePrefix + "Resumed by the user. Continue your task."
+	resumedAfterStopMessage = fragilePrefix + "Resumed by the user after it stopped. Continue your task; read_notes for what changed."
 )
 
 // AgentActivity is a running sub-agent's live state: Busy while mid-turn,
