@@ -1,6 +1,6 @@
-import {memo, useCallback, useEffect, useMemo, useState} from 'react'
+import {memo, useCallback, useEffect, useMemo, useRef, useState} from 'react'
 import {useNow} from '@/hooks/use-now'
-import {Virtuoso} from 'react-virtuoso'
+import {Virtuoso, type VirtuosoHandle} from 'react-virtuoso'
 import {ChevronRight, Play, Square, Wrench} from 'lucide-react'
 import {Button} from '@/components/ui/button'
 import {Collapsible, CollapsibleContent, CollapsibleTrigger} from '@/components/ui/collapsible'
@@ -226,6 +226,7 @@ const Footer = ({context}: {context?: {since: number; label?: string}}) => (
 
 // Keyed by session. Open tool groups live here, not in the row: Virtuoso unmounts rows scrolled out of view.
 function ChatList({sessionId, chat, since, label}: {sessionId: number; chat: ChatItem[]; since: number; label?: string}) {
+  const list = useRef<VirtuosoHandle>(null)
   const rows = useMemo(() => groupTools(chat), [chat])
   const [openIds, setOpenIds] = useState<ReadonlySet<number>>(() => new Set())
   const toggle = useCallback((id: number, open: boolean) => setOpenIds((s) => {
@@ -234,8 +235,22 @@ function ChatList({sessionId, chat, since, label}: {sessionId: number; chat: Cha
     else n.delete(id)
     return n
   }), [])
+  const lastUserId = useMemo(() => rows.findLast((r) => r.kind === 'user')?.id, [rows])
+  const prevLastUserId = useRef(lastUserId)
+  // Scroll to bottom on send: sending is explicit intent; followOutput alone misses when scrolled far up.
+  useEffect(() => {
+    const prev = prevLastUserId.current
+    prevLastUserId.current = lastUserId
+    if (lastUserId === undefined || prev === lastUserId) return
+    list.current?.scrollToIndex({index: 'LAST', align: 'end', behavior: 'auto'})
+    const frame = requestAnimationFrame(() => {
+      list.current?.scrollToIndex({index: 'LAST', align: 'end', behavior: 'auto'})
+    })
+    return () => cancelAnimationFrame(frame)
+  }, [lastUserId])
   return (
     <Virtuoso
+      ref={list}
       data={rows}
       computeItemKey={(_, r) => r.id}
       initialTopMostItemIndex={{index: 'LAST', align: 'end'}}
