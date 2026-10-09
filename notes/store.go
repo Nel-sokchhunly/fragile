@@ -583,6 +583,7 @@ type NoteFilter struct {
 	Type, Status string
 	AuthorID     int64
 	SinceID      int64 // only notes with id > SinceID
+	Limit        int   // max newest notes to return (ordered oldest first)
 }
 
 const noteCols = `id, board_id, COALESCE(author_agent_id,0), type, content, status, created_at, updated_at`
@@ -609,11 +610,17 @@ func (s *Store) GetNote(sessionID, id int64) (Note, error) {
 }
 
 func (s *Store) ListNotes(sessionID, boardID int64, f NoteFilter) ([]Note, error) {
-	rows, err := s.db.Query(`SELECT `+noteCols+` FROM notes
-		WHERE board_id = ? AND `+inSession+`
+	base := `SELECT ` + noteCols + ` FROM notes
+		WHERE board_id = ? AND ` + inSession + `
 		AND (? = '' OR type = ?) AND (? = '' OR status = ?)
-		AND (? = 0 OR author_agent_id = ?) AND id > ? ORDER BY id`,
-		boardID, sessionID, f.Type, f.Type, f.Status, f.Status, f.AuthorID, f.AuthorID, f.SinceID)
+		AND (? = 0 OR author_agent_id = ?) AND id > ?`
+	args := []any{boardID, sessionID, f.Type, f.Type, f.Status, f.Status, f.AuthorID, f.AuthorID, f.SinceID}
+	q := base + ` ORDER BY id`
+	if f.Limit > 0 { // newest N, returned oldest first
+		q = `SELECT * FROM (` + base + ` ORDER BY id DESC LIMIT ?) ORDER BY id`
+		args = append(args, f.Limit)
+	}
+	rows, err := s.db.Query(q, args...)
 	if err != nil {
 		return nil, err
 	}

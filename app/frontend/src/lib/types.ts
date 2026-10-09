@@ -67,6 +67,8 @@ export type Settings = {
   auto_compact_tokens: number
   orchestrator_rules: string
   subagent_providers: Partial<Record<SessionProvider, {enabled: boolean; default_model?: string}>>
+  /** Plugin names newly spawned sub-agents do not load (global, not per session). */
+  subagent_disabled_plugins: string[] | null
 }
 
 export type Task = {

@@ -347,7 +347,8 @@ export namespace main {
 	    auto_compact_tokens: number;
 	    orchestrator_rules: string;
 	    subagent_providers: Record<string, SubagentProviderSetting>;
-	
+	    subagent_disabled_plugins: string[];
+
 	    static createFrom(source: any = {}) {
 	        return new Settings(source);
 	    }
@@ -357,6 +358,7 @@ export namespace main {
 	        this.auto_compact_tokens = source["auto_compact_tokens"];
 	        this.orchestrator_rules = source["orchestrator_rules"];
 	        this.subagent_providers = this.convertValues(source["subagent_providers"], SubagentProviderSetting, true);
+	        this.subagent_disabled_plugins = source["subagent_disabled_plugins"];
 	    }
 	
 		convertValues(a: any, classs: any, asMap: boolean = false): any {

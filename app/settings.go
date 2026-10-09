@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"maps"
+	"slices"
 	"sync"
 
 	"github.com/Nel-sokchhunly/fragile/notes"
@@ -15,6 +16,7 @@ const (
 	keyAutoCompact       = "auto_compact_tokens"
 	keyOrchestratorRules = "orchestrator_rules"
 	keySubagentProviders = "subagent_providers"
+	keyDisabledPlugins   = "subagent_disabled_plugins"
 )
 
 // SubagentProviderSetting is one CLI in the global template: whether new
@@ -34,6 +36,10 @@ type Settings struct {
 	AutoCompactTokens int                       `json:"auto_compact_tokens"` // 0 = off (default)
 	OrchestratorRules string                    `json:"orchestrator_rules"`
 	SubagentProviders SubagentProvidersSettings `json:"subagent_providers"` // nil = never saved: GetSettings enables every detected CLI
+
+	// DisabledPlugins are notes.UserPlugins names that newly spawned sub-agents
+	// do not load. Global, read at spawn time; empty (default) loads them all.
+	DisabledPlugins []string `json:"subagent_disabled_plugins"`
 }
 
 // sessionConfig is the template for a new session.
@@ -80,7 +86,7 @@ func (a *App) settings() (Settings, error) {
 		return a.prefs.cur, nil
 	}
 	var s Settings
-	for key, dst := range map[string]any{keyAutoCompact: &s.AutoCompactTokens, keyOrchestratorRules: &s.OrchestratorRules, keySubagentProviders: &s.SubagentProviders} {
+	for key, dst := range map[string]any{keyAutoCompact: &s.AutoCompactTokens, keyOrchestratorRules: &s.OrchestratorRules, keySubagentProviders: &s.SubagentProviders, keyDisabledPlugins: &s.DisabledPlugins} {
 		v, err := a.store.GetSetting(key)
 		if errors.Is(err, notes.ErrNotFound) {
 			continue
@@ -119,9 +125,10 @@ func (a *App) SetSettings(s Settings) error {
 		return err
 	}
 	s.SubagentProviders = maps.Clone(s.SubagentProviders)
+	s.DisabledPlugins = slices.Clone(s.DisabledPlugins)
 	a.prefs.mu.Lock()
 	defer a.prefs.mu.Unlock()
-	for key, v := range map[string]any{keyAutoCompact: s.AutoCompactTokens, keyOrchestratorRules: s.OrchestratorRules, keySubagentProviders: s.SubagentProviders} {
+	for key, v := range map[string]any{keyAutoCompact: s.AutoCompactTokens, keyOrchestratorRules: s.OrchestratorRules, keySubagentProviders: s.SubagentProviders, keyDisabledPlugins: s.DisabledPlugins} {
 		b, _ := json.Marshal(v)
 		if err := a.store.PutSetting(key, string(b)); err != nil {
 			a.prefs.loaded = false // some rows may be written; reload them
@@ -130,6 +137,28 @@ func (a *App) SetSettings(s Settings) error {
 	}
 	a.prefs.cur, a.prefs.loaded = s, true
 	return nil
+}
+
+// subagentPluginDirs is the Runner's PluginDirs: every user plugin except the
+// disabled ones, read from the current settings on each spawn.
+func (a *App) subagentPluginDirs() []string {
+	s, _ := a.settings()
+	var dirs []string
+	for _, p := range notes.UserPlugins(a.agentDir) {
+		if !slices.Contains(s.DisabledPlugins, p.Name) {
+			dirs = append(dirs, p.Dir)
+		}
+	}
+	return dirs
+}
+
+// ListUserPlugins returns the names of the plugins sub-agents can load.
+func (a *App) ListUserPlugins() []string {
+	names := []string{}
+	for _, p := range notes.UserPlugins(a.agentDir) {
+		names = append(names, p.Name)
+	}
+	return names
 }
 
 // subagentDefaultModel is the Runner's DefaultModel: the template's model for the CLI.

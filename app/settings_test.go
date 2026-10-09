@@ -104,6 +104,32 @@ func TestSettingsTemplate(t *testing.T) {
 	}
 }
 
+// Disabled plugins are dropped from the next spawn's plugin dirs without a restart.
+func TestDisabledPlugins(t *testing.T) {
+	claude := t.TempDir()
+	t.Setenv("CLAUDE_CONFIG_DIR", claude)
+	plug := filepath.Join(claude, "plugins", "cache", "a")
+	if err := os.MkdirAll(plug, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	os.WriteFile(filepath.Join(claude, "settings.json"), []byte(`{"enabledPlugins":{"a@m":true}}`), 0o644)
+	os.WriteFile(filepath.Join(claude, "plugins", "installed_plugins.json"), []byte(`{"plugins":{"a@m":[{"installPath":"`+plug+`"}]}}`), 0o644)
+	a, _ := newTestApp(t, t.TempDir(), "")
+	defer a.close()
+	if got := a.ListUserPlugins(); !reflect.DeepEqual(got, []string{"a@m"}) {
+		t.Fatalf("ListUserPlugins = %v", got)
+	}
+	if got := a.subagentPluginDirs(); !reflect.DeepEqual(got, []string{plug}) {
+		t.Fatalf("default dirs = %v", got)
+	}
+	if err := a.SetSettings(Settings{DisabledPlugins: []string{"a@m"}}); err != nil {
+		t.Fatal(err)
+	}
+	if got := a.subagentPluginDirs(); len(got) != 0 {
+		t.Fatalf("disabled plugin still loaded: %v", got)
+	}
+}
+
 // autoCompactSession starts an orchestrator that answers /compact and records its stdin.
 func autoCompactSession(t *testing.T, tokens, used int) (a *App, sid int64, stdinLog string) {
 	t.Helper()
