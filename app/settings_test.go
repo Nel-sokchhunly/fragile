@@ -36,6 +36,74 @@ func TestSettings(t *testing.T) {
 	}
 }
 
+func TestSubagentProviderSettings(t *testing.T) {
+	dir := t.TempDir()
+	a, _ := newTestApp(t, dir, "")
+	defer a.close()
+
+	// Default settings reflect detected providers.
+	defaults, err := a.GetSubagentProviderSettings()
+	if err != nil {
+		t.Fatalf("GetSubagentProviderSettings defaults error: %v", err)
+	}
+	for _, p := range a.GetProviders() {
+		setting, ok := defaults[p.Name]
+		if !ok {
+			t.Errorf("provider %s missing from default settings", p.Name)
+		}
+		if p.Available && !setting.Enabled {
+			t.Errorf("expected available provider %s to be enabled by default", p.Name)
+		}
+	}
+
+	// Invalid provider name rejected
+	bad := SubagentProvidersSettings{
+		"invalid-prov": {Enabled: true},
+	}
+	if err := a.SetSubagentProviderSettings(bad); err == nil {
+		t.Fatal("expected error for invalid provider name")
+	}
+
+	// Valid settings stored and retrieved
+	updated := SubagentProvidersSettings{
+		"claude": {Enabled: true, DefaultModel: "claude-sonnet-4-6"},
+		"codex":  {Enabled: false},
+		"agy":    {Enabled: true, DefaultModel: "flash"},
+	}
+	if err := a.SetSubagentProviderSettings(updated); err != nil {
+		t.Fatalf("SetSubagentProviderSettings failed: %v", err)
+	}
+	got, err := a.GetSubagentProviderSettings()
+	if err != nil {
+		t.Fatalf("GetSubagentProviderSettings failed: %v", err)
+	}
+	if !got["claude"].Enabled || got["claude"].DefaultModel != "claude-sonnet-4-6" {
+		t.Fatalf("unexpected claude setting: %+v", got["claude"])
+	}
+	if got["codex"].Enabled {
+		t.Fatalf("expected codex to be disabled: %+v", got["codex"])
+	}
+	if !got["agy"].Enabled || got["agy"].DefaultModel != "flash" {
+		t.Fatalf("unexpected agy setting: %+v", got["agy"])
+	}
+
+	// Persisted after restart
+	a.close()
+	b, _ := newTestApp(t, dir, "")
+	defer b.close()
+	reopened, err := b.GetSubagentProviderSettings()
+	if err != nil {
+		t.Fatalf("reopened GetSubagentProviderSettings failed: %v", err)
+	}
+	if !reopened["claude"].Enabled || reopened["claude"].DefaultModel != "claude-sonnet-4-6" {
+		t.Fatalf("reopened claude setting: %+v", reopened["claude"])
+	}
+	if reopened["codex"].Enabled {
+		t.Fatalf("reopened codex setting: %+v", reopened["codex"])
+	}
+}
+
+
 // autoCompactSession starts an orchestrator that answers /compact and records its stdin.
 func autoCompactSession(t *testing.T, tokens, used int) (a *App, sid int64, stdinLog string) {
 	t.Helper()

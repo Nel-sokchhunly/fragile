@@ -24,7 +24,9 @@ import (
 
 func main() {
 	var cfg notes.Config
+	var subagentProviders string
 	flag.StringVar(&cfg.Provider, "provider", notes.ProviderClaude, "agent CLI provider: claude, codex (ChatGPT login) or agy (Antigravity)")
+	flag.StringVar(&subagentProviders, "subagent-providers", "", "comma-separated sub-agent CLI providers (claude, codex, agy); defaults to detected providers")
 	flag.StringVar(&cfg.Addr, "addr", "127.0.0.1:7777", "listen address (keep it on localhost)")
 	flag.StringVar(&cfg.DBPath, "db", ".fragile/fragile.db", "SQLite database path")
 	flag.StringVar(&cfg.LogPath, "log", ".fragile/events.jsonl", "observation log path (tail -f it)")
@@ -36,7 +38,7 @@ func main() {
 	}
 	flag.Parse()
 
-	if err := run(cfg, strings.Join(flag.Args(), " ")); err != nil {
+	if err := run(cfg, subagentProviders, strings.Join(flag.Args(), " ")); err != nil {
 		log.Fatal(err)
 	}
 }
@@ -54,7 +56,7 @@ func checkLoopback(addr string) error {
 	return nil
 }
 
-func run(cfg notes.Config, task string) error {
+func run(cfg notes.Config, subagentProviders, task string) error {
 	provider := cfg.Provider
 	if provider == "" {
 		provider = notes.ProviderClaude
@@ -97,11 +99,33 @@ func run(cfg notes.Config, task string) error {
 	}
 	defer evlog.Close()
 
+	var enabled []string
+	if subagentProviders != "" {
+		for _, p := range strings.Split(subagentProviders, ",") {
+			p = strings.TrimSpace(p)
+			if p != "" {
+				if err := notes.CheckProvider(p); err != nil {
+					return err
+				}
+				enabled = append(enabled, p)
+			}
+		}
+	} else {
+		for _, p := range notes.DetectProviders() {
+			if p.Available {
+				enabled = append(enabled, p.Name)
+			}
+		}
+		if len(enabled) == 0 {
+			enabled = []string{provider}
+		}
+	}
+
 	title := notes.FirstLine(task)
 	if title == "" {
 		title = "phase0"
 	}
-	session, err := store.CreateSessionWithProvider(title, cfg.WorkDir, provider)
+	session, err := store.CreateSessionWithProviders(title, cfg.WorkDir, provider, enabled)
 	if err != nil {
 		return err
 	}

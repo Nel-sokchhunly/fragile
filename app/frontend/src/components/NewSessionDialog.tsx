@@ -1,4 +1,4 @@
-import {useState, type ReactNode} from 'react'
+import {useEffect, useState, type ReactNode} from 'react'
 import {FolderOpen} from 'lucide-react'
 import {Button} from '@/components/ui/button'
 import {Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger} from '@/components/ui/dialog'
@@ -6,7 +6,8 @@ import {Input} from '@/components/ui/input'
 import {Select, SelectContent, SelectItem, SelectTrigger, SelectValue} from '@/components/ui/select'
 import {Tip, Tooltip, TooltipContent, TooltipTrigger} from '@/components/ui/tooltip'
 import {api} from '@/lib/api'
-import type {SessionProvider} from '@/lib/types'
+import {PROVIDER_NAMES, type ProviderInfo, type SessionProvider, type SubagentProvidersSettings} from '@/lib/types'
+import {cn} from '@/lib/utils'
 import {useAppStore} from '@/store/app'
 
 const PROVIDER_HINTS: Partial<Record<SessionProvider, ReactNode>> = {
@@ -18,15 +19,56 @@ const PROVIDER_HINTS: Partial<Record<SessionProvider, ReactNode>> = {
   ),
 }
 
+const ALL_PROVIDERS: SessionProvider[] = ['claude', 'codex', 'agy']
+
 // Wraps any trigger element (asChild) with the "new session" dialog.
 export function NewSessionDialog({children, tip}: {children: ReactNode; tip?: string}) {
   const createSession = useAppStore((s) => s.createSession)
   const [open, setOpen] = useState(false)
   const [name, setName] = useState('')
   const [provider, setProvider] = useState<SessionProvider>('claude')
+  const [availableProviders, setAvailableProviders] = useState<ProviderInfo[]>([])
+  const [enabledSubProviders, setEnabledSubProviders] = useState<SessionProvider[]>(['claude'])
   const [dir, setDir] = useState('')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
+
+  useEffect(() => {
+    if (!open) return
+    let active = true
+    Promise.all([
+      api.getProviders().catch(() => [
+        {name: 'claude', available: true, default_model: ''},
+        {name: 'codex', available: false, reason: 'Codex CLI not detected', default_model: ''},
+        {name: 'agy', available: false, reason: 'Antigravity CLI not detected', default_model: ''},
+      ] as ProviderInfo[]),
+      api.getSubagentProviderSettings().catch(() => ({
+        claude: {enabled: true},
+      } as SubagentProvidersSettings)),
+    ]).then(([provs, settings]) => {
+      if (!active) return
+      setAvailableProviders(provs)
+
+      // Pre-populate from global settings or defaults
+      const selected: SessionProvider[] = []
+      for (const p of provs) {
+        if (!p.available) continue
+        const conf = settings[p.name]
+        if (conf !== undefined) {
+          if (conf.enabled) selected.push(p.name)
+        } else {
+          selected.push(p.name)
+        }
+      }
+      if (selected.length === 0) {
+        const firstAvail = provs.find((p) => p.available)
+        if (firstAvail) selected.push(firstAvail.name)
+        else selected.push('claude')
+      }
+      setEnabledSubProviders(selected)
+    })
+    return () => { active = false }
+  }, [open])
 
   const pick = async () => {
     try {
@@ -42,7 +84,7 @@ export function NewSessionDialog({children, tip}: {children: ReactNode; tip?: st
     setBusy(true)
     setError('')
     try {
-      await createSession(name.trim(), dir, provider)
+      await createSession(name.trim(), dir, provider, enabledSubProviders)
       setName('')
       setOpen(false)
     } catch (e) {
@@ -60,7 +102,7 @@ export function NewSessionDialog({children, tip}: {children: ReactNode; tip?: st
         </Tooltip>
       ) : <DialogTrigger asChild>{children}</DialogTrigger>}
       {/* After creating, focus goes to the composer rather than back to the (tooltipped) + button. */}
-      <DialogContent className="sm:max-w-md" onCloseAutoFocus={(e) => { e.preventDefault(); document.querySelector<HTMLElement>('[data-composer]')?.focus() }}>
+      <DialogContent className="sm:max-w-md max-h-[90vh] overflow-y-auto" onCloseAutoFocus={(e) => { e.preventDefault(); document.querySelector<HTMLElement>('[data-composer]')?.focus() }}>
         <form onSubmit={(e) => { e.preventDefault(); void submit() }} className="flex flex-col gap-2.5">
           <DialogHeader>
             <DialogTitle>New session</DialogTitle>
@@ -83,6 +125,58 @@ export function NewSessionDialog({children, tip}: {children: ReactNode; tip?: st
           {PROVIDER_HINTS[provider] && (
             <p className="text-xs text-muted-foreground">{PROVIDER_HINTS[provider]}</p>
           )}
+
+          <div className="flex flex-col gap-1.5 text-xs">
+            <span className="font-medium text-foreground">Sub-agent CLIs</span>
+            <div className="flex flex-col gap-1 rounded-md border border-border-default p-2 bg-background/50">
+              {ALL_PROVIDERS.map((pName) => {
+                const info = availableProviders.find((p) => p.name === pName) ?? {
+                  name: pName,
+                  available: pName === 'claude',
+                  reason: pName === 'claude' ? undefined : `${PROVIDER_NAMES[pName]} CLI not detected`,
+                }
+                const checked = info.available && enabledSubProviders.includes(pName)
+                const toggle = () => {
+                  if (!info.available) return
+                  setEnabledSubProviders((prev) =>
+                    prev.includes(pName) ? prev.filter((p) => p !== pName) : [...prev, pName]
+                  )
+                }
+                const row = (
+                  <label
+                    key={pName}
+                    className={cn(
+                      'flex items-center justify-between gap-2 py-0.5 text-xs select-none',
+                      info.available ? 'cursor-pointer hover:text-foreground' : 'cursor-not-allowed opacity-50 text-muted-foreground'
+                    )}
+                  >
+                    <span className="flex items-center gap-2">
+                      <input
+                        type="checkbox"
+                        checked={checked}
+                        disabled={!info.available}
+                        onChange={toggle}
+                        className="size-3.5 rounded border-border-default accent-primary cursor-pointer disabled:cursor-not-allowed"
+                      />
+                      <span>{PROVIDER_NAMES[pName] ?? pName}</span>
+                    </span>
+                    {!info.available && (
+                      <span className="font-mono text-[11px] text-muted-foreground">unavailable</span>
+                    )}
+                  </label>
+                )
+                if (!info.available) {
+                  return (
+                    <Tip key={pName} content={info.reason || `${PROVIDER_NAMES[pName]} CLI is not available`}>
+                      {row}
+                    </Tip>
+                  )
+                }
+                return row
+              })}
+            </div>
+          </div>
+
           <Input autoFocus value={name} onChange={(e) => setName(e.target.value)} aria-label="Name" placeholder="name (default: directory name)"/>
           {error && <p role="alert" className="text-xs text-destructive">{error}</p>}
           <DialogFooter><Button type="submit" disabled={!ready}>{busy ? 'Starting...' : 'Create'}</Button></DialogFooter>

@@ -240,15 +240,51 @@ type SessionSnapshot struct {
 	Activity    map[int64]AgentActivity `json:"activity"`    // running sub-agents only; agent_activity events update it
 }
 
+// defaultEnabledProviders returns the enabled providers for new sessions based on global settings.
+func (a *App) defaultEnabledProviders() []string {
+	settings, err := a.GetSubagentProviderSettings()
+	if err != nil {
+		return []string{notes.ProviderClaude}
+	}
+	var enabled []string
+	for _, name := range []string{notes.ProviderClaude, notes.ProviderCodex, notes.ProviderAGY} {
+		if s, ok := settings[name]; ok && s.Enabled {
+			enabled = append(enabled, name)
+		}
+	}
+	if len(enabled) == 0 {
+		return []string{notes.ProviderClaude}
+	}
+	return enabled
+}
+
 // CreateSession creates an empty session in workDir (name defaults to the
 // directory's base name). Its orchestrator starts with the first SendMessage.
 // A directory holds at most one session, live or past; deleting it frees the directory.
-func (a *App) CreateSession(name, workDir string) (notes.Session, error) {
-	return a.CreateSessionWithProvider(name, workDir, notes.ProviderClaude)
+// enabledProviders can optionally specify enabled sub-agent CLI providers; if omitted/empty,
+// it is populated from global default settings.
+func (a *App) CreateSession(name, workDir string, enabledProviders ...[]string) (notes.Session, error) {
+	var ep []string
+	if len(enabledProviders) > 0 {
+		ep = enabledProviders[0]
+	}
+	return a.CreateSessionWithProviders(name, workDir, notes.ProviderClaude, ep)
 }
 
 // CreateSessionWithProvider fixes the CLI provider for this conversation and its team.
-func (a *App) CreateSessionWithProvider(name, workDir, provider string) (notes.Session, error) {
+// enabledProviders can optionally specify enabled sub-agent CLI providers; if omitted/empty,
+// it is populated from global default settings.
+func (a *App) CreateSessionWithProvider(name, workDir, provider string, enabledProviders ...[]string) (notes.Session, error) {
+	var ep []string
+	if len(enabledProviders) > 0 {
+		ep = enabledProviders[0]
+	}
+	return a.CreateSessionWithProviders(name, workDir, provider, ep)
+}
+
+// CreateSessionWithProviders creates an empty session with the specified provider and enabled sub-agent providers.
+// If enabledProviders is nil or empty, it is populated from global default settings.
+func (a *App) CreateSessionWithProviders(name, workDir, provider string, enabledProviders []string) (notes.Session, error) {
 	if err := notes.CheckProvider(provider); err != nil {
 		return notes.Session{}, err
 	}
@@ -263,6 +299,15 @@ func (a *App) CreateSessionWithProvider(name, workDir, provider string) (notes.S
 	if name == "" {
 		name = filepath.Base(dir)
 	}
+	if len(enabledProviders) == 0 {
+		enabledProviders = a.defaultEnabledProviders()
+	} else {
+		for _, p := range enabledProviders {
+			if err := notes.CheckProvider(p); err != nil {
+				return notes.Session{}, err
+			}
+		}
+	}
 	a.startMu.Lock() // racing creates for one directory must not both pass the check
 	all, err := a.store.ListSessions()
 	if err != nil {
@@ -275,7 +320,7 @@ func (a *App) CreateSessionWithProvider(name, workDir, provider string) (notes.S
 			return notes.Session{}, fmt.Errorf("a session for this directory already exists: %q; open it from the sidebar instead", other.Title)
 		}
 	}
-	se, err := a.store.CreateSessionWithProvider(name, dir, provider)
+	se, err := a.store.CreateSessionWithProviders(name, dir, provider, enabledProviders)
 	a.startMu.Unlock()
 	if err != nil {
 		return notes.Session{}, err
@@ -286,6 +331,68 @@ func (a *App) CreateSessionWithProvider(name, workDir, provider string) (notes.S
 		se = cur
 	}
 	return se, nil
+}
+
+// UpdateSessionProviders updates the session's enabled sub-agent CLI providers and
+// posts a decision note to the session board announcing the change.
+func (a *App) UpdateSessionProviders(sessionID int64, enabledProviders []string) error {
+	if _, err := a.store.GetSession(sessionID); err != nil {
+		return err
+	}
+	if enabledProviders == nil {
+		enabledProviders = []string{}
+	}
+	for _, p := range enabledProviders {
+		if err := notes.CheckProvider(p); err != nil {
+			return err
+		}
+	}
+	if err := a.store.SetSessionEnabledProviders(sessionID, enabledProviders); err != nil {
+		return err
+	}
+	board, err := a.store.SessionBoard(sessionID)
+	if err != nil {
+		return err
+	}
+	var content string
+	if len(enabledProviders) == 0 {
+		content = "Enabled sub-agent CLI providers updated: none"
+	} else {
+		content = fmt.Sprintf("Enabled sub-agent CLI providers updated: %s", strings.Join(enabledProviders, ", "))
+	}
+	n, err := a.store.PostNote(sessionID, board, 0, "decision", content)
+	if err != nil {
+		return err
+	}
+	a.log.Write(notes.EventNotePosted, sessionID, 0, n)
+	return nil
+}
+
+// SetSessionProviders is an alias for UpdateSessionProviders for frontend Wails bindings.
+func (a *App) SetSessionProviders(sessionID int64, enabledProviders []string) error {
+	return a.UpdateSessionProviders(sessionID, enabledProviders)
+}
+
+// SetSessionEnabledProviders is an alias for UpdateSessionProviders for frontend Wails bindings.
+func (a *App) SetSessionEnabledProviders(sessionID int64, enabledProviders []string) error {
+	return a.UpdateSessionProviders(sessionID, enabledProviders)
+}
+
+// GetSessionProviders returns the enabled sub-agent CLI providers for the session.
+func (a *App) GetSessionProviders(sessionID int64) ([]string, error) {
+	se, err := a.store.GetSession(sessionID)
+	if err != nil {
+		return nil, err
+	}
+	if se.EnabledProviders == nil {
+		return []string{}, nil
+	}
+	return se.EnabledProviders, nil
+}
+
+// GetSessionEnabledProviders is an alias for GetSessionProviders for frontend Wails bindings.
+func (a *App) GetSessionEnabledProviders(sessionID int64) ([]string, error) {
+	return a.GetSessionProviders(sessionID)
 }
 
 // SendMessage sends a chat message to the session's orchestrator, starting it

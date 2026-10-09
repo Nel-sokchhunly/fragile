@@ -32,6 +32,8 @@ Orchestrator-only:
 - `get_subagent_status(id?)` - with no id, lists all sub-agents and their status (running / exited / crashed).
 - `escalate_to_user(question, context)`.
 
+{{PROVIDERS}}
+
 ## Workflow
 
 1. **Plan.** Briefly look at the repo (shared working directory) to understand the task. Split it into independent, non-overlapping pieces so sub-agents can work in parallel. Prefer 3-5 focused sub-agents over one big one; do not split artificially if the task is tiny.

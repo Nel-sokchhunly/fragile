@@ -385,13 +385,36 @@ func (r *Runner) Forget(sessionID int64) {
 	r.mu.Unlock()
 }
 
+func (r *Runner) orchestratorPrompt(sessionID int64) string {
+	var enabled []string
+	if r.store != nil {
+		if se, err := r.store.GetSession(sessionID); err == nil {
+			enabled = se.EnabledProviders
+			if len(enabled) == 0 && se.Provider != "" {
+				enabled = []string{se.Provider}
+			}
+		}
+	}
+	if len(enabled) == 0 {
+		enabled = []string{r.provider(sessionID)}
+	}
+	var provs []string
+	for _, info := range AvailableSubagentProviders(enabled) {
+		provs = append(provs, info.Name)
+	}
+	if len(provs) == 0 {
+		provs = enabled
+	}
+	return OrchestratorPrompt(r.workDir(sessionID), r.Interactive, provs...)
+}
+
 // StartOrchestrator registers the session's orchestrator and launches it; task is its prompt.
 func (r *Runner) StartOrchestrator(sessionID int64, task string) (Agent, error) {
 	a, err := r.store.CreateAgent(sessionID, "orchestrator", 0, 0)
 	if err != nil {
 		return Agent{}, err
 	}
-	return r.launch(a, "", task, OrchestratorPrompt(r.workDir(sessionID), r.Interactive), "", "")
+	return r.launch(a, "", task, r.orchestratorPrompt(sessionID), "", "")
 }
 
 // ResumeOrchestrator registers a new orchestrator for the session and launches
@@ -419,27 +442,48 @@ func (r *Runner) ResumeOrchestrator(sessionID int64, providerSessionID string) (
 	if err != nil {
 		return Agent{}, err
 	}
-	return r.launch(a, "", "", OrchestratorPrompt(r.workDir(sessionID), r.Interactive), providerSessionID, "")
+	return r.launch(a, "", "", r.orchestratorPrompt(sessionID), providerSessionID, "")
 }
 
 // SpawnSubagent creates the task and sub-agent rows in the session and launches
 // the process. title is the task title shown on the agent card (the task's first line if empty). parentID must be the session's orchestrator (one level deep only).
 // model is the full model id it runs with (--model); empty uses the CLI's default.
-func (r *Runner) SpawnSubagent(sessionID, parentID int64, title, task, model string) (Agent, error) {
+// provider specifies the agent CLI (claude, codex, agy); empty uses the session provider.
+func (r *Runner) SpawnSubagent(sessionID, parentID int64, title, task, model string, provider ...string) (Agent, error) {
 	if p, err := r.store.GetAgent(sessionID, parentID); err != nil {
 		return Agent{}, err
 	} else if p.Role != "orchestrator" {
 		return Agent{}, errors.New("only an orchestrator can spawn sub-agents")
 	}
-	if r.provider(sessionID) == ProviderCodex {
-		if err := validCodexModel(model); err != nil {
+	var prov string
+	if len(provider) > 0 {
+		prov = strings.TrimSpace(provider[0])
+	}
+	if prov == "" {
+		prov = r.provider(sessionID)
+	}
+	if err := CheckProvider(prov); err != nil {
+		return Agent{}, err
+	}
+	var err error
+	if adapter, ok := GetAdapter(prov); ok {
+		if model, err = adapter.ValidateModel(model); err != nil {
 			return Agent{}, err
 		}
-	}
-	if r.provider(sessionID) == ProviderAGY {
-		var err error
-		if model, err = resolveAGYModel(model); err != nil {
-			return Agent{}, err
+	} else {
+		switch prov {
+		case ProviderCodex:
+			if err := validCodexModel(model); err != nil {
+				return Agent{}, err
+			}
+		case ProviderAGY:
+			if model, err = resolveAGYModel(model); err != nil {
+				return Agent{}, err
+			}
+		case ProviderClaude:
+			if model, err = resolveModel(model); err != nil {
+				return Agent{}, err
+			}
 		}
 	}
 	if len(task) > maxTaskBytes {
@@ -449,7 +493,7 @@ func (r *Runner) SpawnSubagent(sessionID, parentID int64, title, task, model str
 		title = FirstLine(task)
 	}
 	r.spawnMu.Lock() // the agent row counts as running from CreateAgent on
-	a, err := r.createSubagent(sessionID, parentID, title, task)
+	a, err := r.createSubagent(sessionID, parentID, title, task, prov)
 	r.spawnMu.Unlock()
 	if err != nil {
 		return Agent{}, err
@@ -459,7 +503,7 @@ func (r *Runner) SpawnSubagent(sessionID, parentID int64, title, task, model str
 
 // createSubagent adds the task and sub-agent rows unless the session already
 // has maxRunningSubagents running; the caller holds r.spawnMu.
-func (r *Runner) createSubagent(sessionID, parentID int64, title, task string) (Agent, error) {
+func (r *Runner) createSubagent(sessionID, parentID int64, title, task string, provider ...string) (Agent, error) {
 	if err := r.checkSubagentLimit(sessionID); err != nil {
 		return Agent{}, err
 	}
@@ -467,7 +511,11 @@ func (r *Runner) createSubagent(sessionID, parentID int64, title, task string) (
 	if err != nil {
 		return Agent{}, err
 	}
-	a, err := r.store.CreateAgent(sessionID, "subagent", parentID, t.ID)
+	var prov string
+	if len(provider) > 0 {
+		prov = provider[0]
+	}
+	a, err := r.store.CreateAgent(sessionID, "subagent", parentID, t.ID, prov)
 	if err != nil {
 		return Agent{}, err
 	}
@@ -502,15 +550,15 @@ func (r *Runner) ResumeSubagent(sessionID, agentID int64, providerSessionID, mes
 	if providerSessionID == "" {
 		return Agent{}, errors.New("no provider conversation to resume")
 	}
-	if r.provider(sessionID) != ProviderClaude {
-		return Agent{}, errors.New("resuming a sub-agent is supported in Claude sessions only")
-	}
 	a, err := r.store.GetAgent(sessionID, agentID)
 	if err != nil {
 		return Agent{}, err
 	}
 	if a.Role == roleOrchestrator {
 		return Agent{}, errors.New("not a sub-agent")
+	}
+	if r.ProviderForAgent(a) != ProviderClaude {
+		return Agent{}, errors.New("resuming a sub-agent is supported in Claude sessions only")
 	}
 	r.mu.Lock()
 	refused := r.refusing(sessionID)
@@ -584,7 +632,7 @@ func (r *Runner) args(a Agent, workDir, mcpConfig, prompt, systemPrompt, resume,
 // interactive orchestrator, or an interactive Claude sub-agent (its first message
 // is the task; CloseStdin ends it). Codex sub-agents stay one-shot.
 func (r *Runner) stdinAgent(a Agent) bool {
-	return r.Interactive && (a.Role == roleOrchestrator || r.provider(a.SessionID) == ProviderClaude)
+	return r.Interactive && (a.Role == roleOrchestrator || r.ProviderForAgent(a) == ProviderClaude)
 }
 
 func (r *Runner) launch(a Agent, taskTitle, prompt, systemPrompt, resume, model string) (Agent, error) {
@@ -592,10 +640,11 @@ func (r *Runner) launch(a Agent, taskTitle, prompt, systemPrompt, resume, model 
 	mcpConfig := filepath.Join(r.cfg.AgentDir, "agent-"+id+".mcp.json")
 	logPath := filepath.Join(r.cfg.AgentDir, "agent-"+id+".jsonl")
 
+	prov := r.ProviderForAgent(a)
 	preflight := r.Preflight
-	if r.provider(a.SessionID) == ProviderCodex && preflight != nil {
+	if prov == ProviderCodex && preflight != nil {
 		preflight = func() error { return checkCodexPrereqs(r.CodexCommand) }
-	} else if r.provider(a.SessionID) == ProviderAGY && preflight != nil {
+	} else if prov == ProviderAGY && preflight != nil {
 		preflight = func() error { return checkAGYPrereqs(r.AGYCommand) }
 	}
 	if preflight != nil {
@@ -632,10 +681,11 @@ func (r *Runner) launch(a Agent, taskTitle, prompt, systemPrompt, resume, model 
 // start writes the MCP config and starts the process in its own process
 // group. The returned channel yields how it ended once the process is gone.
 func (r *Runner) start(a Agent, mcpConfig, logPath, prompt, systemPrompt, resume, model string) (int, <-chan exit, error) {
-	if r.provider(a.SessionID) == ProviderCodex {
+	prov := r.ProviderForAgent(a)
+	if prov == ProviderCodex {
 		return r.startCodex(a, mcpConfig, logPath, prompt, systemPrompt, resume, model)
 	}
-	if r.provider(a.SessionID) == ProviderAGY {
+	if prov == ProviderAGY {
 		return r.startAGY(a, logPath, prompt, systemPrompt, resume, model)
 	}
 	// Refuse before any file is written; checked again under the lock below.

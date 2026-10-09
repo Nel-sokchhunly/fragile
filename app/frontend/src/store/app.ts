@@ -43,7 +43,7 @@ type AppState = {
   setChangesRepo: (sessionId: number, repo: string) => void
   notify: (e: unknown) => void
   // Throw the backend's error string; the caller shows it inline.
-  createSession: (name: string, workDir: string, provider?: SessionProvider) => Promise<void>
+  createSession: (name: string, workDir: string, provider?: SessionProvider, enabledProviders?: SessionProvider[]) => Promise<void>
   sendMessage: (sessionId: number, text: string, attachments?: Attachment[]) => Promise<void>
   compactSession: (sessionId: number) => Promise<void>
   // Report failures as toasts.
@@ -169,8 +169,16 @@ export const useAppStore = create<AppState>((set, get) => {
       setTimeout(() => set((s) => ({toasts: s.toasts.filter((t) => t.id !== id)})), 6000)
     },
 
-    createSession: async (name, workDir, provider = 'claude') => {
+    createSession: async (name, workDir, provider = 'claude', enabledProviders?: SessionProvider[]) => {
       const se = await api.createSession(name, workDir, provider)
+      if (enabledProviders && enabledProviders.length > 0) {
+        try {
+          await api.setSessionProviders(se.id, enabledProviders)
+          se.enabled_providers = enabledProviders
+        } catch {
+          // ignore error if backend doesn't support setting mid-creation
+        }
+      }
       get().sessionCreated(se)
       select(se.id)
     },

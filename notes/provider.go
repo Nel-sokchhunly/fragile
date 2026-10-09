@@ -34,8 +34,209 @@ func (r *Runner) provider(id int64) string {
 		if s.Provider == ProviderAGY {
 			return ProviderAGY
 		}
+		return ProviderClaude
+	}
+	if a, e := r.store.FindAgent(id); e == nil && a.Provider != "" {
+		return a.Provider
 	}
 	return ProviderClaude
+}
+
+// ProviderForAgent returns the provider for the agent, falling back to its session's provider.
+func (r *Runner) ProviderForAgent(a Agent) string {
+	if a.Provider != "" {
+		return a.Provider
+	}
+	return r.provider(a.SessionID)
+}
+
+func (r *Runner) providerForAgent(a Agent) string {
+	return r.ProviderForAgent(a)
+}
+
+// ProviderForAgentID returns the provider for the agent ID, falling back to its session's provider.
+func (r *Runner) ProviderForAgentID(agentID int64) string {
+	if r.store != nil {
+		if a, err := r.store.FindAgent(agentID); err == nil {
+			return r.ProviderForAgent(a)
+		}
+	}
+	return ProviderClaude
+}
+
+func (r *Runner) providerForAgentID(agentID int64) string {
+	return r.ProviderForAgentID(agentID)
+}
+
+// Provider returns the provider for a session ID, agent ID, or Agent.
+func (r *Runner) Provider(target any) string {
+	switch v := target.(type) {
+	case Agent:
+		return r.ProviderForAgent(v)
+	case *Agent:
+		if v != nil {
+			return r.ProviderForAgent(*v)
+		}
+	case int64:
+		return r.provider(v)
+	case int:
+		return r.provider(int64(v))
+	}
+	return ProviderClaude
+}
+
+type ProviderAdapter interface {
+	Name() string
+	CheckPrereqs(command string) error
+	CheckDetected() (detected bool, reason string)
+	ValidateModel(model string) (string, error)
+	AdjustPrompt(a Agent, prompt string) string
+}
+
+type ProviderInfo struct {
+	Name         string `json:"name"`
+	Available    bool   `json:"available"`
+	Reason       string `json:"reason,omitempty"`
+	DefaultModel string `json:"default_model,omitempty"`
+}
+
+type claudeAdapter struct{}
+
+func (c *claudeAdapter) Name() string { return ProviderClaude }
+
+func (c *claudeAdapter) CheckPrereqs(command string) error {
+	if command == "" {
+		command = "claude"
+	}
+	return checkPrereqs(command)
+}
+
+func (c *claudeAdapter) CheckDetected() (bool, string) {
+	if _, err := exec.LookPath("claude"); err != nil {
+		return false, "claude CLI not found on PATH; install Claude Code and log in"
+	}
+	out, err := exec.Command("claude", "--version").Output()
+	if err != nil {
+		return false, fmt.Sprintf("checking claude CLI: %v", err)
+	}
+	if len(strings.TrimSpace(string(out))) == 0 {
+		return false, "cannot identify Claude CLI version"
+	}
+	return true, ""
+}
+
+func (c *claudeAdapter) ValidateModel(model string) (string, error) {
+	return resolveModel(model)
+}
+
+func (c *claudeAdapter) AdjustPrompt(a Agent, prompt string) string {
+	return prompt
+}
+
+type codexAdapter struct{}
+
+func (c *codexAdapter) Name() string { return ProviderCodex }
+
+func (c *codexAdapter) CheckPrereqs(command string) error {
+	if command == "" {
+		command = "codex"
+	}
+	return checkCodexPrereqs(command)
+}
+
+func (c *codexAdapter) CheckDetected() (bool, string) {
+	if err := checkCodexPrereqs("codex"); err != nil {
+		return false, err.Error()
+	}
+	return true, ""
+}
+
+func (c *codexAdapter) ValidateModel(model string) (string, error) {
+	model = strings.TrimSpace(model)
+	if err := validCodexModel(model); err != nil {
+		return "", err
+	}
+	return model, nil
+}
+
+func (c *codexAdapter) AdjustPrompt(a Agent, prompt string) string {
+	return codexPrompt(a, prompt)
+}
+
+type agyAdapter struct{}
+
+func (a *agyAdapter) Name() string { return ProviderAGY }
+
+func (a *agyAdapter) CheckPrereqs(command string) error {
+	if command == "" {
+		command = "agy"
+	}
+	return checkAGYPrereqs(command)
+}
+
+func (a *agyAdapter) CheckDetected() (bool, string) {
+	if err := checkAGYPrereqs("agy"); err != nil {
+		return false, err.Error()
+	}
+	return true, ""
+}
+
+func (a *agyAdapter) ValidateModel(model string) (string, error) {
+	return resolveAGYModel(model)
+}
+
+func (a *agyAdapter) AdjustPrompt(ag Agent, prompt string) string {
+	return agyPrompt(ag, prompt)
+}
+
+var adapterRegistry = map[string]ProviderAdapter{
+	ProviderClaude: &claudeAdapter{},
+	ProviderCodex:  &codexAdapter{},
+	ProviderAGY:    &agyAdapter{},
+}
+
+func GetAdapter(name string) (ProviderAdapter, bool) {
+	a, ok := adapterRegistry[name]
+	return a, ok
+}
+
+func Adapter(name string) (ProviderAdapter, bool) {
+	return GetAdapter(name)
+}
+
+func Adapters() map[string]ProviderAdapter {
+	out := make(map[string]ProviderAdapter, len(adapterRegistry))
+	for k, v := range adapterRegistry {
+		out[k] = v
+	}
+	return out
+}
+
+func DetectProviders() []ProviderInfo {
+	providers := []string{ProviderClaude, ProviderCodex, ProviderAGY}
+	infos := make([]ProviderInfo, 0, len(providers))
+	for _, name := range providers {
+		adapter, ok := adapterRegistry[name]
+		if !ok {
+			continue
+		}
+		detected, reason := adapter.CheckDetected()
+		info := ProviderInfo{
+			Name:      name,
+			Available: detected,
+			Reason:    reason,
+		}
+		switch name {
+		case ProviderClaude:
+			info.DefaultModel = "claude-sonnet-5-5"
+		case ProviderCodex:
+			info.DefaultModel = ""
+		case ProviderAGY:
+			info.DefaultModel = "gemini-3.8-flash-medium"
+		}
+		infos = append(infos, info)
+	}
+	return infos
 }
 
 // Codex permission profiles require a recent CLI. Older CLIs must fail closed,
