@@ -205,7 +205,7 @@ func TestAGYParseText(t *testing.T) {
 
 func TestAGYParseError(t *testing.T) {
 	var out []map[string]any
-	c := &agyClient{emit: func(v map[string]any) { out = append(out, v) }, text: map[int]string{}, tools: map[int]bool{}}
+	c := &agyClient{emit: func(v map[string]any) { out = append(out, v) }, text: map[int]string{}, tools: map[int]bool{}, turnDone: make(chan struct{})}
 	c.line([]byte(`{"event":"result","result":{"conversation_id":"c","status":"ERROR","error":"quota exceeded"}}`))
 	if r := out[len(out)-1]; r["is_error"] != true || r["result"] != "quota exceeded" || !c.failed {
 		t.Fatalf("result = %v", r)
@@ -220,6 +220,38 @@ func TestAGYParseError(t *testing.T) {
 	c.eof()
 	if r := out[len(out)-1]; r["is_error"] != true || !strings.Contains(fmt.Sprint(r["result"]), "error: not logged in") {
 		t.Fatalf("result = %v", r)
+	}
+}
+
+func TestAGYShutdownEchoIgnored(t *testing.T) {
+	var out []map[string]any
+	turn := make(chan struct{})
+	c := &agyClient{
+		emit:     func(v map[string]any) { out = append(out, v) },
+		text:     map[int]string{},
+		tools:    map[int]bool{},
+		turnDone: turn,
+	}
+
+	// Normal turn completes successfully.
+	c.line([]byte(`{"event":"result","result":{"conversation_id":"c","status":"SUCCESS","response":"done","num_turns":1}}`))
+	select {
+	case <-turn:
+	default:
+		t.Fatal("result did not end the turn")
+	}
+	n := len(out)
+	if n == 0 || out[n-1]["subtype"] != "success" || !c.success || c.failed {
+		t.Fatalf("after first result: out=%v, success=%v, failed=%v", out, c.success, c.failed)
+	}
+
+	// Second result emitted on SIGTERM shutdown echo while turnDone is nil.
+	c.line([]byte(`{"event":"result","result":{"conversation_id":"c","status":"CANCELLED","error":"stream input cancelled: context canceled"}}`))
+	if len(out) != n {
+		t.Fatalf("echo result was emitted: %v", out[n:])
+	}
+	if !c.success || c.failed {
+		t.Fatalf("shutdown echo corrupted status: success=%v, failed=%v", c.success, c.failed)
 	}
 }
 

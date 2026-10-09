@@ -284,6 +284,15 @@ func (c *agyClient) step(v agyEvent) {
 
 // finish handles a turn's result event.
 func (c *agyClient) finish(v agyEvent) {
+	c.mu.Lock()
+	finished := c.turnDone
+	c.turnDone = nil
+	c.mu.Unlock()
+	if finished == nil {
+		// A result with no turn in progress is the shutdown echo of an ended turn; ignore it.
+		return
+	}
+
 	r := v.Result
 	if r.ConversationID != "" {
 		c.conv = r.ConversationID
@@ -315,12 +324,8 @@ func (c *agyClient) finish(v agyEvent) {
 	c.text, c.tools, c.sawText = map[int]string{}, map[int]bool{}, false
 	c.mu.Lock()
 	c.failed, c.success = failed, !failed
-	finished := c.turnDone
-	c.turnDone = nil
 	c.mu.Unlock()
-	if finished != nil {
-		close(finished)
-	}
+	close(finished)
 }
 
 // eof ends a turn agy left without a result (it exited, e.g. on an auth error).
