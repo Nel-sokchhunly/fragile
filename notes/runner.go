@@ -302,10 +302,11 @@ type Runner struct {
 
 	spawnMu sync.Mutex // makes "count running sub-agents, create one" atomic
 
-	mu       sync.Mutex // guards everything below
-	running  map[int]*proc
-	sessions map[int64]*sessionRun
-	stopping bool // set by StopAll; start refuses new processes
+	mu        sync.Mutex // guards everything below
+	running   map[int]*proc
+	sessions  map[int64]*sessionRun
+	stopping  bool           // set by StopAll; start refuses new processes
+	finishing map[int64]bool // agents StopAgent ended; recorded as stopped even if they exit 0
 }
 
 // proc is a live agent process; exited is closed once it has exited.
@@ -459,18 +460,8 @@ func (r *Runner) SpawnSubagent(sessionID, parentID int64, title, task, model str
 // createSubagent adds the task and sub-agent rows unless the session already
 // has maxRunningSubagents running; the caller holds r.spawnMu.
 func (r *Runner) createSubagent(sessionID, parentID int64, title, task string) (Agent, error) {
-	subs, err := r.store.ListAgents(sessionID, "subagent")
-	if err != nil {
+	if err := r.checkSubagentLimit(sessionID); err != nil {
 		return Agent{}, err
-	}
-	n := 0
-	for _, s := range subs {
-		if s.Status == "running" {
-			n++
-		}
-	}
-	if n >= maxRunningSubagents {
-		return Agent{}, fmt.Errorf("%d sub-agents are already running (the limit); wait for some to finish before spawning more", n)
 	}
 	t, err := r.store.CreateTask(sessionID, title, task)
 	if err != nil {
@@ -481,6 +472,77 @@ func (r *Runner) createSubagent(sessionID, parentID int64, title, task string) (
 		return Agent{}, err
 	}
 	return a, r.store.SetTaskAgent(sessionID, t.ID, a.ID)
+}
+
+// checkSubagentLimit errors if the session already has maxRunningSubagents
+// running; the caller holds r.spawnMu.
+func (r *Runner) checkSubagentLimit(sessionID int64) error {
+	subs, err := r.store.ListAgents(sessionID, "subagent")
+	if err != nil {
+		return err
+	}
+	n := 0
+	for _, s := range subs {
+		if s.Status == "running" {
+			n++
+		}
+	}
+	if n >= maxRunningSubagents {
+		return fmt.Errorf("%d sub-agents are already running (the limit); wait for some to finish before spawning more", n)
+	}
+	return nil
+}
+
+// ResumeSubagent relaunches a sub-agent that is no longer running on its own
+// row (same id, token and task), resuming its Claude Code conversation
+// providerSessionID; message is its first user message (the prompt when not
+// interactive). Its output log is appended to. Codex and Antigravity
+// sub-agents cannot be resumed.
+func (r *Runner) ResumeSubagent(sessionID, agentID int64, providerSessionID, message string) (Agent, error) {
+	if providerSessionID == "" {
+		return Agent{}, errors.New("no provider conversation to resume")
+	}
+	if r.provider(sessionID) != ProviderClaude {
+		return Agent{}, errors.New("resuming a sub-agent is supported in Claude sessions only")
+	}
+	a, err := r.store.GetAgent(sessionID, agentID)
+	if err != nil {
+		return Agent{}, err
+	}
+	if a.Role == roleOrchestrator {
+		return Agent{}, errors.New("not a sub-agent")
+	}
+	r.mu.Lock()
+	refused := r.refusing(sessionID)
+	live := false
+	for _, p := range r.running {
+		live = live || p.agentID == agentID
+	}
+	r.mu.Unlock()
+	switch {
+	case refused:
+		return Agent{}, errors.New("the session is stopped; resume the session first")
+	case live || a.Status == "running":
+		return Agent{}, fmt.Errorf("agent %d is still running", agentID)
+	}
+	t, err := r.store.GetTask(sessionID, a.TaskID)
+	if err != nil {
+		return Agent{}, err
+	}
+	r.spawnMu.Lock() // like createSubagent: count, then the row counts as running
+	if err = r.checkSubagentLimit(sessionID); err == nil {
+		err = r.store.SetAgentStatus(sessionID, a.ID, "running", nil)
+	}
+	r.spawnMu.Unlock()
+	if err != nil {
+		return Agent{}, err
+	}
+	if err := r.store.SetTaskStatus(sessionID, t.ID, "working"); err != nil {
+		r.finish(a, t.Title, -1, err.Error(), false) // the row must not stay running without a process
+		return Agent{}, err
+	}
+	a.Status = "running"
+	return r.launch(a, t.Title, message, SubagentPrompt(a.ID, t.Description, r.workDir(sessionID), r.stdinAgent(a)), providerSessionID, a.Model)
 }
 
 // args builds the claude command line. The prompt goes after "--" so a task
@@ -555,7 +617,11 @@ func (r *Runner) launch(a Agent, taskTitle, prompt, systemPrompt, resume, model 
 	go func() {
 		defer r.sessionDone(a.SessionID)
 		x := <-done
-		r.finish(a, taskTitle, x.code, "", x.stopped)
+		r.mu.Lock()
+		finished := r.finishing[a.ID]
+		delete(r.finishing, a.ID)
+		r.mu.Unlock()
+		r.finish(a, taskTitle, x.code, "", (x.stopped && x.code != 0) || finished)
 	}()
 	if setErr != nil {
 		return Agent{}, setErr
@@ -583,7 +649,11 @@ func (r *Runner) start(a Agent, mcpConfig, logPath, prompt, systemPrompt, resume
 	if err := os.WriteFile(mcpConfig, []byte(cfg), 0o600); err != nil {
 		return 0, nil, err
 	}
-	out, err := os.Create(logPath)
+	flags := os.O_WRONLY | os.O_CREATE | os.O_TRUNC
+	if resume != "" { // a resumed sub-agent keeps its row and log file
+		flags = os.O_WRONLY | os.O_CREATE | os.O_APPEND
+	}
+	out, err := os.OpenFile(logPath, flags, 0o666)
 	if err != nil {
 		return 0, nil, err
 	}
@@ -653,19 +723,20 @@ func (r *Runner) refusing(sessionID int64) bool {
 }
 
 // finish records the outcome of an agent process (or of a failed launch, code
-// -1). A process the runner killed on purpose (stopped) is recorded as
+// -1). A process the runner ended on purpose (stopped) is recorded as
 // "stopped" and its unfinished task becomes "blocked", as after a crash (a
-// task already done stays done); one that exited 0 anyway is just "exited".
+// task already done stays done). The launch goroutine passes stopped false for
+// one stop killed that exited 0 anyway (just "exited"), true for one StopAgent ended.
 func (r *Runner) finish(a Agent, taskTitle string, code int, launchErr string, stopped bool) {
 	status, taskStatus := "crashed", "blocked"
 	switch {
-	case code == 0:
-		status, taskStatus = "exited", "done"
 	case stopped:
 		status = "stopped"
 		if t, err := r.store.GetTask(a.SessionID, a.TaskID); err == nil && t.Status == "done" {
 			taskStatus = ""
 		}
+	case code == 0:
+		status, taskStatus = "exited", "done"
 	}
 	payload := map[string]any{"role": a.Role, "status": status, "exit_code": code}
 	if launchErr != "" {
@@ -761,6 +832,53 @@ func (r *Runner) stop(only *int64) {
 	for _, sr := range runs {
 		sr.wg.Wait()
 	}
+}
+
+// StopAgent ends one agent for the user; it is recorded as "stopped". With
+// graceful its stdin is closed first, so an idle agent exits by itself; else,
+// or if it is still alive after killAfter, its process group gets SIGTERM, then
+// SIGKILL after killAfter more. It returns once the process has exited, or
+// ErrNotRunning if the agent has none.
+func (r *Runner) StopAgent(agentID int64, graceful bool) error {
+	r.mu.Lock()
+	pid, p := 0, (*proc)(nil)
+	for id, q := range r.running {
+		if q.agentID == agentID {
+			pid, p = id, q
+		}
+	}
+	if p == nil {
+		r.mu.Unlock()
+		return ErrNotRunning
+	}
+	p.killed = true
+	if r.finishing == nil {
+		r.finishing = map[int64]bool{}
+	}
+	r.finishing[agentID] = true
+	r.mu.Unlock()
+	wait := func() bool {
+		select {
+		case <-p.exited:
+			return true
+		case <-time.After(killAfter):
+			return false
+		}
+	}
+	if graceful && p.stdin != nil {
+		p.stdin.mu.Lock()
+		p.stdin.w.Close()
+		p.stdin.mu.Unlock()
+		if wait() {
+			return nil
+		}
+	}
+	r.signal(pid, syscall.SIGTERM)
+	if !wait() {
+		r.signal(pid, syscall.SIGKILL)
+		<-p.exited
+	}
+	return nil
 }
 
 // signal signals pid's process group only while pid is still in running, so a

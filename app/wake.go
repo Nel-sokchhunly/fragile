@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"strings"
@@ -45,6 +46,7 @@ type wakeQueue struct {
 	timer     *time.Timer
 	sessionID int64 // sub-agent queues only
 	idle      bool  // sub-agent queues only: its turn ended without a done note
+	paused    bool  // sub-agent queues only: PauseAgent; no automatic wakes until ResumeAgent
 }
 
 // queueWake (from react) queues the event's wake lines, if it has any, and arms the debounces.
@@ -252,7 +254,8 @@ func (a *App) dropSubWakes(agentID int64) {
 }
 
 // flushSub delivers the sub-agent's pending lines as one message if it is
-// idle; while it is mid-turn they stay queued for subTurnEnded.
+// idle; while it is mid-turn they stay queued for subTurnEnded, while it is
+// paused for ResumeAgent.
 func (a *App) flushSub(agentID int64) {
 	a.wq.mu.Lock()
 	q := a.wq.subs[agentID]
@@ -264,31 +267,41 @@ func (a *App) flushSub(agentID int64) {
 		q.timer.Stop()
 		q.timer = nil
 	}
-	if !q.idle || len(q.lines) == 0 {
+	if !q.idle || q.paused || len(q.lines) == 0 {
 		a.wq.mu.Unlock()
 		return
 	}
 	lines, sessionID := q.lines, q.sessionID
-	q.lines, q.idle = nil, false // busy from the message on
+	q.lines = nil
+	a.setActivity(agentID, q, false, false) // busy from the message on
 	a.wq.mu.Unlock()
-	// Stored like the orchestrator's messages: the row first, published once written.
-	msg := wakeMessage(lines)
+	// A failed write means it exited; its status change drops the queue.
+	if err := a.sendSub(sessionID, agentID, wakeMessage(lines)); err != nil && !errors.Is(err, notes.ErrNotRunning) {
+		log.Printf("agent %d: storing wake: %v", agentID, err)
+	}
+}
+
+// sendSub sends a message to a sub-agent's stdin, outside any lock. Stored like
+// the orchestrator's messages: the row first, removed if the write fails,
+// published once written.
+func (a *App) sendSub(sessionID, agentID int64, msg string) error {
 	b, _ := json.Marshal(userMessage{Text: msg})
 	ev, err := a.store.AppendAgentEvent(sessionID, agentID, evUserMessage, string(b))
 	if err != nil {
-		log.Printf("agent %d: storing wake: %v", agentID, err)
-		return
+		return err
 	}
 	if err := a.runner.SendUser(agentID, msg); err != nil {
 		a.store.DeleteAgentEvent(sessionID, agentID, ev.ID)
-		return // it exited; its status change drops the queue
+		return err
 	}
 	a.publish(notes.Agent{ID: agentID, SessionID: sessionID, Role: "subagent"}, ev)
+	return nil
 }
 
 // subTurnEnded runs when a sub-agent's turn ends, outside any lock. With its
 // done note posted its stdin is closed, so it exits; otherwise it is idle:
-// pending notes go out now, else the orchestrator is told it waits.
+// pending notes go out now, else the orchestrator is told it waits. A paused
+// one keeps its notes and the orchestrator is told it is paused.
 func (a *App) subTurnEnded(ag notes.Agent) {
 	if !a.runner.Running(ag.ID) {
 		return // one-shot or Codex: no stdin, it exits on its own
@@ -308,14 +321,17 @@ func (a *App) subTurnEnded(ag notes.Agent) {
 	}
 	a.wq.mu.Lock()
 	q := a.subQueue(ag.SessionID, ag.ID)
-	q.idle = true
-	pending := len(q.lines) > 0
+	a.setActivity(ag.ID, q, true, q.paused)
+	paused, pending := q.paused, len(q.lines) > 0
 	a.wq.mu.Unlock()
-	if pending {
+	switch {
+	case paused:
+		a.queueOrchestrator(ag.SessionID, fmt.Sprintf("agent %d paused by the user", ag.ID))
+	case pending:
 		a.flushSub(ag.ID)
-		return
+	default:
+		a.queueOrchestrator(ag.SessionID, fmt.Sprintf("agent %d idle, waiting (no done note)", ag.ID))
 	}
-	a.queueOrchestrator(ag.SessionID, fmt.Sprintf("agent %d idle, waiting (no done note)", ag.ID))
 }
 
 // turnEnded runs when an orchestrator turn ends (busy true -> false), outside any

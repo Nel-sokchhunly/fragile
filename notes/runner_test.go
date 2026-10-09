@@ -740,6 +740,57 @@ func TestRunnerResumeOrchestrator(t *testing.T) {
 	}
 }
 
+// ResumeSubagent relaunches a sub-agent on its own row with --resume, appending to its log.
+func TestRunnerResumeSubagent(t *testing.T) {
+	r, store, sess, _ := newTestRunner(t, `echo "args: $*"`)
+	orch, _ := store.CreateAgent(sess.ID, "orchestrator", 0, 0)
+	a, err := r.SpawnSubagent(sess.ID, orch.ID, "", "build it", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	r.Wait(sess.ID)
+	if _, err := r.ResumeSubagent(sess.ID, a.ID, "", "go on"); err == nil {
+		t.Fatal("resume without a Claude session id succeeded")
+	}
+	if _, err := r.ResumeSubagent(sess.ID, orch.ID, "abc-123", "go on"); err == nil {
+		t.Fatal("resumed the orchestrator as a sub-agent")
+	}
+	b, err := r.ResumeSubagent(sess.ID, a.ID, "abc-123", "go on")
+	if err != nil {
+		t.Fatal(err)
+	}
+	r.Wait(sess.ID)
+	if b.ID != a.ID {
+		t.Fatalf("resumed as agent %d, want %d", b.ID, a.ID)
+	}
+	out, _ := os.ReadFile(a.LogPath)
+	if s := string(out); strings.Count(s, "args:") != 2 || !strings.Contains(s, "--resume abc-123") || !strings.Contains(s, "-- go on") {
+		t.Fatalf("log = %q", s)
+	}
+	if got, _ := store.GetAgent(sess.ID, a.ID); got.Status != "exited" {
+		t.Fatalf("status = %s", got.Status)
+	}
+}
+
+// StopAgent records the agent as stopped even when it exits 0 on SIGTERM.
+func TestRunnerStopAgent(t *testing.T) {
+	r, store, sess, _ := newTestRunner(t, `trap 'exit 0' TERM; sleep 30 & wait`)
+	a, err := r.StartOrchestrator(sess.ID, "x")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := r.StopAgent(a.ID, false); err != nil {
+		t.Fatal(err)
+	}
+	r.Wait(sess.ID)
+	if got, _ := store.GetAgent(sess.ID, a.ID); got.Status != "stopped" {
+		t.Fatalf("status = %s", got.Status)
+	}
+	if err := r.StopAgent(a.ID, false); !errors.Is(err, ErrNotRunning) {
+		t.Fatalf("second stop: %v", err)
+	}
+}
+
 // An explicit title wins over the task's first line.
 func TestRunnerSpawnTitle(t *testing.T) {
 	r, store, sess, _ := newTestRunner(t, `exit 0`)

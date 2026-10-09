@@ -1,5 +1,19 @@
 export namespace main {
-	
+
+	export class AgentActivity {
+	    busy: boolean;
+	    paused: boolean;
+
+	    static createFrom(source: any = {}) {
+	        return new AgentActivity(source);
+	    }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.busy = source["busy"];
+	        this.paused = source["paused"];
+	    }
+	}
 	export class Attachment {
 	    name: string;
 	    media_type: string;
@@ -279,11 +293,12 @@ export namespace main {
 	    notes: notes.Note[];
 	    chat: ChatItem[];
 	    escalations: notes.Escalation[];
-	
+	    activity: Record<number, AgentActivity>;
+
 	    static createFrom(source: any = {}) {
 	        return new SessionSnapshot(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.session = this.convertValues(source["session"], notes.Session);
@@ -292,6 +307,7 @@ export namespace main {
 	        this.notes = this.convertValues(source["notes"], notes.Note);
 	        this.chat = this.convertValues(source["chat"], ChatItem);
 	        this.escalations = this.convertValues(source["escalations"], notes.Escalation);
+	        this.activity = this.convertValues(source["activity"], AgentActivity, true);
 	    }
 	
 		convertValues(a: any, classs: any, asMap: boolean = false): any {

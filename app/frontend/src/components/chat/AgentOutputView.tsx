@@ -1,8 +1,9 @@
 import {memo, useEffect, useState} from 'react'
 import {Virtuoso} from 'react-virtuoso'
-import {ArrowLeft, ChevronRight} from 'lucide-react'
+import {ArrowLeft, ChevronRight, Pause, Play, Square} from 'lucide-react'
 import {Button} from '@/components/ui/button'
 import {Collapsible, CollapsibleContent, CollapsibleTrigger} from '@/components/ui/collapsible'
+import {Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle} from '@/components/ui/dialog'
 import {Tip, Tooltip, TooltipContent, TooltipTrigger} from '@/components/ui/tooltip'
 import {Markdown} from '@/components/Markdown'
 import {useNow} from '@/hooks/use-now'
@@ -79,6 +80,16 @@ export function AgentOutputView({sessionId, agentId}: {sessionId: number; agentI
   const loaded = useAppStore((s) => !!s.agentLoaded[agentId])
   const load = useAppStore((s) => s.loadAgentEvents)
   const back = useAppStore((s) => s.selectAgent)
+  const act = useAppStore((s) => s.activity[agentId])
+  const hasDone = useAppStore((s) => !!s.data[sessionId]?.notes.some((n) => n.type === 'done' && n.author_agent_id === agentId))
+  const {pauseAgent, resumeAgent, finishAgent} = useAppStore.getState()
+  const [confirmFinish, setConfirmFinish] = useState(false)
+  useEffect(() => setConfirmFinish(false), [agentId])
+  const running = agent?.status === 'running'
+  const paused = running && !!act?.paused
+  const canPause = running && !!act?.busy && !paused
+  const canResume = paused || (running && !act?.busy) || (!!agent && !running && !hasDone)
+  const sub = agent?.role === 'subagent'
   useEffect(() => { void load(agentId) }, [load, agentId]) // no-op once cached; live events keep appending
   const start = agent ? Date.parse(agent.created_at) : 0
 
@@ -94,9 +105,25 @@ export function AgentOutputView({sessionId, agentId}: {sessionId: number; agentI
         <div className="grid min-w-0 flex-1">
           <h1 className="truncate text-title font-semibold">
             {agentLabel(agent, task)}{agent && <> · <span className={cn('font-mono text-xs font-normal', STATE_CLS[agent.status])}>{agentState(agent)}</span></>}
+            {paused && <span className="ml-1.5 font-mono text-xs font-normal text-muted-foreground">paused</span>}
           </h1>
           {agent && <Meta agent={agent} count={events.length}/>}
         </div>
+        {sub && canPause && <Tip content="Pause: end the current turn and hold" side="bottom"><Button variant="ghost" size="icon-sm" onClick={() => void pauseAgent(agentId)} aria-label="Pause agent"><Pause/></Button></Tip>}
+        {sub && canResume && <Tip content="Resume" side="bottom"><Button variant="ghost" size="icon-sm" onClick={() => void resumeAgent(agentId)} aria-label="Resume agent"><Play/></Button></Tip>}
+        {sub && running && <Tip content="Finish agent" side="bottom"><Button variant="ghost" size="icon-sm" onClick={() => setConfirmFinish(true)} aria-label="Finish agent"><Square/></Button></Tip>}
+        <Dialog open={confirmFinish} onOpenChange={setConfirmFinish}>
+          <DialogContent className="sm:max-w-sm">
+            <DialogHeader>
+              <DialogTitle>Finish {agentLabel(agent, task)}?</DialogTitle>
+              <DialogDescription>Ends this agent now. It is recorded as stopped and the orchestrator is told.</DialogDescription>
+            </DialogHeader>
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setConfirmFinish(false)}>Cancel</Button>
+              <Button variant="destructive" onClick={() => { setConfirmFinish(false); void finishAgent(agentId) }}>Finish</Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
       </header>
       {task?.description && <Tip content={task.description} side="bottom"><p className="truncate border-b px-6 py-1 text-[13px] text-text-secondary">{task.description}</p></Tip>}
       {/* Absolutely positioned list: its height never depends on percentage resolution inside flex. */}
