@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -81,11 +82,14 @@ func TestMCPRolesAndNotes(t *testing.T) {
 	if got := toolNames(t, ca); len(got) != 4 {
 		t.Fatalf("subagent tools = %v, want only read_notes, post_note, update_note, wait_for_notes", got)
 	}
-	if got := toolNames(t, co); len(got) != 7 {
-		t.Fatalf("orchestrator tools = %v, want 7", got)
+	if got := toolNames(t, co); len(got) != 8 {
+		t.Fatalf("orchestrator tools = %v, want 8", got)
 	}
 	if out, isErr := call(t, ca, "escalate_to_user", map[string]any{"question": "q", "context": "c"}); !isErr {
 		t.Fatalf("subagent escalate_to_user allowed: %s", out)
+	}
+	if out, isErr := call(t, ca, "stop_subagent", map[string]any{"id": 1}); !isErr {
+		t.Fatalf("subagent stop_subagent allowed: %s", out)
 	}
 
 	out, isErr := call(t, ca, "post_note", map[string]any{"scope": "session", "type": "heads_up", "content": "renamed Foo"})
@@ -292,6 +296,73 @@ func TestMCPSpawnSubagent(t *testing.T) {
 	}
 }
 
+func TestMCPStopSubagent(t *testing.T) {
+	s, ts := newTestServer(t)
+	sess, _ := s.Store.CreateSession("test")
+	dir := t.TempDir()
+	s.Runner = NewRunner(Config{Addr: strings.TrimPrefix(ts.URL, "http://"), AgentDir: dir, WorkDir: dir}, s.Store, s.Log)
+	s.Runner.Preflight = nil
+	s.Runner.Command = writeFake(t, dir, `trap 'exit 0' TERM; sleep 30 & wait`)
+	orch, _ := s.Store.CreateAgent(sess.ID, "orchestrator", 0, 0)
+	co := connect(t, ts, orch.Token)
+
+	// Unknown id returns an error
+	if out, isErr := call(t, co, "stop_subagent", map[string]any{"id": 999}); !isErr || !strings.Contains(out, "sub-agent 999 not found") {
+		t.Fatalf("stop_subagent unknown id = %s, want error", out)
+	}
+
+	// Orchestrator cannot be stopped via stop_subagent
+	if out, isErr := call(t, co, "stop_subagent", map[string]any{"id": orch.ID}); !isErr || !strings.Contains(out, fmt.Sprintf("sub-agent %d not found", orch.ID)) {
+		t.Fatalf("stop_subagent orchestrator = %s, want error", out)
+	}
+
+	out, isErr := call(t, co, "spawn_subagent", map[string]any{"task": "write the thing", "title": "Writer"})
+	if isErr {
+		t.Fatal(out)
+	}
+	var res struct {
+		AgentID int64 `json:"agent_id"`
+	}
+	if err := json.Unmarshal([]byte(out), &res); err != nil {
+		t.Fatal(err)
+	}
+	subID := res.AgentID
+
+	sub, err := s.Store.GetAgent(sess.ID, subID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cs := connect(t, ts, sub.Token)
+
+	// A sub-agent caller cannot call stop_subagent
+	if out, isErr := call(t, cs, "stop_subagent", map[string]any{"id": subID}); !isErr {
+		t.Fatalf("sub-agent caller calling stop_subagent allowed: %s", out)
+	}
+
+	// Stop a running sub-agent
+	out, isErr = call(t, co, "stop_subagent", map[string]any{"id": subID})
+	if isErr || !strings.Contains(out, fmt.Sprintf("Sub-agent %d stopped.", subID)) {
+		t.Fatalf("stop_subagent = %s, isErr = %v", out, isErr)
+	}
+	s.Runner.Wait(sess.ID)
+
+	got, err := s.Store.GetAgent(sess.ID, subID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Status != "stopped" {
+		t.Fatalf("agent status = %q, want stopped", got.Status)
+	}
+	if task, err := s.Store.GetTask(sess.ID, got.TaskID); err != nil || task.Status != "blocked" {
+		t.Fatalf("task status = %q, want blocked, err %v", task.Status, err)
+	}
+
+	// Calling stop_subagent on an agent that is not running returns an error
+	if out, isErr := call(t, co, "stop_subagent", map[string]any{"id": subID}); !isErr || !strings.Contains(out, fmt.Sprintf("sub-agent %d is not running", subID)) {
+		t.Fatalf("stop_subagent on non-running agent = %s, want not running error", out)
+	}
+}
+
 // Two sessions share one store and server; nothing of one is visible to the other.
 func TestSessionIsolation(t *testing.T) {
 	s, ts := newTestServer(t)
@@ -339,6 +410,9 @@ func TestSessionIsolation(t *testing.T) {
 		}
 		if out, isErr := call(t, x.me.co, "get_subagent_status", map[string]any{"id": x.other.sub.ID}); !isErr {
 			t.Fatalf("status of another session's sub-agent allowed: %s", out)
+		}
+		if out, isErr := call(t, x.me.co, "stop_subagent", map[string]any{"id": x.other.sub.ID}); !isErr {
+			t.Fatalf("stop of another session's sub-agent allowed: %s", out)
 		}
 		otherNote := noteIDs(t, s.Store, x.other.sess.ID)[0]
 		if out, isErr := call(t, x.me.cs, "update_note", map[string]any{"id": otherNote, "status": "resolved"}); !isErr {

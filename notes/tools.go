@@ -50,6 +50,8 @@ func (s *Server) newMCPServer(a Agent, cache *mcp.SchemaCache) *mcp.Server {
 		"Returns the new agent id and task id.", true, s.spawnSubagent)
 	addTool(srv, a, "get_subagent_status", "Orchestrator only. Status of one sub-agent (pass id), or of all sub-agents in the session (omit id): "+
 		"agent and task status, pid, times, exit code, its latest note (short summary; full note via read_notes), and whether it posted a done note.", true, s.subagentStatus)
+	addTool(srv, a, "stop_subagent", "Orchestrator only. Stop a running sub-agent (e.g. one that is stuck or no longer needed). "+
+		"It is recorded as stopped, not crashed; its unfinished task becomes blocked. Returns once it has exited.", true, s.stopSubagent)
 	addTool(srv, a, "escalate_to_user", "Orchestrator only. Raise a product decision you cannot reasonably make yourself to the user. "+
 		"It returns at once. In the desktop app the user's answer arrives later as a new user message; in the one-shot CLI it is only logged and no answer comes back.", true, s.escalate)
 	return srv
@@ -351,6 +353,29 @@ func (s *Server) subagentStatus(_ context.Context, caller Agent, in statusIn) (a
 		return out[0], nil
 	}
 	return out, nil
+}
+
+type stopSubagentIn struct {
+	ID int64 `json:"id" jsonschema:"sub-agent id"`
+}
+
+func (s *Server) stopSubagent(_ context.Context, caller Agent, in stopSubagentIn) (any, error) {
+	a, err := s.Store.GetAgent(caller.SessionID, in.ID)
+	if errors.Is(err, ErrNotFound) || err == nil && a.Role != "subagent" {
+		return nil, fmt.Errorf("sub-agent %d not found", in.ID)
+	} else if err != nil {
+		return nil, err
+	}
+	if s.Runner == nil {
+		return nil, errors.New("sub-agent runner not configured")
+	}
+	if err := s.Runner.StopAgent(in.ID, false); err != nil {
+		if errors.Is(err, ErrNotRunning) {
+			return nil, fmt.Errorf("sub-agent %d is not running", in.ID)
+		}
+		return nil, err
+	}
+	return fmt.Sprintf("Sub-agent %d stopped.", in.ID), nil
 }
 
 type escalateIn struct {
