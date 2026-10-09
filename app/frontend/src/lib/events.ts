@@ -47,6 +47,9 @@ export type EventMap = {
   // Upsert by `id` into the session's orchestrator chat (an answered escalation re-arrives with the same id).
   chat_item: Envelope<ChatItem>
 
+  // The backend started a compaction itself (auto-compact): show the "compacting" state until the orchestrator's next result.
+  session_compacting: Envelope<null>
+
   // Notes board. author_agent_id 0 = the user.
   note_posted: Envelope<Note>
   note_updated: Envelope<Note>
@@ -85,6 +88,7 @@ export function subscribeEvents() {
     on('note_updated', patch((d, n: Note) => ({...d, notes: upsert(d.notes, n)}))),
     // The chat shows escalations through chat_item; this only keeps a displayed one in step.
     on('escalation', patch((d, x: Escalation) => ({...d, chat: d.chat.map((c) => (c.kind === 'escalation' && c.escalation.id === x.id ? {...c, escalation: x} : c))}))),
+    on('session_compacting', (e) => useAppStore.setState((s) => ({compacting: {...s.compacting, [e.session_id]: Date.now()}}))),
     on('agent_event', (e) => st().agentEvent(e.session_id, e.payload)),
   ]
   return () => offs.forEach((off) => off())

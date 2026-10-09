@@ -445,7 +445,7 @@ func (r *Runner) SpawnSubagent(sessionID, parentID int64, title, task, model str
 	if err != nil {
 		return Agent{}, err
 	}
-	return r.launch(a, title, task, SubagentPrompt(a.ID, task, r.workDir(sessionID)), "", model)
+	return r.launch(a, title, task, SubagentPrompt(a.ID, task, r.workDir(sessionID), r.stdinAgent(a)), "", model)
 }
 
 // createSubagent adds the task and sub-agent rows unless the session already
@@ -510,8 +510,12 @@ func (r *Runner) args(a Agent, workDir, mcpConfig, prompt, systemPrompt, resume,
 	return append(args, "--", prompt)
 }
 
-// stdinAgent reports whether the agent is the long-lived orchestrator fed over stdin.
-func (r *Runner) stdinAgent(a Agent) bool { return r.Interactive && a.Role == roleOrchestrator }
+// stdinAgent reports whether the agent is long-lived and fed over stdin: an
+// interactive orchestrator, or an interactive Claude sub-agent (its first message
+// is the task; CloseStdin ends it). Codex sub-agents stay one-shot.
+func (r *Runner) stdinAgent(a Agent) bool {
+	return r.Interactive && (a.Role == roleOrchestrator || r.provider(a.SessionID) == ProviderClaude)
+}
 
 func (r *Runner) launch(a Agent, taskTitle, prompt, systemPrompt, resume, model string) (Agent, error) {
 	id := strconv.FormatInt(a.ID, 10)
@@ -624,6 +628,9 @@ func (r *Runner) start(a Agent, mcpConfig, logPath, prompt, systemPrompt, resume
 		close(exited)
 		code <- exit{cmd.ProcessState.ExitCode(), killed} // -1 if killed by a signal
 	}()
+	if stdin != nil && a.Role != roleOrchestrator {
+		r.SendUser(a.ID, prompt) // the task; a failed write means it died, which finish records
+	}
 	return pid, code, nil
 }
 
@@ -781,14 +788,7 @@ func (r *Runner) SendUserContent(agentID int64, blocks []map[string]any) error {
 	if len(blocks) == 0 {
 		return errors.New("message has no content")
 	}
-	r.mu.Lock()
-	var in *stdinPipe
-	for _, p := range r.running {
-		if p.agentID == agentID {
-			in = p.stdin
-		}
-	}
-	r.mu.Unlock()
+	in := r.stdinOf(agentID)
 	if in == nil {
 		return ErrNotRunning
 	}
@@ -803,6 +803,29 @@ func (r *Runner) SendUserContent(agentID int64, blocks []map[string]any) error {
 		return fmt.Errorf("%w: %v", ErrNotRunning, err)
 	}
 	return nil
+}
+
+// CloseStdin closes the agent's stdin, so a Claude agent fed over stdin exits
+// once its current turn is over. A no-op if it has no live stdin.
+func (r *Runner) CloseStdin(agentID int64) {
+	if in := r.stdinOf(agentID); in != nil {
+		in.mu.Lock()
+		in.w.Close()
+		in.mu.Unlock()
+	}
+}
+
+// stdinOf returns the agent's live stdin, nil if it has none.
+func (r *Runner) stdinOf(agentID int64) *stdinPipe {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	var in *stdinPipe
+	for _, p := range r.running {
+		if p.agentID == agentID {
+			in = p.stdin
+		}
+	}
+	return in
 }
 
 // maxLine bounds one buffered output line; longer lines are still written to the

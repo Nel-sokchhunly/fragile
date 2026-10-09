@@ -58,6 +58,10 @@ export function GetSession(arg1) {
   return window['go']['main']['App']['GetSession'](arg1);
 }
 
+export function GetSettings() {
+  return window['go']['main']['App']['GetSettings']();
+}
+
 export function InterruptSession(arg1) {
   return window['go']['main']['App']['InterruptSession'](arg1);
 }
@@ -80,6 +84,10 @@ export function ResumeSession(arg1) {
 
 export function SendMessage(arg1, arg2, arg3) {
   return window['go']['main']['App']['SendMessage'](arg1, arg2, arg3);
+}
+
+export function SetSettings(arg1) {
+  return window['go']['main']['App']['SetSettings'](arg1);
 }
 
 export function StopSession(arg1) {

@@ -40,6 +40,9 @@ export type Agent = {
 export type LimitWindow = {utilization: number; resets_at: number}
 export type RateLimit = {five_hour: LimitWindow | null; seven_day: LimitWindow | null}
 
+// User preferences (Go: Settings). auto_compact_tokens: 0 = off, else 20000..1000000.
+export type Settings = {auto_compact_tokens: number}
+
 export type Task = {
   id: number
   session_id: number

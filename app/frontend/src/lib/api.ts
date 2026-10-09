@@ -1,9 +1,9 @@
 import {
-  AddNote, AnswerEscalation, CompactSession, CreateSessionWithProvider, DeleteSession, GetAgentEventTail, GetAgentEvents, GetAttachment, GetChanges, GetFileDiff, GetRateLimit, GetSession,
-  InterruptSession, ListRepos, ListSessions, PickDirectory, ResumeSession, SendMessage, StopSession, TerminalClose, TerminalOpen,
+  AddNote, AnswerEscalation, CompactSession, CreateSessionWithProvider, DeleteSession, GetAgentEventTail, GetAgentEvents, GetAttachment, GetChanges, GetFileDiff, GetRateLimit, GetSession, GetSettings,
+  InterruptSession, ListRepos, ListSessions, PickDirectory, ResumeSession, SendMessage, SetSettings, StopSession, TerminalClose, TerminalOpen,
   TerminalResize, TerminalWrite, UpdateNote,
 } from '../../wailsjs/go/main/App'
-import type {Agent, AgentEvent, Attachment, Changes, ChatItem, Escalation, FileDiff, Note, NoteType, RateLimit, Session, Task} from './types'
+import type {Agent, AgentEvent, Attachment, Changes, ChatItem, Escalation, FileDiff, Note, NoteType, RateLimit, Session, Settings, Task} from './types'
 
 // Typed wrappers around the generated Wails bindings (wailsjs/go, regenerate with `wails generate module`
 // from app/). The generated typings use classes and plain `string` for enums; the values are plain JSON
@@ -28,6 +28,10 @@ export const api = {
   createSession: (name: string, workDir: string, provider: 'claude' | 'codex' = 'claude') => as<Session>(CreateSessionWithProvider(name, workDir, provider)),
   /** Latest subscription limits seen, null until any agent reported them. */
   getRateLimit: () => as<RateLimit | null>(GetRateLimit()),
+  /** User preferences, with defaults for anything never set. */
+  getSettings: () => as<Settings>(GetSettings()),
+  /** Validates and stores the preferences; rejects with the reason (e.g. an auto-compact threshold out of range). */
+  setSettings: (s: Settings): Promise<void> => SetSettings(s),
   /** All sessions, newest first. */
   listSessions: () => as<Session[]>(ListSessions()),
   /** Full state of a session from the database (live or past). */

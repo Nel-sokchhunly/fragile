@@ -31,6 +31,8 @@ export function GetRateLimit():Promise<main.RateLimit>;
 
 export function GetSession(arg1:number):Promise<main.SessionSnapshot>;
 
+export function GetSettings():Promise<main.Settings>;
+
 export function InterruptSession(arg1:number):Promise<void>;
 
 export function ListRepos(arg1:number):Promise<Array<string>>;
@@ -42,6 +44,8 @@ export function PickDirectory():Promise<string>;
 export function ResumeSession(arg1:number):Promise<void>;
 
 export function SendMessage(arg1:number,arg2:string,arg3:Array<main.Attachment>):Promise<void>;
+
+export function SetSettings(arg1:main.Settings):Promise<void>;
 
 export function StopSession(arg1:number):Promise<void>;
 

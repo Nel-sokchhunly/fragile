@@ -68,6 +68,10 @@ type App struct {
 	startMu sync.Mutex // one orchestrator start/resume, or session create, at a time
 
 	terms terminals // session -> its terminal pane's shell (terminal.go)
+
+	prefs prefs // user settings (settings.go) and auto-compact bookkeeping (autocompact.go)
+
+	wq wakeQueues // session -> pending wake events for its orchestrator (wake.go)
 }
 
 func NewApp() *App { return &App{ready: make(chan struct{})} }

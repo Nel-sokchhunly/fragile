@@ -397,6 +397,18 @@ func (s *Store) SetAgentContext(sessionID, id int64, used, window int) error {
 		used, window, id, sessionID))
 }
 
+// GetSetting returns the stored (JSON) value of an app setting, or ErrNotFound if it was never set.
+func (s *Store) GetSetting(key string) (string, error) {
+	var v string
+	return v, one(s.db.QueryRow(`SELECT value FROM settings WHERE key = ?`, key).Scan(&v))
+}
+
+// PutSetting stores the (JSON) value of an app setting, replacing any earlier one.
+func (s *Store) PutSetting(key, value string) error {
+	_, err := s.db.Exec(`INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value`, key, value)
+	return err
+}
+
 // SetAgentModel records the model the agent runs on.
 func (s *Store) SetAgentModel(sessionID, id int64, model string) error {
 	return affected(s.db.Exec(`UPDATE agent_instances SET model = ? WHERE id = ? AND session_id = ?`,

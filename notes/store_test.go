@@ -237,8 +237,19 @@ func TestMigratePhase0Database(t *testing.T) {
 
 	var v int
 	s.db.QueryRow(`PRAGMA user_version`).Scan(&v)
-	if v != 7 {
-		t.Fatalf("user_version = %d, want 7", v)
+	if v != 8 {
+		t.Fatalf("user_version = %d, want 8", v)
+	}
+	if _, err := s.GetSetting("k"); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("unset setting: %v", err)
+	}
+	for _, val := range []string{"1", "2"} { // put twice: the second overwrites
+		if err := s.PutSetting("k", val); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if got, err := s.GetSetting("k"); err != nil || got != "2" {
+		t.Fatalf("setting = %q, %v", got, err)
 	}
 	sess, err := s.GetSession(1)
 	if err != nil || sess.Title != "old" || sess.Status != SessionDone {

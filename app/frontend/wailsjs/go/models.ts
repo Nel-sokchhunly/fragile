@@ -312,6 +312,18 @@ export namespace main {
 		    return a;
 		}
 	}
+	export class Settings {
+	    auto_compact_tokens: number;
+
+	    static createFrom(source: any = {}) {
+	        return new Settings(source);
+	    }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.auto_compact_tokens = source["auto_compact_tokens"];
+	    }
+	}
 
 }
 

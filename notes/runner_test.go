@@ -282,8 +282,9 @@ func TestRunnerArgs(t *testing.T) {
 	if slices.Contains(args, "--permission-mode") {
 		t.Errorf("sub-agents keep the sandbox, not auto mode: %v", args)
 	}
-	if sub := r.args(Agent{Role: "subagent"}, "/w/dir", "/x", "p", "SYS", "", ""); slices.Contains(sub, "--input-format") {
-		t.Errorf("sub-agents stay one-shot: %v", sub)
+	// Interactive Claude sub-agents take their task and wakes on stdin too: no prompt argument.
+	if sub := r.args(Agent{Role: "subagent"}, "/w/dir", "/x", "p", "SYS", "", ""); !slices.Contains(sub, "--input-format") || slices.Contains(sub, "--") {
+		t.Errorf("interactive sub-agent args: %v", sub)
 	}
 	if !slices.Contains(args, "--strict-mcp-config") || slices.Contains(args, "--disable-slash-commands") || !slices.Contains(args, "--verbose") || slices.Contains(args, "--dangerously-skip-permissions") {
 		t.Errorf("args: %v", args)
@@ -435,7 +436,7 @@ func TestRunnerIsolationEnvAndWorkDir(t *testing.T) {
 }
 
 func TestPromptsWorkDirAndNoSleep(t *testing.T) {
-	for name, p := range map[string]string{"orchestrator": OrchestratorPrompt("/w/dir", false), "subagent": SubagentPrompt(7, "task {{WORKDIR}}", "/w/dir")} {
+	for name, p := range map[string]string{"orchestrator": OrchestratorPrompt("/w/dir", false), "subagent": SubagentPrompt(7, "task {{WORKDIR}}", "/w/dir", false)} {
 		if !strings.Contains(p, "`/w/dir`") || !strings.Contains(p, "wait_for_notes") || strings.Contains(p, "sleep") {
 			t.Errorf("%s prompt: workdir/wait_for_notes/sleep check failed", name)
 		}
@@ -489,6 +490,41 @@ func TestRunnerInteractiveStdinAndOnLine(t *testing.T) {
 	}
 	if b, _ := os.ReadFile(a.LogPath); !strings.Contains(string(b), "got: ") {
 		t.Errorf("log file = %q", b)
+	}
+}
+
+// An interactive sub-agent gets its task as the first stdin message and exits
+// once its stdin is closed; its prompt waits by ending the turn.
+func TestRunnerInteractiveSubagentStdin(t *testing.T) {
+	r, store, sess, _ := newTestRunner(t, `while IFS= read -r line; do echo "got: $line"; done`)
+	r.Interactive = true
+	got := make(chan string, 4)
+	r.OnLine = func(a Agent, l []byte) { got <- string(l) }
+	orch, _ := store.CreateAgent(sess.ID, "orchestrator", 0, 0)
+	a, err := r.SpawnSubagent(sess.ID, orch.ID, "", "do -it", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case l := <-got:
+		if want := `got: {"message":{"content":[{"text":"do -it","type":"text"}],"role":"user"},"type":"user"}`; l != want {
+			t.Fatalf("line = %s\nwant   %s", l, want)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("no task on stdin")
+	}
+	if !r.Running(a.ID) {
+		t.Fatal("sub-agent not running after its first message")
+	}
+	r.CloseStdin(a.ID)
+	r.Wait(sess.ID)
+	if ag, _ := store.GetAgent(sess.ID, a.ID); ag.Status != "exited" {
+		t.Fatalf("after CloseStdin: %+v", ag)
+	}
+	one, chat := SubagentPrompt(7, "t", "/w", false), SubagentPrompt(7, "t", "/w", true)
+	if strings.Contains(one, "{{") || strings.Contains(chat, "{{") || strings.Contains(one, "[Fragile]") ||
+		!strings.Contains(one, "`wait_for_notes` for the orchestrator's reply") || !strings.Contains(chat, `"[Fragile] Board update"`) {
+		t.Error("sub-agent prompt modes wrong")
 	}
 }
 
@@ -577,6 +613,13 @@ func TestOrchestratorPromptModes(t *testing.T) {
 	}
 	if strings.Contains(chat, "one-shot") || strings.Contains(chat, "log-only") || !strings.Contains(chat, "Answer to your escalation #N") {
 		t.Error("interactive prompt wrong")
+	}
+	// One-shot keeps the wait_for_notes loop; interactive ends its turn and is woken by Fragile.
+	if !strings.Contains(one, "**Wait loop.**") || strings.Contains(one, "[Fragile]") {
+		t.Error("one-shot prompt lost the wait loop")
+	}
+	if strings.Contains(chat, "**Wait loop.**") || !strings.Contains(chat, `"[Fragile] Board update"`) || strings.Contains(chat, "usual wait loop") {
+		t.Error("interactive prompt still describes the wait loop")
 	}
 }
 

@@ -437,6 +437,7 @@ func (a *App) DeleteSession(sessionID int64) error {
 	}
 	// SQLite reuses the highest rowid, so a new session can get this id: it must start clean.
 	a.runner.Forget(sessionID)
+	a.dropWakes(sessionID, true)
 	a.mu.Lock()
 	delete(a.busy, sessionID)
 	for _, ag := range agents {
@@ -648,19 +649,22 @@ func (a *App) deliver(orch notes.Agent, text string, atts []attachment, persist 
 // onLine (notes.Runner.OnLine) turns one line of an agent's stream-json output
 // into stored and emitted agent events, and tracks whether the orchestrator is mid-turn.
 func (a *App) onLine(ag notes.Agent, line []byte) {
-	changed := false
+	changed, ended, subEnded := false, false, false
 	a.trackUsage(ag, line)
 	for _, pe := range parseLine(line) {
 		if _, err := a.record(ag, pe.Type, pe.Payload); err != nil {
 			log.Printf("agent %d: storing %s event: %v", ag.ID, pe.Type, err)
 			continue
 		}
-		if ag.Role == "orchestrator" {
+		if ag.Role != "orchestrator" {
+			subEnded = subEnded || pe.Type == evResult
+		} else {
 			// A result ends the turn; any other activity means a turn is under way
 			// (self-corrects if Claude Code folded queued messages into one turn).
 			switch pe.Type {
 			case evResult:
 				changed = a.setBusy(ag.SessionID, false)
+				ended = ended || changed
 			case evAssistantText, evToolUse, evToolResult:
 				changed = a.setBusy(ag.SessionID, true)
 			}
@@ -668,6 +672,14 @@ func (a *App) onLine(ag notes.Agent, line []byte) {
 	}
 	if changed {
 		a.recompute(ag.SessionID)
+	}
+	if ended {
+		// Not on this goroutine: it reads the orchestrator's output, and the
+		// delivery (or a compact) writes to its input.
+		go a.turnEnded(ag.SessionID)
+	}
+	if subEnded {
+		go a.subTurnEnded(ag) // likewise: it may write to the sub-agent's input
 	}
 }
 
@@ -890,11 +902,19 @@ func (a *App) loop() {
 // task rows the UI upserts after a spawn or an exit.
 func (a *App) react(ev notes.Event) {
 	switch ev.Event {
+	case notes.EventNotePosted:
+		a.queueWake(ev)
 	case notes.EventAgentSpawned, notes.EventAgentStatusChanged:
 		if ev.Event == notes.EventAgentStatusChanged {
 			a.mu.Lock()
 			delete(a.models, ev.AgentID) // the agent is done with its model
 			a.mu.Unlock()
+			if p, ok := ev.Payload.(map[string]any); ok && p["role"] == "orchestrator" {
+				a.dropWakes(ev.SessionID, false) // nobody left to wake; a resumed one reads the board
+			} else {
+				a.dropSubWakes(ev.AgentID) // it exited: nothing more to wake it with
+				a.queueWake(ev)
+			}
 		}
 		if ag, err := a.store.GetAgent(ev.SessionID, ev.AgentID); err == nil {
 			a.pushEvent(eventAgentUpdated, ev.SessionID, ag.ID, ag)
