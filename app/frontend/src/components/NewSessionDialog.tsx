@@ -6,7 +6,7 @@ import {Input} from '@/components/ui/input'
 import {Select, SelectContent, SelectItem, SelectTrigger, SelectValue} from '@/components/ui/select'
 import {Tip, Tooltip, TooltipContent, TooltipTrigger} from '@/components/ui/tooltip'
 import {api} from '@/lib/api'
-import type {ProviderInfo, SessionConfig, SessionProvider} from '@/lib/types'
+import type {ProviderInfo, SessionConfig, SessionMode, SessionProvider} from '@/lib/types'
 import {SessionConfigFields, templateConfig} from '@/components/SessionConfigFields'
 import {useAppStore} from '@/store/app'
 
@@ -25,6 +25,7 @@ export function NewSessionDialog({children, tip}: {children: ReactNode; tip?: st
   const [open, setOpen] = useState(false)
   const [name, setName] = useState('')
   const [provider, setProvider] = useState<SessionProvider>('claude')
+  const [mode, setMode] = useState<SessionMode>('orchestra')
   const [dir, setDir] = useState('')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
@@ -55,7 +56,7 @@ export function NewSessionDialog({children, tip}: {children: ReactNode; tip?: st
     setBusy(true)
     setError('')
     try {
-      await createSession(name.trim(), dir, provider, cfg!)
+      await createSession(name.trim(), dir, provider, cfg!, mode)
       setName('')
       setOpen(false)
     } catch (e) {
@@ -93,6 +94,18 @@ export function NewSessionDialog({children, tip}: {children: ReactNode; tip?: st
               </SelectContent>
             </Select>
           </div>
+          <div className="flex items-center gap-2 text-xs">Mode
+            <Select value={mode} onValueChange={(v) => setMode(v as SessionMode)}>
+              <SelectTrigger aria-label="Mode" className="w-44"><SelectValue/></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="orchestra">Orchestra</SelectItem>
+                <SelectItem value="normal">Normal</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+          <p className="text-xs text-muted-foreground">
+            {mode === 'normal' ? 'One agent, no sub-agents. You can switch to orchestra later without losing the conversation.' : 'The agent orchestrates sub-agents.'}
+          </p>
           {PROVIDER_HINTS[provider] && (
             <p className="text-xs text-muted-foreground">{PROVIDER_HINTS[provider]}</p>
           )}

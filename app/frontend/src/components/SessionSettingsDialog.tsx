@@ -20,8 +20,8 @@ export function SessionSettingsDialog({session}: {session: Session}) {
   const onOpenChange = (o: boolean) => {
     setOpen(o)
     if (!o) return
-    const {enabled_providers, auto_compact_tokens, orchestrator_rules} = session
-    setCfg({enabled_providers, auto_compact_tokens, orchestrator_rules})
+    const {enabled_providers, auto_compact_tokens, orchestrator_rules, escalation_threshold} = session
+    setCfg({enabled_providers, auto_compact_tokens, orchestrator_rules, escalation_threshold})
     setProviders(null)
     setError('')
     api.getProviders().then(setProviders, (e) => setError(String(e)))

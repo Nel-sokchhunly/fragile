@@ -5,6 +5,8 @@ import {main} from '../models';
 
 export function AddNote(arg1:number,arg2:string,arg3:string):Promise<notes.Note>;
 
+export function AddScopedNote(arg1:number,arg2:string,arg3:string,arg4:string):Promise<notes.Note>;
+
 export function AnswerEscalation(arg1:number,arg2:string):Promise<void>;
 
 export function ClipboardImage():Promise<string>;
@@ -39,15 +41,21 @@ export function GetSettings():Promise<main.Settings>;
 
 export function InterruptSession(arg1:number):Promise<void>;
 
+export function ListOpenEscalations():Promise<Array<notes.Escalation>>;
+
 export function ListRepos(arg1:number):Promise<Array<string>>;
 
 export function ListSessions():Promise<Array<notes.Session>>;
 
 export function ListUserPlugins():Promise<Array<string>>;
 
+export function MessageAgent(arg1:number,arg2:string):Promise<void>;
+
 export function PauseAgent(arg1:number):Promise<void>;
 
 export function PickDirectory():Promise<string>;
+
+export function RestartAgent(arg1:number):Promise<number>;
 
 export function ResumeAgent(arg1:number):Promise<void>;
 
@@ -56,6 +64,8 @@ export function ResumeSession(arg1:number):Promise<void>;
 export function SendMessage(arg1:number,arg2:string,arg3:Array<main.Attachment>):Promise<void>;
 
 export function SetSessionConfig(arg1:number,arg2:notes.SessionConfig):Promise<notes.Session>;
+
+export function SetSessionMode(arg1:number,arg2:string):Promise<notes.Session>;
 
 export function SetSettings(arg1:main.Settings):Promise<void>;
 

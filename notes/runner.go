@@ -408,6 +408,9 @@ func (r *Runner) Forget(sessionID int64) {
 func (r *Runner) orchestratorPrompt(sessionID int64) string {
 	var extra string
 	if se, err := r.store.GetSession(sessionID); err == nil {
+		if se.Mode == ModeNormal {
+			return "" // a normal session's agent gets no orchestrator prompt
+		}
 		extra = sessionPromptText(se)
 	}
 	return OrchestratorPrompt(r.workDir(sessionID), r.Interactive, extra)
@@ -456,6 +459,17 @@ func (r *Runner) ResumeOrchestrator(sessionID int64, providerSessionID string) (
 // picks the session's first enabled one. model is passed to that CLI (--model,
 // aliases expanded); empty uses DefaultModel, then the CLI's default.
 func (r *Runner) SpawnSubagent(sessionID, parentID int64, title, task, model, provider string) (Agent, error) {
+	return r.SpawnSubagentScoped(sessionID, parentID, title, task, model, provider, nil)
+}
+
+// SpawnSubagentScoped is SpawnSubagent that also makes the sub-agent a member of
+// the named private scopes (see CheckScope) before it starts.
+func (r *Runner) SpawnSubagentScoped(sessionID, parentID int64, title, task, model, provider string, scopes []string) (Agent, error) {
+	for _, sc := range scopes {
+		if err := CheckScope(sc); err != nil {
+			return Agent{}, err
+		}
+	}
 	if p, err := r.store.GetAgent(sessionID, parentID); err != nil {
 		return Agent{}, err
 	} else if p.Role != "orchestrator" {
@@ -491,6 +505,9 @@ func (r *Runner) SpawnSubagent(sessionID, parentID int64, title, task, model, pr
 	a, err := r.createSubagent(sessionID, parentID, title, task, provider)
 	r.spawnMu.Unlock()
 	if err != nil {
+		return Agent{}, err
+	}
+	if err := r.store.JoinScopes(sessionID, a.ID, scopes); err != nil {
 		return Agent{}, err
 	}
 	return r.launch(a, title, task, SubagentPrompt(a.ID, task, r.workDir(sessionID), r.stdinAgent(a)), "", model)
@@ -593,11 +610,15 @@ func (r *Runner) args(a Agent, workDir, mcpConfig, prompt, systemPrompt, resume,
 	if r.stdinAgent(a) { // messages arrive on stdin; the first one is the task
 		args = append(args, "--input-format", "stream-json")
 	}
-	args = append(args, "--output-format", "stream-json", "--verbose",
-		"--append-system-prompt", systemPrompt,
-		"--mcp-config", mcpConfig, "--strict-mcp-config",
-		"--disallowedTools", disallowedTools)
-	if a.Role == roleOrchestrator {
+	args = append(args, "--output-format", "stream-json", "--verbose")
+	normal := r.normalOrchestrator(a)
+	if !normal {
+		args = append(args, "--append-system-prompt", systemPrompt, "--mcp-config", mcpConfig)
+	}
+	args = append(args, "--strict-mcp-config", "--disallowedTools", disallowedTools) // strict with no config: no MCP servers at all
+	if normal {
+		args = append(args, "--permission-mode", "auto", "--allowedTools", normalAllowedTools)
+	} else if a.Role == roleOrchestrator {
 		args = append(args, "--permission-mode", "auto", "--allowedTools", orchestratorAllowedTools)
 	} else {
 		args = append(args, "--allowedTools", allowedTools)
@@ -772,6 +793,7 @@ func (r *Runner) refusing(sessionID int64) bool {
 // one stop killed that exited 0 anyway (just "exited"), true for one StopAgent ended.
 func (r *Runner) finish(a Agent, taskTitle string, code int, launchErr string, stopped bool) {
 	status, taskStatus := "crashed", "blocked"
+	var errorAfterDone bool
 	switch {
 	case stopped:
 		status = "stopped"
@@ -780,10 +802,20 @@ func (r *Runner) finish(a Agent, taskTitle string, code int, launchErr string, s
 		}
 	case code == 0:
 		status, taskStatus = "exited", "done"
+	case a.Role == "subagent":
+		if board, err := r.store.SessionBoard(a.SessionID); err == nil {
+			if done, err := r.store.ListNotes(a.SessionID, board, NoteFilter{Type: "done", AuthorID: a.ID}); err == nil && len(done) > 0 {
+				status, taskStatus = "exited", "done"
+				errorAfterDone = true
+			}
+		}
 	}
 	payload := map[string]any{"role": a.Role, "status": status, "exit_code": code}
 	if launchErr != "" {
 		payload["error"] = launchErr
+	}
+	if errorAfterDone {
+		payload["error_after_done"] = true
 	}
 	if err := r.store.SetAgentStatus(a.SessionID, a.ID, status, &code); err != nil {
 		payload["store_error"] = err.Error()

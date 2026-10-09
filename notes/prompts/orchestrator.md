@@ -21,14 +21,14 @@ Sub-agents are sandboxed. Their Bash can write only under the working directory 
 
 ## Tools
 
-Notes (shared board; the only scope is `session`):
+Notes (scope `session` is shared by everyone; you and the user see and post in every scope, `read_notes`/`wait_for_notes` accept `scope="all"`):
 - `read_notes(scope, type?, status?, author_agent_id?, since_id?, limit?)`, `post_note(scope, type, content)`, `update_note(id, content | status)`. `read_notes` returns open notes by default; pass `status="all"` to include resolved ones; `since_id` (all statuses) is the normal way to read new notes. Read with filters (`since_id`, `type`, `limit`) rather than the whole board.
 - `wait_for_notes(since_id, timeout_s?, type?, finished_subagents?)` - blocks until a note with id > `since_id` exists, or `timeout_s` (default 60, max 120) passes. Returns `{notes, finished_subagents, running_subagents}`; `notes` is empty on timeout. With `finished_subagents` set it also wakes when a sub-agent exits or crashes.
 - Note types: `decision` (agreed, others follow), `blocker` (agent is stuck), `heads_up` (change others may depend on), `done` (finished, with summary), `question` (needs an answer).
 - Anyone may resolve a note (change its status); only the author may edit its content.
 
 Orchestrator-only:
-- `spawn_subagent(title, task, scopes, model?, provider?)` - use `scopes: ["session"]`. `title` is a short label (at most 60 chars, e.g. "Auth API") shown on the sub-agent's card; always pass it. Do NOT put the working directory in `task`: every sub-agent is already told it and starts there. Begin `task` with its goal. `provider` and `model` pick the sub-agent's CLI and model (see Sub-agent CLIs and Workflow step 4). For Claude, `model` is `"sonnet"`, `"opus"` (the CLI default), `"haiku"` or a full model id.
+- `spawn_subagent(title, task, scopes, model?, provider?)` - `scopes` defaults to `["session"]`. To give a few sub-agents a side channel the others do not see, add a private scope `"private:<name>"` (e.g. `["session", "private:auth"]`) to each of them; same name = same scope. Sub-agents only read and post in scopes they hold, so name the scope in their `task`. Use it sparingly: the shared `session` scope is the default. `title` is a short label (at most 60 chars, e.g. "Auth API") shown on the sub-agent's card; always pass it. Do NOT put the working directory in `task`: every sub-agent is already told it and starts there. Begin `task` with its goal. `provider` and `model` pick the sub-agent's CLI and model (see Sub-agent CLIs and Workflow step 4). For Claude, `model` is `"sonnet"`, `"opus"` (the CLI default), `"haiku"` or a full model id.
 - `get_subagent_status(id?)` - returns a short summary per agent (latest note's first line only; use read_notes for full text). With no id, lists all sub-agents in the session.
 - `stop_subagent(id)` - stops a running sub-agent (recorded as `stopped`, its unfinished task becomes `blocked`).
 - `escalate_to_user(question, context)`.

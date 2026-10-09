@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"regexp"
 	"slices"
 	"strings"
 	"unicode"
@@ -30,7 +31,66 @@ const noteTypeHelp = `Note types: ` +
 func CheckNoteType(v string) error   { return checkEnum("type", v, noteTypes) }
 func CheckNoteStatus(v string) error { return checkEnum("status", v, noteStatuses) }
 
-const scopeHelp = `Only "session" (the board shared by all agents in this session) is available.`
+// ScopeSession is the board shared by every agent of a session. Other scopes are
+// private boards named "private:<name>" (lowercase letters, digits, "-" and "_"),
+// shared by the sub-agents the orchestrator spawned with that scope.
+const ScopeSession = "session"
+
+var privateScopeRE = regexp.MustCompile(`^private:[a-z0-9][a-z0-9_-]{0,31}$`)
+
+const scopeHelp = `scope is "session" (the board shared by all agents in this session) or a private scope "private:<name>" you were given; ` +
+	`"all" (read_notes, wait_for_notes) covers every scope you can access. You can only use scopes you are a member of.`
+
+// CheckScope validates the syntax of a scope name: "session" or "private:<name>".
+func CheckScope(scope string) error {
+	if scope != ScopeSession && !privateScopeRE.MatchString(scope) {
+		return fmt.Errorf(`invalid scope %q: use "session" or "private:<name>" (name: lowercase letters, digits, "-", "_"; at most 32 chars)`, scope)
+	}
+	return nil
+}
+
+// accessScopes returns the boards the agent may use: all of the session's for
+// the orchestrator, else "session" and the scopes it is a member of.
+func (s *Server) accessScopes(a Agent) ([]Scope, error) {
+	if a.Role == roleOrchestrator {
+		return s.Store.ListScopes(a.SessionID)
+	}
+	return s.Store.AgentScopes(a.SessionID, a.ID)
+}
+
+// pickScopes resolves a scope argument to accessible boards: "all" (when allowAll)
+// or empty (when emptyAll) means every accessible one. A scope that is unknown or
+// not accessible gets the same error, so existence does not leak.
+func (s *Server) pickScopes(a Agent, scope string, allowAll, emptyAll bool) ([]Scope, error) {
+	have, err := s.accessScopes(a)
+	if err != nil {
+		return nil, err
+	}
+	if scope == "" && emptyAll || scope == "all" && allowAll {
+		return have, nil
+	}
+	if err := CheckScope(scope); err != nil {
+		return nil, err
+	}
+	for _, sc := range have {
+		if sc.Name == scope {
+			return []Scope{sc}, nil
+		}
+	}
+	names := make([]string, len(have))
+	for i, sc := range have {
+		names[i] = sc.Name
+	}
+	return nil, fmt.Errorf("scope %q is not available to you (your scopes: %s)", scope, strings.Join(names, ", "))
+}
+
+func boardIDs(scopes []Scope) []int64 {
+	ids := make([]int64, len(scopes))
+	for i, sc := range scopes {
+		ids[i] = sc.BoardID
+	}
+	return ids
+}
 
 // newMCPServer builds the tool set for one agent. Orchestrator-only tools are
 // not registered for sub-agents.
@@ -91,13 +151,6 @@ func addTool[In any](srv *mcp.Server, a Agent, name, desc string, orchOnly bool,
 		})
 }
 
-func checkScope(scope string) error {
-	if scope != "session" {
-		return fmt.Errorf("invalid scope %q: only \"session\" is available in this phase", scope)
-	}
-	return nil
-}
-
 func checkEnum(what, v string, valid []string) error {
 	if !slices.Contains(valid, v) {
 		return fmt.Errorf("invalid %s %q: must be one of %v", what, v, valid)
@@ -110,7 +163,7 @@ func checkEnum(what, v string, valid []string) error {
 var readNoteStatuses = []string{"open", "resolved", "all"}
 
 type readNotesIn struct {
-	Scope         string `json:"scope" jsonschema:"must be \"session\""`
+	Scope         string `json:"scope" jsonschema:"\"session\", a private scope \"private:<name>\" you are a member of, or \"all\" for every scope you can access"`
 	Type          string `json:"type,omitempty" jsonschema:"only notes of this type"`
 	Status        string `json:"status,omitempty" jsonschema:"filter by status: \"open\" (default when since_id omitted), \"resolved\", or \"all\""`
 	AuthorAgentID int64  `json:"author_agent_id,omitempty" jsonschema:"only notes written by this agent id"`
@@ -119,7 +172,8 @@ type readNotesIn struct {
 }
 
 func (s *Server) readNotes(_ context.Context, a Agent, in readNotesIn) (any, error) {
-	if err := checkScope(in.Scope); err != nil {
+	scopes, err := s.pickScopes(a, in.Scope, true, false)
+	if err != nil {
 		return nil, err
 	}
 	if in.Type != "" {
@@ -141,11 +195,7 @@ func (s *Server) readNotes(_ context.Context, a Agent, in readNotesIn) (any, err
 	if in.Limit < 0 {
 		return nil, errors.New("limit must be greater than 0")
 	}
-	board, err := s.Store.SessionBoard(a.SessionID)
-	if err != nil {
-		return nil, err
-	}
-	notes, err := s.Store.ListNotes(a.SessionID, board, NoteFilter{
+	notes, err := s.Store.ListNotesIn(a.SessionID, boardIDs(scopes), NoteFilter{
 		Type:     in.Type,
 		Status:   filterStatus,
 		AuthorID: in.AuthorAgentID,
@@ -159,26 +209,26 @@ func (s *Server) readNotes(_ context.Context, a Agent, in readNotesIn) (any, err
 }
 
 type postNoteIn struct {
-	Scope   string `json:"scope" jsonschema:"must be \"session\""`
+	Scope   string `json:"scope" jsonschema:"\"session\" or a private scope \"private:<name>\" you are a member of; done notes go in \"session\""`
 	Type    string `json:"type" jsonschema:"decision, blocker, heads_up, done or question"`
 	Content string `json:"content" jsonschema:"the note text; short and specific"`
 }
 
 func (s *Server) postNote(_ context.Context, a Agent, in postNoteIn) (any, error) {
-	if err := checkScope(in.Scope); err != nil {
+	scopes, err := s.pickScopes(a, in.Scope, false, false)
+	if err != nil {
 		return nil, err
 	}
 	if err := checkEnum("type", in.Type, noteTypes); err != nil {
 		return nil, err
 	}
+	if in.Type == "done" && scopes[0].Name != ScopeSession {
+		return nil, errors.New(`done notes go in scope "session" so the orchestrator sees them`)
+	}
 	if strings.TrimSpace(in.Content) == "" {
 		return nil, errors.New("content must not be empty")
 	}
-	board, err := s.Store.SessionBoard(a.SessionID)
-	if err != nil {
-		return nil, err
-	}
-	n, err := s.Store.PostNote(a.SessionID, board, a.ID, in.Type, in.Content)
+	n, err := s.Store.PostNote(a.SessionID, scopes[0].BoardID, a.ID, in.Type, in.Content)
 	if err != nil {
 		return nil, err
 	}
@@ -210,6 +260,11 @@ func (s *Server) updateNote(_ context.Context, a Agent, in updateNoteIn) (any, e
 	} else if err != nil {
 		return nil, err
 	}
+	if have, err := s.accessScopes(a); err != nil {
+		return nil, err
+	} else if !slices.Contains(boardIDs(have), old.BoardID) {
+		return nil, fmt.Errorf("note %d not found", in.ID)
+	}
 	if in.Content != nil && old.AuthorID != a.ID {
 		return nil, fmt.Errorf("only the author (agent %d) may change the content of note %d; you may change its status", old.AuthorID, old.ID)
 	}
@@ -226,7 +281,7 @@ func (s *Server) updateNote(_ context.Context, a Agent, in updateNoteIn) (any, e
 type spawnIn struct {
 	Title    string   `json:"title,omitempty" jsonschema:"short title shown on the agent card, at most 60 chars"`
 	Task     string   `json:"task" jsonschema:"self-contained task: goal, files owned, constraints, what done looks like"`
-	Scopes   []string `json:"scopes,omitempty" jsonschema:"note scopes the sub-agent gets; only [\"session\"] (default)"`
+	Scopes   []string `json:"scopes,omitempty" jsonschema:"note scopes the sub-agent gets; default [\"session\"] (the board shared by everyone). Add private scopes named \"private:<name>\" (e.g. \"private:auth\"): every sub-agent spawned with the same name shares that scope; others cannot read or post there. You and the user see all scopes."`
 	Model    string   `json:"model,omitempty" jsonschema:"optional model id for this sub-agent provider. Claude accepts sonnet, opus, haiku or a full claude- id; Codex accepts a full Codex model id; AGY accepts flash, pro, flash_lite or an AGY model id. Omit to use the provider default."`
 	Provider string   `json:"provider,omitempty" jsonschema:"optional CLI for this sub-agent: claude, codex or agy; must be enabled for the session. Omit for the session's first enabled CLI."`
 }
@@ -255,15 +310,15 @@ func (s *Server) spawnSubagent(_ context.Context, a Agent, in spawnIn) (any, err
 	if strings.TrimSpace(in.Task) == "" {
 		return nil, errors.New("task must not be empty")
 	}
-	for _, sc := range in.Scopes { // validated, but only "session" exists, so nothing else to apply
-		if err := checkScope(sc); err != nil {
+	for _, sc := range in.Scopes {
+		if err := CheckScope(sc); err != nil {
 			return nil, err
 		}
 	}
 	if s.Runner == nil {
 		return nil, errors.New("sub-agent runner not configured")
 	}
-	sub, err := s.Runner.SpawnSubagent(a.SessionID, a.ID, in.Title, in.Task, strings.TrimSpace(in.Model), strings.TrimSpace(in.Provider))
+	sub, err := s.Runner.SpawnSubagentScoped(a.SessionID, a.ID, in.Title, in.Task, strings.TrimSpace(in.Model), strings.TrimSpace(in.Provider), in.Scopes)
 	if err != nil {
 		return nil, err
 	}
@@ -319,10 +374,6 @@ func (s *Server) subagentStatus(_ context.Context, caller Agent, in statusIn) (a
 			return nil, err
 		}
 	}
-	board, err := s.Store.SessionBoard(caller.SessionID)
-	if err != nil {
-		return nil, err
-	}
 	out := []subagentStatus{}
 	for _, a := range agents {
 		st := subagentStatus{AgentID: a.ID, AgentStatus: a.Status, PID: a.PID, CreatedAt: a.CreatedAt, ExitedAt: a.ExitedAt, ExitCode: a.ExitCode}
@@ -331,7 +382,7 @@ func (s *Server) subagentStatus(_ context.Context, caller Agent, in statusIn) (a
 		} else if !errors.Is(err, ErrNotFound) {
 			return nil, err
 		}
-		notes, err := s.Store.ListNotes(caller.SessionID, board, NoteFilter{AuthorID: a.ID})
+		notes, err := s.Store.ListNotes(caller.SessionID, 0, NoteFilter{AuthorID: a.ID})
 		if err != nil {
 			return nil, err
 		}

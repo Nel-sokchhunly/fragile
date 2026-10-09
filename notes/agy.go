@@ -249,7 +249,7 @@ func (c *agyClient) step(v agyEvent) {
 		}
 		delete(c.text, s.StepIndex)
 		if s.Usage != nil {
-			c.emit(map[string]any{"type": "system", "subtype": "context_usage", "provider": ProviderAGY, "context_used": s.Usage.Input + s.Usage.Output})
+			c.emit(map[string]any{"type": "system", "subtype": "context_usage", "provider": ProviderAGY, "context_used": s.Usage.Input + s.Usage.CacheRead + s.Usage.Output})
 		}
 	case "tool":
 		id := "agy-" + c.conv + "-" + strconv.Itoa(s.StepIndex)
@@ -393,11 +393,17 @@ func (r *Runner) agyHome(a Agent, systemPrompt, workDir string) (string, error) 
 	userGemini := filepath.Join(userHome, ".gemini")
 	realCLI := filepath.Join(userGemini, "antigravity-cli")
 
-	prompt := agyPrompt(a, systemPrompt)
+	normal := r.normalOrchestrator(a) // no Fragile tools and no orchestrator prompt
+	prompt := systemPrompt
+	servers := map[string]any{}
+	if !normal {
+		prompt = agyPrompt(a, systemPrompt)
+		servers["fragile"] = map[string]string{"url": fmt.Sprintf("http://%s/mcp/%s", r.cfg.Addr, a.Token)}
+	}
 	if b, err := os.ReadFile(filepath.Join(userGemini, "GEMINI.md")); err == nil {
 		prompt += "\n\n" + string(b)
 	}
-	mcp, _ := json.Marshal(map[string]any{"mcpServers": map[string]any{"fragile": map[string]string{"url": fmt.Sprintf("http://%s/mcp/%s", r.cfg.Addr, a.Token)}}})
+	mcp, _ := json.Marshal(map[string]any{"mcpServers": servers})
 	hooks, _ := json.MarshalIndent(agySubagentHook, "", "  ")
 	settings, err := agySettings(filepath.Join(realCLI, "settings.json"), workDir)
 	if err != nil {

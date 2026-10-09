@@ -36,6 +36,7 @@ export function SettingsDialog({side = 'bottom'}: {side?: 'bottom' | 'right'}) {
     ...p,
     auto_compact_tokens: c.auto_compact_tokens,
     orchestrator_rules: c.orchestrator_rules,
+    escalation_threshold: c.escalation_threshold,
     subagent_providers: Object.fromEntries(PROVIDERS.map((x) => [x, {...p.subagent_providers[x], enabled: c.enabled_providers.includes(x)}])),
   })
   const save = async () => {

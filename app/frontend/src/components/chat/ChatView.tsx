@@ -293,6 +293,19 @@ export function ChatView({sessionId}: {sessionId: number}) {
       setCompactError(String(e))
     }
   }
+  const normal = session?.mode === 'normal'
+  const [switching, setSwitching] = useState(false)
+  const switchToOrchestra = async () => {
+    setCompactError('')
+    setSwitching(true)
+    try {
+      useAppStore.getState().sessionUpdated(await api.setSessionMode(sessionId, 'orchestra'))
+    } catch (e) {
+      setCompactError(String(e))
+    } finally {
+      setSwitching(false)
+    }
+  }
   // Esc interrupts the current turn (not inside a dialog) by clicking the composer's Interrupt button, so errors show there.
   useEffect(() => {
     if (!working) return
@@ -331,13 +344,13 @@ export function ChatView({sessionId}: {sessionId: number}) {
         <div className="grid min-w-0 flex-1">
           <div className="flex min-w-0 items-baseline gap-2.5">
             <h1 className="min-w-0 truncate text-title font-semibold">{session?.title}</h1>
-            <span className="shrink-0 text-xs text-muted-foreground">{session ? (PROVIDER_NAMES[session.provider] ?? 'Claude') : ''}</span>
+            <span className="shrink-0 text-xs text-muted-foreground">{session ? (PROVIDER_NAMES[session.provider] ?? 'Claude') : ''} · {normal ? 'normal' : 'orchestra'}</span>
             {st && <StatusLabel sessionId={sessionId} working={session?.status === 'working'} label={st.label} className={cn('shrink-0 font-mono text-xs', st.cls)}/>}
           </div>
           <div className="flex min-w-0 items-baseline gap-2 font-mono text-xs leading-4 text-muted-foreground">
             <Tip content={lead ? `pid ${lead.pid ?? '-'} · started ${formatExact(lead.created_at)}` : undefined}>
               <span className="min-w-0 truncate">
-                orchestrator{lead ? ` ${lead.status === 'running' ? `pid ${lead.pid ?? '-'}` : agentState(lead)}` : ' not started'} · {lead?.model && <><Tip content={lead.model}><span>{modelName(lead.model)}</span></Tip> · </>}{ctx && <><Tip content="Compact context (/compact)"><span><button
+                {normal ? 'agent' : 'orchestrator'}{lead ? ` ${lead.status === 'running' ? `pid ${lead.pid ?? '-'}` : agentState(lead)}` : ' not started'} · {lead?.model && <><Tip content={lead.model}><span>{modelName(lead.model)}</span></Tip> · </>}{ctx && <><Tip content="Compact context (/compact)"><span><button
                 type="button" className={cn(ctx.cls, 'enabled:cursor-pointer enabled:hover:underline')}
                 onClick={compact} disabled={!running || working || compactingSince > 0}
               >ctx {ctx.text}</button></span></Tip> · </>}{agentSummary(agents)}
@@ -345,6 +358,11 @@ export function ChatView({sessionId}: {sessionId: number}) {
             </Tip>
           </div>
         </div>
+        {normal && (
+          <Tip content="Give the agent the orchestrator tools and prompt; the conversation is kept. Available when it is not replying.">
+            <span><Button variant="outline" size="sm" onClick={switchToOrchestra} disabled={switching || working}>Switch to orchestra</Button></span>
+          </Tip>
+        )}
         {session && <SessionSettingsDialog session={session}/>}
         {anyRunning && <StopButton sessionId={sessionId}/>}
       </header>

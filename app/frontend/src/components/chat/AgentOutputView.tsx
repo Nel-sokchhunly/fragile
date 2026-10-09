@@ -1,7 +1,8 @@
 import {memo, useEffect, useState} from 'react'
 import {Virtuoso} from 'react-virtuoso'
-import {ArrowLeft, ChevronRight, Pause, Play, Square} from 'lucide-react'
+import {ArrowLeft, ChevronRight, Pause, Play, RotateCcw, Send, Square} from 'lucide-react'
 import {Button} from '@/components/ui/button'
+import {Textarea} from '@/components/ui/textarea'
 import {Collapsible, CollapsibleContent, CollapsibleTrigger} from '@/components/ui/collapsible'
 import {Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle} from '@/components/ui/dialog'
 import {Tip, Tooltip, TooltipContent, TooltipTrigger} from '@/components/ui/tooltip'
@@ -42,9 +43,10 @@ const EventRow = memo(function EventRow({ev, start}: {ev: AgentEvent; start: num
       <Tip content={formatExact(ev.created_at)}><time className="font-mono text-mini leading-5 text-muted-foreground" dateTime={ev.created_at}>{formatElapsed(Date.parse(ev.created_at) - start)}</time></Tip>
       <div className="min-w-0">
         {ev.event_type === 'assistant_text' && <div className="leading-5"><Markdown>{String(p.text ?? '')}</Markdown></div>}
+        {ev.event_type === 'user_message' && <div className="rounded-md bg-surface-sunken px-2 py-1 leading-5 whitespace-pre-wrap break-words">{String(p.text ?? '')}</div>}
         {ev.event_type === 'tool_use' && <Fold title={String(p.name ?? 'tool')} body={JSON.stringify(p.input ?? {}, null, 2)}/>}
         {ev.event_type === 'tool_result' && <Fold title="result" tone={p.is_error ? 'text-destructive' : undefined} body={String(p.content ?? '')}/>}
-        {!['assistant_text', 'tool_use', 'tool_result'].includes(ev.event_type) && <Fold title={ev.event_type} body={ev.payload}/>}
+        {!['assistant_text', 'user_message', 'tool_use', 'tool_result'].includes(ev.event_type) && <Fold title={ev.event_type} body={ev.payload}/>}
       </div>
     </div>
   )
@@ -65,6 +67,37 @@ function Meta({agent, count}: {agent: Agent; count: number}) {
   )
 }
 
+// Plain textarea + send (Enter sends, Shift+Enter newline); disabled with the reason as its tooltip.
+function MessageBox({agentId, disabledReason}: {agentId: number; disabledReason: string | null}) {
+  const [text, setText] = useState('')
+  const messageAgent = useAppStore((s) => s.messageAgent)
+  useEffect(() => setText(''), [agentId])
+  const send = async () => {
+    const t = text.trim()
+    if (!t || disabledReason) return
+    if (await messageAgent(agentId, t)) setText('')
+  }
+  return (
+    <div className="shrink-0 border-t px-6 py-3">
+      <Tip content={disabledReason ?? 'Message this agent; the orchestrator is told'} side="top">
+        <div className="mx-auto flex max-w-[680px] items-end gap-2">
+          <Textarea
+            value={text}
+            disabled={!!disabledReason}
+            rows={1}
+            placeholder="Message this agent…"
+            aria-label="Message this agent"
+            onChange={(e) => setText(e.target.value)}
+            onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) { e.preventDefault(); void send() } }}
+            className="min-h-9 resize-none"
+          />
+          <Button size="icon" disabled={!!disabledReason || !text.trim()} onClick={() => void send()} aria-label="Send message"><Send/></Button>
+        </div>
+      </Tip>
+    </div>
+  )
+}
+
 const Pad = () => <div className="h-3"/>
 // "streaming…" tail while the agent is alive (context carries that flag; the components stay module-level).
 const Tail = ({context}: {context?: {live: boolean}}) => (
@@ -82,9 +115,10 @@ export function AgentOutputView({sessionId, agentId}: {sessionId: number; agentI
   const back = useAppStore((s) => s.selectAgent)
   const act = useAppStore((s) => s.activity[agentId])
   const hasDone = useAppStore((s) => !!s.data[sessionId]?.notes.some((n) => n.type === 'done' && n.author_agent_id === agentId))
-  const {pauseAgent, resumeAgent, finishAgent} = useAppStore.getState()
+  const {pauseAgent, resumeAgent, finishAgent, restartAgent} = useAppStore.getState()
   const [confirmFinish, setConfirmFinish] = useState(false)
-  useEffect(() => setConfirmFinish(false), [agentId])
+  const [confirmRestart, setConfirmRestart] = useState(false)
+  useEffect(() => { setConfirmFinish(false); setConfirmRestart(false) }, [agentId])
   const running = agent?.status === 'running'
   const paused = running && !!act?.paused
   const canPause = running && !!act?.busy && !paused
@@ -112,6 +146,19 @@ export function AgentOutputView({sessionId, agentId}: {sessionId: number; agentI
         {sub && canPause && <Tip content="Pause: end the current turn and hold" side="bottom"><Button variant="ghost" size="icon-sm" onClick={() => void pauseAgent(agentId)} aria-label="Pause agent"><Pause/></Button></Tip>}
         {sub && canResume && <Tip content="Resume" side="bottom"><Button variant="ghost" size="icon-sm" onClick={() => void resumeAgent(agentId)} aria-label="Resume agent"><Play/></Button></Tip>}
         {sub && running && <Tip content="Finish agent" side="bottom"><Button variant="ghost" size="icon-sm" onClick={() => setConfirmFinish(true)} aria-label="Finish agent"><Square/></Button></Tip>}
+        {sub && <Tip content="Restart on the same task with a fresh conversation" side="bottom"><Button variant="ghost" size="icon-sm" onClick={() => setConfirmRestart(true)} aria-label="Restart agent"><RotateCcw/></Button></Tip>}
+        <Dialog open={confirmRestart} onOpenChange={setConfirmRestart}>
+          <DialogContent className="sm:max-w-sm">
+            <DialogHeader>
+              <DialogTitle>Restart {agentLabel(agent, task)}?</DialogTitle>
+              <DialogDescription>{running ? 'Stops this agent and starts' : 'Starts'} a new agent on the same task with a fresh conversation. Nothing is resumed. The orchestrator is told.</DialogDescription>
+            </DialogHeader>
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setConfirmRestart(false)}>Cancel</Button>
+              <Button onClick={() => { setConfirmRestart(false); void restartAgent(agentId) }}>Restart</Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
         <Dialog open={confirmFinish} onOpenChange={setConfirmFinish}>
           <DialogContent className="sm:max-w-sm">
             <DialogHeader>
@@ -148,6 +195,7 @@ export function AgentOutputView({sessionId, agentId}: {sessionId: number; agentI
           />
         )}
       </div>
+      {sub && <MessageBox agentId={agentId} disabledReason={!running ? 'Agent is not running' : act?.live === false ? 'This agent takes no messages: only interactive Claude sub-agents do' : null}/>}
     </div>
   )
 }

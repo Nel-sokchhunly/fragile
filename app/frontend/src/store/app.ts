@@ -1,7 +1,7 @@
 import {create} from 'zustand'
 import {api} from '@/lib/api'
 import type {PendingAttachment} from '@/lib/attachments'
-import type {Agent, AgentActivity, AgentEvent, Attachment, ChatItem, Note, NoteType, RateLimit, Session, SessionConfig, SessionProvider, SessionStatus, Task} from '@/lib/types'
+import type {Agent, AgentActivity, AgentEvent, Attachment, ChatItem, Note, NoteType, RateLimit, Session, SessionConfig, SessionMode, SessionProvider, SessionStatus, Task} from '@/lib/types'
 
 // Zustand store fed by the backend: snapshots (lib/api.ts) on first view of a session, then Wails events
 // (lib/events.ts) routed here by session_id. Components only read it via selectors.
@@ -43,7 +43,7 @@ type AppState = {
   setChangesRepo: (sessionId: number, repo: string) => void
   notify: (e: unknown) => void
   // Throw the backend's error string; the caller shows it inline.
-  createSession: (name: string, workDir: string, provider: SessionProvider, cfg: SessionConfig) => Promise<void>
+  createSession: (name: string, workDir: string, provider: SessionProvider, cfg: SessionConfig, mode?: SessionMode) => Promise<void>
   sendMessage: (sessionId: number, text: string, attachments?: Attachment[]) => Promise<void>
   compactSession: (sessionId: number) => Promise<void>
   // Report failures as toasts.
@@ -53,7 +53,9 @@ type AppState = {
   pauseAgent: (agentId: number) => Promise<void>
   resumeAgent: (agentId: number) => Promise<void>
   finishAgent: (agentId: number) => Promise<void>
-  addNote: (sessionId: number, type: NoteType, content: string) => Promise<boolean>
+  restartAgent: (agentId: number) => Promise<void> // fresh agent on the same task; selects it
+  messageAgent: (agentId: number, text: string) => Promise<boolean> // false: rejected (toasted), keep the draft
+  addNote: (sessionId: number, type: NoteType, content: string, scope?: string) => Promise<boolean>
   setNoteStatus: (sessionId: number, noteId: number, status: 'open' | 'resolved') => Promise<void>
   loadAgentEvents: (agentId: number) => Promise<void>
 
@@ -170,8 +172,9 @@ export const useAppStore = create<AppState>((set, get) => {
       setTimeout(() => set((s) => ({toasts: s.toasts.filter((t) => t.id !== id)})), 6000)
     },
 
-    createSession: async (name, workDir, provider, cfg) => {
-      const se = await api.createSession(name, workDir, provider, cfg)
+    createSession: async (name, workDir, provider, cfg, mode = 'orchestra') => {
+      let se = await api.createSession(name, workDir, provider, cfg)
+      if (mode === 'normal') se = await api.setSessionMode(se.id, mode)
       get().sessionCreated(se)
       select(se.id)
     },
@@ -194,8 +197,13 @@ export const useAppStore = create<AppState>((set, get) => {
     pauseAgent: async (id) => { await toasting(api.pauseAgent(id)) },
     resumeAgent: async (id) => { await toasting(api.resumeAgent(id)) },
     finishAgent: async (id) => { await toasting(api.finishAgent(id)) },
-    addNote: async (sid, type, content) => {
-      const n = await toasting(api.addNote(sid, type, content))
+    restartAgent: async (id) => {
+      const newId = await toasting(api.restartAgent(id))
+      if (newId) set({selectedAgentId: newId})
+    },
+    messageAgent: async (id, text) => !!(await toasting(api.messageAgent(id, text).then(() => true))), // the user_message event shows it
+    addNote: async (sid, type, content, scope) => {
+      const n = await toasting(api.addNote(sid, type, content, scope))
       if (n) get().patchSession(sid, (d) => ({...d, notes: upsert(d.notes, n)}))
       return !!n
     },

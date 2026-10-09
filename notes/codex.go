@@ -120,7 +120,11 @@ func (c *codexClient) run(a Agent, dir, prompt, systemPrompt, resume, model stri
 		c.fail(err)
 		return
 	}
-	params := map[string]any{"cwd": dir, "approvalPolicy": "never", "developerInstructions": codexPrompt(a, systemPrompt), "config": isolated}
+	instructions := systemPrompt
+	if c.mcpURL != "" {
+		instructions = codexPrompt(a, systemPrompt)
+	}
+	params := map[string]any{"cwd": dir, "approvalPolicy": "never", "developerInstructions": instructions, "config": isolated}
 	preferred, _ := isolated["model"].(string)
 	selected, err := c.selectModel(model, preferred)
 	if err != nil {
@@ -234,9 +238,12 @@ func (c *codexClient) isolatedConfig(dir string) (map[string]any, error) {
 	if err = json.Unmarshal(raw, &v); err != nil {
 		return nil, err
 	}
-	config := map[string]any{"mcp_servers.fragile.url": c.mcpURL, "mcp_servers.fragile.enabled": true, "mcp_servers.fragile.required": true, "model": v.Config.Model, "features.multi_agent": false, "features.plugins": false, "features.memories": false, "features.apps": false, "features.hooks": false, "web_search": "disabled"}
+	config := map[string]any{"model": v.Config.Model, "features.multi_agent": false, "features.plugins": false, "features.memories": false, "features.apps": false, "features.hooks": false, "web_search": "disabled"}
+	if c.mcpURL != "" { // empty: a normal-mode agent, which gets no Fragile tools
+		config["mcp_servers.fragile.url"], config["mcp_servers.fragile.enabled"], config["mcp_servers.fragile.required"] = c.mcpURL, true, true
+	}
 	for name := range v.Config.MCP {
-		if name != "fragile" {
+		if name != "fragile" || c.mcpURL == "" {
 			if strings.ContainsAny(name, ".\" \t\n") {
 				return nil, errors.New("cannot isolate an MCP server with an unsupported name; rename it in Codex config")
 			}
@@ -601,6 +608,9 @@ func (r *Runner) startCodex(a Agent, mcpConfig, logPath, prompt, systemPrompt, r
 	// Keep diagnostic stderr, without passing arbitrary diagnostics to the parser.
 	cmd.Stderr = &lockedWriter{mu: &outputMu, w: out}
 	cmd.WaitDelay = time.Second
+	if r.normalOrchestrator(a) {
+		url = ""
+	}
 	c := &codexClient{mcpURL: url, in: in, emit: emit, pending: map[int]chan rpcReply{}, done: make(chan struct{}), inputs: make(chan []map[string]any, 32)}
 	r.mu.Lock()
 	sr := r.session(a.SessionID)

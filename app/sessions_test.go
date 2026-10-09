@@ -51,6 +51,16 @@ func TestSetSessionConfig(t *testing.T) {
 		t.Fatalf("notes = %+v", ns)
 	}
 
+	// Threshold: decision note names it.
+	cfg.EscalationThreshold = "only when blocked"
+	if se, err = a.SetSessionConfig(se.ID, cfg); err != nil || !reflect.DeepEqual(se.SessionConfig, cfg) {
+		t.Fatalf("set = %+v, %v", se.SessionConfig, err)
+	}
+	ns = countNotes()
+	if len(ns) != 2 || ns[1].Type != "decision" || !strings.Contains(ns[1].Content, "only when blocked") {
+		t.Fatalf("notes = %+v", ns)
+	}
+
 	if _, err := a.SetSessionConfig(se.ID, notes.SessionConfig{}); err == nil {
 		t.Fatal("empty CLI list accepted")
 	}

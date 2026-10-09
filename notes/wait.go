@@ -15,6 +15,7 @@ type waitIn struct {
 	SinceID           int64  `json:"since_id" jsonschema:"return notes with an id greater than this (use the highest id you have seen; 0 for all)"`
 	TimeoutS          int    `json:"timeout_s,omitempty" jsonschema:"seconds to block at most; default 60, max 120"`
 	Type              string `json:"type,omitempty" jsonschema:"only wake for notes of this type, e.g. done"`
+	Scope             string `json:"scope,omitempty" jsonschema:"only wake for notes in this scope; default every scope you can access"`
 	FinishedSubagents *int   `json:"finished_subagents,omitempty" jsonschema:"orchestrator only: also wake when more sub-agents than this have exited or crashed (pass the finished_subagents value of your previous call, 0 at first)"`
 }
 
@@ -41,15 +42,15 @@ func (s *Server) waitForNotes(ctx context.Context, a Agent, in waitIn) (any, err
 		timeout = defaultWait
 	}
 	timeout = min(timeout, maxWait)
-	board, err := s.Store.SessionBoard(a.SessionID)
-	if err != nil {
-		return nil, err
-	}
 	timer := time.NewTimer(timeout)
 	defer timer.Stop()
 	for {
 		changed := s.Log.Changed(a.SessionID) // before the check, so no change is missed
-		notes, err := s.Store.ListNotes(a.SessionID, board, NoteFilter{Type: in.Type, SinceID: in.SinceID})
+		scopes, err := s.pickScopes(a, in.Scope, true, true) // each round: the orchestrator's spawns may add scopes
+		if err != nil {
+			return nil, err
+		}
+		notes, err := s.Store.ListNotesIn(a.SessionID, boardIDs(scopes), NoteFilter{Type: in.Type, SinceID: in.SinceID})
 		if err != nil {
 			return nil, err
 		}

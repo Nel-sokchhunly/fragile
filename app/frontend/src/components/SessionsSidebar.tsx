@@ -1,4 +1,5 @@
 import {PanelLeftClose, PanelLeftOpen, Plus, Trash2} from 'lucide-react'
+import {EscalationInbox} from '@/components/EscalationInbox'
 import {LimitLine} from '@/components/LimitLine'
 import {NewSessionDialog} from '@/components/NewSessionDialog'
 import {StatusLabel} from '@/components/StatusLabel'
@@ -106,6 +107,7 @@ export function SessionsSidebar({onToggle}: {onToggle: () => void}) {
       <nav aria-label="Sessions" className="flex h-full flex-col items-center gap-1 bg-sidebar py-1.5 text-sidebar-foreground">
         {toggle}
         {add}
+        <EscalationInbox side="right"/>
         <ScrollArea className="min-h-0 w-full flex-1">
           <div className="flex flex-col items-center gap-1 py-1">
             {sessions.map((s, i) => <RailItem key={s.id} session={s} index={i} selected={s.id === selectedId}/>)}
@@ -121,6 +123,7 @@ export function SessionsSidebar({onToggle}: {onToggle: () => void}) {
     <nav aria-label="Sessions" className="flex h-full flex-col bg-sidebar text-sidebar-foreground">
       <header className="flex h-[52px] shrink-0 items-center gap-0.5 pr-1.5 pl-3">
         <h2 className="flex-1 text-base font-semibold tracking-[-0.01em]">Fragile</h2>
+        <EscalationInbox/>
         <SettingsDialog/>
         <ShortcutsDialog/>
         {toggle}

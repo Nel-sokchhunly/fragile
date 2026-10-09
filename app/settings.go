@@ -13,10 +13,11 @@ import (
 
 // Each field of Settings is one row of the settings table, holding its JSON value.
 const (
-	keyAutoCompact       = "auto_compact_tokens"
-	keyOrchestratorRules = "orchestrator_rules"
-	keySubagentProviders = "subagent_providers"
-	keyDisabledPlugins   = "subagent_disabled_plugins"
+	keyAutoCompact         = "auto_compact_tokens"
+	keyOrchestratorRules   = "orchestrator_rules"
+	keyEscalationThreshold = "escalation_threshold"
+	keySubagentProviders   = "subagent_providers"
+	keyDisabledPlugins     = "subagent_disabled_plugins"
 )
 
 // SubagentProviderSetting is one CLI in the global template: whether new
@@ -33,9 +34,10 @@ type SubagentProvidersSettings map[string]SubagentProviderSetting
 // they are a template: a new session copies them into its notes.SessionConfig,
 // and changing them never affects existing sessions.
 type Settings struct {
-	AutoCompactTokens int                       `json:"auto_compact_tokens"` // 0 = off (default)
-	OrchestratorRules string                    `json:"orchestrator_rules"`
-	SubagentProviders SubagentProvidersSettings `json:"subagent_providers"` // nil = never saved: GetSettings enables every detected CLI
+	AutoCompactTokens   int                       `json:"auto_compact_tokens"` // 0 = off (default)
+	OrchestratorRules   string                    `json:"orchestrator_rules"`
+	EscalationThreshold string                    `json:"escalation_threshold"`
+	SubagentProviders   SubagentProvidersSettings `json:"subagent_providers"` // nil = never saved: GetSettings enables every detected CLI
 
 	// DisabledPlugins are notes.UserPlugins names that newly spawned sub-agents
 	// do not load. Global, read at spawn time; empty (default) loads them all.
@@ -44,7 +46,11 @@ type Settings struct {
 
 // sessionConfig is the template for a new session.
 func (s Settings) sessionConfig() notes.SessionConfig {
-	c := notes.SessionConfig{AutoCompactTokens: s.AutoCompactTokens, OrchestratorRules: s.OrchestratorRules}
+	c := notes.SessionConfig{
+		AutoCompactTokens:   s.AutoCompactTokens,
+		OrchestratorRules:   s.OrchestratorRules,
+		EscalationThreshold: s.EscalationThreshold,
+	}
 	for _, p := range notes.Providers {
 		if s.SubagentProviders[p].Enabled {
 			c.EnabledProviders = append(c.EnabledProviders, p)
@@ -86,7 +92,7 @@ func (a *App) settings() (Settings, error) {
 		return a.prefs.cur, nil
 	}
 	var s Settings
-	for key, dst := range map[string]any{keyAutoCompact: &s.AutoCompactTokens, keyOrchestratorRules: &s.OrchestratorRules, keySubagentProviders: &s.SubagentProviders, keyDisabledPlugins: &s.DisabledPlugins} {
+	for key, dst := range map[string]any{keyAutoCompact: &s.AutoCompactTokens, keyOrchestratorRules: &s.OrchestratorRules, keyEscalationThreshold: &s.EscalationThreshold, keySubagentProviders: &s.SubagentProviders, keyDisabledPlugins: &s.DisabledPlugins} {
 		v, err := a.store.GetSetting(key)
 		if errors.Is(err, notes.ErrNotFound) {
 			continue
@@ -128,7 +134,7 @@ func (a *App) SetSettings(s Settings) error {
 	s.DisabledPlugins = slices.Clone(s.DisabledPlugins)
 	a.prefs.mu.Lock()
 	defer a.prefs.mu.Unlock()
-	for key, v := range map[string]any{keyAutoCompact: s.AutoCompactTokens, keyOrchestratorRules: s.OrchestratorRules, keySubagentProviders: s.SubagentProviders, keyDisabledPlugins: s.DisabledPlugins} {
+	for key, v := range map[string]any{keyAutoCompact: s.AutoCompactTokens, keyOrchestratorRules: s.OrchestratorRules, keyEscalationThreshold: s.EscalationThreshold, keySubagentProviders: s.SubagentProviders, keyDisabledPlugins: s.DisabledPlugins} {
 		b, _ := json.Marshal(v)
 		if err := a.store.PutSetting(key, string(b)); err != nil {
 			a.prefs.loaded = false // some rows may be written; reload them

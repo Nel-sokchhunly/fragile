@@ -122,6 +122,36 @@ func TestRunnerSubagentCrashes(t *testing.T) {
 	}
 }
 
+func TestRunnerSubagentExitNonZeroAfterDone(t *testing.T) {
+	r, store, sess, evPath := newTestRunner(t, `sleep 1; echo boom >&2; exit 1`)
+	orch, _ := store.CreateAgent(sess.ID, "orchestrator", 0, 0)
+	a, err := r.SpawnSubagent(sess.ID, orch.ID, "", "do it", "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	board, _ := store.SessionBoard(sess.ID)
+	store.PostNote(sess.ID, board, a.ID, "done", "finished")
+	r.Wait(sess.ID)
+
+	got, _ := store.GetAgent(sess.ID, a.ID)
+	if got.Status != "exited" || got.ExitCode == nil || *got.ExitCode != 1 {
+		t.Fatalf("agent: %+v", got)
+	}
+	if task, _ := store.GetTask(sess.ID, a.TaskID); task.Status != "done" {
+		t.Fatalf("task status = %q, want done", task.Status)
+	}
+	if b, _ := os.ReadFile(a.LogPath); strings.TrimSpace(string(b)) != "boom" {
+		t.Fatalf("stderr not in log: %q", b)
+	}
+	ev, _ := os.ReadFile(evPath)
+	if !strings.Contains(string(ev), `"status":"exited"`) || !strings.Contains(string(ev), `"error_after_done":true`) {
+		t.Fatalf("events:\n%s", ev)
+	}
+	if strings.Contains(string(ev), `"status":"crashed"`) || strings.Contains(string(ev), "missing_done_note") {
+		t.Fatalf("unexpected crashed or missing_done_note in events:\n%s", ev)
+	}
+}
+
 func TestRunnerStopAllRecordsEverything(t *testing.T) {
 	r, store, sess, evPath := newTestRunner(t, `sleep 300`)
 	orch, err := r.StartOrchestrator(sess.ID, "build a thing")

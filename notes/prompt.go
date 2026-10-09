@@ -27,6 +27,9 @@ func sessionPromptText(se Session) string {
 	if rules := strings.TrimSpace(se.OrchestratorRules); rules != "" {
 		text += "\n\n**The user's rules for this session** (they override the defaults above, including which CLI and model to pick):\n\n" + rules
 	}
+	if threshold := strings.TrimSpace(se.EscalationThreshold); threshold != "" {
+		text += "\n\n**When to escalate to the user** (overrides the Escalation section): " + threshold
+	}
 	return text
 }
 

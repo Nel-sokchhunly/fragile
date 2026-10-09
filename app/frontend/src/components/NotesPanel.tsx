@@ -1,4 +1,4 @@
-import {useState} from 'react'
+import {useMemo, useState} from 'react'
 import {Check, Plus, Undo2} from 'lucide-react'
 import {Button} from '@/components/ui/button'
 import {Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger} from '@/components/ui/dialog'
@@ -21,7 +21,7 @@ const TYPE_STYLE: Record<NoteType, string> = {
 }
 const typeLabel = (t: NoteType) => t.replace('_', ' ') // dialog labels; the list shows the raw type
 
-function AddNoteDialog({sessionId}: {sessionId: number}) {
+function AddNoteDialog({sessionId, scope}: {sessionId: number; scope: string}) {
   const addNote = useAppStore((s) => s.addNote)
   const [open, setOpen] = useState(false)
   const [type, setType] = useState<NoteType>('heads_up')
@@ -29,7 +29,7 @@ function AddNoteDialog({sessionId}: {sessionId: number}) {
 
   const submit = async () => {
     if (!content.trim()) return
-    if (await addNote(sessionId, type, content.trim())) { // on failure a toast shows; keep the text
+    if (await addNote(sessionId, type, content.trim(), scope)) { // on failure a toast shows; keep the text
       setContent('')
       setOpen(false)
     }
@@ -48,7 +48,7 @@ function AddNoteDialog({sessionId}: {sessionId: number}) {
         <form onSubmit={(e) => { e.preventDefault(); void submit() }} className="flex flex-col gap-3">
           <DialogHeader>
             <DialogTitle>Add note</DialogTitle>
-            <DialogDescription>Posted as you; agents read it.</DialogDescription>
+            <DialogDescription>Posted as you{scope !== 'session' && <> in <span className="font-mono">{scope}</span></>}; agents read it.</DialogDescription>
           </DialogHeader>
           <Select value={type} onValueChange={(v) => setType(v as NoteType)}>
             <SelectTrigger aria-label="Note type" className="w-40"><SelectValue/></SelectTrigger>
@@ -86,6 +86,7 @@ function NoteRow({sessionId, note}: {sessionId: number; note: Note}) {
         className={cn('min-w-0 flex-1 cursor-pointer text-left', open ? 'break-words whitespace-pre-wrap' : 'truncate', resolved && 'line-through')}
       >
         <span className={cn('font-mono text-xs', TYPE_STYLE[note.type])}>{note.type}</span>{' '}
+        {note.scope !== 'session' && <><span className="font-mono text-xs text-muted-foreground">[{note.scope}]</span>{' '}</>}
         <span className="font-mono text-xs text-muted-foreground">{author}</span>{' '}
         {note.content}
       </button>
@@ -104,12 +105,28 @@ function NoteRow({sessionId, note}: {sessionId: number; note: Note}) {
 }
 
 export function NotesPanel({sessionId}: {sessionId: number | null}) {
-  const notes = useAppStore((s) => (sessionId == null ? NO_NOTES : (s.data[sessionId]?.notes ?? NO_NOTES)))
+  const all = useAppStore((s) => (sessionId == null ? NO_NOTES : (s.data[sessionId]?.notes ?? NO_NOTES)))
+  const [filter, setFilter] = useState('all') // 'all', 'session' or a private scope
+  const privateScopes = useMemo(() => [...new Set(all.map((n) => n.scope).filter((sc) => sc !== 'session'))].sort(), [all])
+  const active = filter === 'all' || filter === 'session' || privateScopes.includes(filter) ? filter : 'all'
+  const notes = active === 'all' ? all : all.filter((n) => n.scope === active)
   return (
     <section className="flex h-full min-h-0 flex-col" aria-label="Notes">
       <header className="flex h-9 shrink-0 items-center justify-between gap-2 pr-1.5 pl-3">
         <h2 className="text-title font-semibold">Notes</h2>
-        {sessionId != null && <AddNoteDialog sessionId={sessionId}/>}
+        <div className="flex items-center gap-1">
+          {privateScopes.length > 0 && (
+            <Select value={active} onValueChange={setFilter}>
+              <SelectTrigger aria-label="Scope filter" size="sm" className="h-7 w-36 font-mono text-xs"><SelectValue/></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All scopes</SelectItem>
+                <SelectItem value="session">session</SelectItem>
+                {privateScopes.map((sc) => <SelectItem key={sc} value={sc}>{sc}</SelectItem>)}
+              </SelectContent>
+            </Select>
+          )}
+          {sessionId != null && <AddNoteDialog sessionId={sessionId} scope={active === 'all' ? 'session' : active}/>}
+        </div>
       </header>
       <ScrollArea className="min-h-0 flex-1">
         {notes.length === 0 ? (

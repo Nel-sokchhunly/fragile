@@ -6,6 +6,10 @@ export function AddNote(arg1, arg2, arg3) {
   return window['go']['main']['App']['AddNote'](arg1, arg2, arg3);
 }
 
+export function AddScopedNote(arg1, arg2, arg3, arg4) {
+  return window['go']['main']['App']['AddScopedNote'](arg1, arg2, arg3, arg4);
+}
+
 export function AnswerEscalation(arg1, arg2) {
   return window['go']['main']['App']['AnswerEscalation'](arg1, arg2);
 }
@@ -74,6 +78,10 @@ export function InterruptSession(arg1) {
   return window['go']['main']['App']['InterruptSession'](arg1);
 }
 
+export function ListOpenEscalations() {
+  return window['go']['main']['App']['ListOpenEscalations']();
+}
+
 export function ListRepos(arg1) {
   return window['go']['main']['App']['ListRepos'](arg1);
 }
@@ -86,12 +94,20 @@ export function ListUserPlugins() {
   return window['go']['main']['App']['ListUserPlugins']();
 }
 
+export function MessageAgent(arg1, arg2) {
+  return window['go']['main']['App']['MessageAgent'](arg1, arg2);
+}
+
 export function PauseAgent(arg1) {
   return window['go']['main']['App']['PauseAgent'](arg1);
 }
 
 export function PickDirectory() {
   return window['go']['main']['App']['PickDirectory']();
+}
+
+export function RestartAgent(arg1) {
+  return window['go']['main']['App']['RestartAgent'](arg1);
 }
 
 export function ResumeAgent(arg1) {
@@ -108,6 +124,10 @@ export function SendMessage(arg1, arg2, arg3) {
 
 export function SetSessionConfig(arg1, arg2) {
   return window['go']['main']['App']['SetSessionConfig'](arg1, arg2);
+}
+
+export function SetSessionMode(arg1, arg2) {
+  return window['go']['main']['App']['SetSessionMode'](arg1, arg2);
 }
 
 export function SetSettings(arg1) {
