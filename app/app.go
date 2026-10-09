@@ -298,3 +298,8 @@ func (a *App) UpdateNote(sessionID, noteID int64, content, status string) (notes
 	a.log.Write(notes.EventNoteUpdated, sessionID, 0, n)
 	return n, nil
 }
+
+// GetProviders returns available CLI providers with their detection state and default models.
+func (a *App) GetProviders() []notes.ProviderInfo {
+	return notes.DetectProviders()
+}

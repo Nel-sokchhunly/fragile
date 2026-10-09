@@ -44,12 +44,28 @@ const (
 // OrchestratorPrompt returns the system prompt appended for the orchestrator,
 // with the absolute working directory substituted in. interactive selects the
 // desktop-app lifecycle and escalation behaviour over the one-shot CLI's.
-func OrchestratorPrompt(workDir string, interactive bool) string {
+// Optional subagentProviders specifies which sub-agent CLI providers are available.
+func OrchestratorPrompt(workDir string, interactive bool, subagentProviders ...string) string {
 	life, wait, esc := lifecycleOneShot, waitOneShot, escalationOneShot
 	if interactive {
 		life, wait, esc = lifecycleInteractive, waitInteractive, escalationInteractive
 	}
-	return strings.NewReplacer("{{WORKDIR}}", absDir(workDir), "{{LIFECYCLE}}", life, "{{WAIT}}", wait, "{{ESCALATION}}", esc).Replace(orchestratorPrompt)
+	var provs []string
+	if len(subagentProviders) > 0 {
+		provs = subagentProviders
+	} else {
+		for _, info := range AvailableSubagentProviders(nil) {
+			provs = append(provs, info.Name)
+		}
+	}
+	provText := FormatAvailableProviders(provs)
+	return strings.NewReplacer(
+		"{{WORKDIR}}", absDir(workDir),
+		"{{LIFECYCLE}}", life,
+		"{{WAIT}}", wait,
+		"{{ESCALATION}}", esc,
+		"{{PROVIDERS}}", provText,
+	).Replace(orchestratorPrompt)
 }
 
 func absDir(dir string) string {

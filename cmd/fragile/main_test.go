@@ -1,6 +1,10 @@
 package main
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/Nel-sokchhunly/fragile/notes"
+)
 
 func TestCheckLoopback(t *testing.T) {
 	for addr, ok := range map[string]bool{
@@ -13,3 +17,11 @@ func TestCheckLoopback(t *testing.T) {
 		}
 	}
 }
+
+func TestRunInvalidSubagentProvider(t *testing.T) {
+	err := run(notes.Config{Provider: "claude", Addr: "127.0.0.1:7777"}, "unknown_provider", "")
+	if err == nil {
+		t.Fatal("expected error for invalid subagent provider")
+	}
+}
+

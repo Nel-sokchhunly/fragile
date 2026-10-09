@@ -17,6 +17,20 @@ export const PROVIDER_NAMES: Record<SessionProvider, string> = {
   agy: 'Antigravity',
 }
 
+export interface ProviderInfo {
+  name: SessionProvider;
+  available: boolean;
+  reason?: string;
+  default_model?: string;
+}
+
+export type SubagentProvidersSettings = {
+  [key in SessionProvider]?: {
+    enabled: boolean;
+    default_model?: string;
+  };
+}
+
 export type Session = {
   provider: SessionProvider
   id: number
@@ -25,6 +39,7 @@ export type Session = {
   work_dir?: string // directory its agents run in; absent/'' for sessions without one
   created_at: string
   agent_count: number // 0 = new: the orchestrator starts with the first message
+  enabled_providers?: SessionProvider[]
 }
 
 export type Agent = {
@@ -42,6 +57,7 @@ export type Agent = {
   context_used?: number // tokens in the agent's latest message; absent = unknown
   context_window?: number
   model?: string // e.g. "claude-opus-5-5", from the agent's init line; absent = unknown
+  provider: SessionProvider
 }
 
 // Runtime state of a running sub-agent (Go: AgentActivity): mid-turn, and paused by the user (no automatic wakes).

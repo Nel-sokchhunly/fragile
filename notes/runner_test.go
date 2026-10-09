@@ -806,3 +806,39 @@ func TestRunnerSpawnTitle(t *testing.T) {
 	}
 	r.Wait(sess.ID)
 }
+
+func TestRunnerSpawnSubagentProviders(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	r, store, sess, _ := newTestRunner(t, `echo '{"type":"result"}'`)
+	r.AGYCommand, _ = fakeAGY(t)
+	orch, _ := store.CreateAgent(sess.ID, "orchestrator", 0, 0)
+
+	// Explicit claude provider
+	a1, err := r.SpawnSubagent(sess.ID, orch.ID, "claude-sub", "do work", "", ProviderClaude)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if a1.Provider != ProviderClaude {
+		t.Errorf("a1 provider = %q, want %q", a1.Provider, ProviderClaude)
+	}
+
+	// Explicit agy provider (model flash)
+	a2, err := r.SpawnSubagent(sess.ID, orch.ID, "agy-sub", "do work", "flash", ProviderAGY)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if a2.Provider != ProviderAGY {
+		t.Errorf("a2 provider = %q, want %q", a2.Provider, ProviderAGY)
+	}
+
+	// Omitted provider defaults to session provider
+	a3, err := r.SpawnSubagent(sess.ID, orch.ID, "default-sub", "do work", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if a3.Provider != ProviderClaude {
+		t.Errorf("a3 provider = %q, want %q", a3.Provider, ProviderClaude)
+	}
+	r.Wait(sess.ID)
+}
+

@@ -29,7 +29,7 @@ func TestStoreNoteRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	orch, err := s.CreateAgent(sess.ID, "orchestrator", 0, 0)
+	orch, err := s.CreateAgent(sess.ID, "orchestrator", 0, 0, ProviderClaude)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -125,7 +125,7 @@ func TestStoreAgentEvents(t *testing.T) {
 	defer s.Close()
 	a, _ := s.CreateSession("a")
 	b, _ := s.CreateSession("b")
-	ag, _ := s.CreateAgent(a.ID, "orchestrator", 0, 0)
+	ag, _ := s.CreateAgent(a.ID, "orchestrator", 0, 0, ProviderClaude)
 	for i := 0; i < 5; i++ {
 		if _, err := s.AppendAgentEvent(a.ID, ag.ID, "output", itoa(int64(i))); err != nil {
 			t.Fatal(err)
@@ -240,8 +240,8 @@ func TestMigratePhase0Database(t *testing.T) {
 
 	var v int
 	s.db.QueryRow(`PRAGMA user_version`).Scan(&v)
-	if v != 9 {
-		t.Fatalf("user_version = %d, want 9", v)
+	if v != 10 {
+		t.Fatalf("user_version = %d, want 10", v)
 	}
 	if _, err := s.GetSetting("k"); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("unset setting: %v", err)
@@ -330,8 +330,8 @@ func TestUserNotesAndMigration003(t *testing.T) {
 	sess, _ := s.CreateSessionIn("t", "/some/dir")
 	other, _ := s.CreateSession("other")
 	board, _ := s.SessionBoard(sess.ID)
-	agent, _ := s.CreateAgent(sess.ID, "orchestrator", 0, 0)
-	foreign, _ := s.CreateAgent(other.ID, "orchestrator", 0, 0)
+	agent, _ := s.CreateAgent(sess.ID, "orchestrator", 0, 0, ProviderClaude)
+	foreign, _ := s.CreateAgent(other.ID, "orchestrator", 0, 0, ProviderClaude)
 
 	un, err := s.PostNote(sess.ID, board, 0, "decision", "from the user")
 	if err != nil || un.AuthorID != 0 {
@@ -371,9 +371,9 @@ func TestMarkRunningAgentsCrashed(t *testing.T) {
 	}
 	defer s.Close()
 	sess, _ := s.CreateSession("t")
-	orch, _ := s.CreateAgent(sess.ID, "orchestrator", 0, 0)
+	orch, _ := s.CreateAgent(sess.ID, "orchestrator", 0, 0, ProviderClaude)
 	task, _ := s.CreateTask(sess.ID, "t", "")
-	sub, _ := s.CreateAgent(sess.ID, "subagent", orch.ID, task.ID)
+	sub, _ := s.CreateAgent(sess.ID, "subagent", orch.ID, task.ID, ProviderClaude)
 	s.SetTaskAgent(sess.ID, task.ID, sub.ID)
 	zero := 0
 	s.SetAgentStatus(sess.ID, orch.ID, "exited", &zero)
@@ -400,7 +400,7 @@ func TestReopenEscalation(t *testing.T) {
 	}
 	defer s.Close()
 	sess, _ := s.CreateSession("t")
-	orch, _ := s.CreateAgent(sess.ID, "orchestrator", 0, 0)
+	orch, _ := s.CreateAgent(sess.ID, "orchestrator", 0, 0, ProviderClaude)
 	e, err := s.CreateEscalation(sess.ID, orch.ID, "q", "")
 	if err != nil {
 		t.Fatal(err)
@@ -467,8 +467,8 @@ func TestMigrateV7ToV8(t *testing.T) {
 
 	var v int
 	s.db.QueryRow(`PRAGMA user_version`).Scan(&v)
-	if v != 9 {
-		t.Fatalf("user_version = %d, want 9", v)
+	if v != 10 {
+		t.Fatalf("user_version = %d, want 10", v)
 	}
 
 	// Verify old sessions preserved
@@ -490,5 +490,118 @@ func TestMigrateV7ToV8(t *testing.T) {
 	// Invalid provider is still rejected
 	if _, err := s.CreateSessionWithProvider("inv", t.TempDir(), "unsupported"); err == nil {
 		t.Fatal("invalid provider should be rejected")
+	}
+}
+
+func TestMultiCLIMigrationAndProviders(t *testing.T) {
+	s, err := OpenStore(filepath.Join(t.TempDir(), "multi_cli.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+
+	// 1. Session creation with enabled providers
+	enabled := []string{ProviderClaude, ProviderCodex}
+	sess, err := s.CreateSessionWithProviders("test-session", t.TempDir(), ProviderClaude, enabled)
+	if err != nil {
+		t.Fatalf("CreateSessionWithProviders failed: %v", err)
+	}
+	if len(sess.EnabledProviders) != 2 || sess.EnabledProviders[0] != ProviderClaude || sess.EnabledProviders[1] != ProviderCodex {
+		t.Fatalf("unexpected enabled providers on created session: %+v", sess.EnabledProviders)
+	}
+
+	// GetSession preserves enabled providers
+	gotSess, err := s.GetSession(sess.ID)
+	if err != nil {
+		t.Fatalf("GetSession failed: %v", err)
+	}
+	if len(gotSess.EnabledProviders) != 2 || gotSess.EnabledProviders[0] != ProviderClaude || gotSess.EnabledProviders[1] != ProviderCodex {
+		t.Fatalf("unexpected enabled providers on GetSession: %+v", gotSess.EnabledProviders)
+	}
+
+	// ListSessions preserves enabled providers
+	sessions, err := s.ListSessions()
+	if err != nil || len(sessions) != 1 {
+		t.Fatalf("ListSessions failed: len=%d err=%v", len(sessions), err)
+	}
+	if len(sessions[0].EnabledProviders) != 2 {
+		t.Fatalf("unexpected enabled providers in ListSessions: %+v", sessions[0].EnabledProviders)
+	}
+
+	// SetSessionEnabledProviders updates enabled providers
+	if err := s.SetSessionEnabledProviders(sess.ID, []string{ProviderAGY}); err != nil {
+		t.Fatalf("SetSessionEnabledProviders failed: %v", err)
+	}
+	gotSess, err = s.GetSession(sess.ID)
+	if err != nil {
+		t.Fatalf("GetSession failed: %v", err)
+	}
+	if len(gotSess.EnabledProviders) != 1 || gotSess.EnabledProviders[0] != ProviderAGY {
+		t.Fatalf("unexpected enabled providers after update: %+v", gotSess.EnabledProviders)
+	}
+
+	// Session created without explicit enabled providers has empty slice
+	plainSess, err := s.CreateSession("plain")
+	if err != nil {
+		t.Fatalf("CreateSession failed: %v", err)
+	}
+	if plainSess.EnabledProviders == nil || len(plainSess.EnabledProviders) != 0 {
+		t.Fatalf("expected empty slice for plain session enabled providers, got %+v", plainSess.EnabledProviders)
+	}
+
+	// 2. Agent creation and provider fallback
+	// In Claude session: empty provider falls back to session provider ("claude")
+	orchClaude, err := s.CreateAgent(sess.ID, "orchestrator", 0, 0, "")
+	if err != nil {
+		t.Fatalf("CreateAgent fallback failed: %v", err)
+	}
+	if orchClaude.Provider != ProviderClaude {
+		t.Fatalf("expected fallback provider %q, got %q", ProviderClaude, orchClaude.Provider)
+	}
+
+	// In Codex session: empty provider falls back to session provider ("codex")
+	codexSess, err := s.CreateSessionWithProvider("codex-session", t.TempDir(), ProviderCodex)
+	if err != nil {
+		t.Fatalf("create codex session failed: %v", err)
+	}
+	orchCodex, err := s.CreateAgent(codexSess.ID, "orchestrator", 0, 0, "")
+	if err != nil {
+		t.Fatalf("CreateAgent fallback failed: %v", err)
+	}
+	if orchCodex.Provider != ProviderCodex {
+		t.Fatalf("expected fallback provider %q, got %q", ProviderCodex, orchCodex.Provider)
+	}
+
+	// Specific provider can differ from session provider
+	subCodex, err := s.CreateAgent(sess.ID, "subagent", orchClaude.ID, 0, ProviderCodex)
+	if err != nil {
+		t.Fatalf("CreateAgent with explicit codex failed: %v", err)
+	}
+	if subCodex.Provider != ProviderCodex {
+		t.Fatalf("expected explicit provider %q, got %q", ProviderCodex, subCodex.Provider)
+	}
+
+	subAGY, err := s.CreateAgent(sess.ID, "subagent", orchClaude.ID, 0, ProviderAGY)
+	if err != nil {
+		t.Fatalf("CreateAgent with explicit agy failed: %v", err)
+	}
+	if subAGY.Provider != ProviderAGY {
+		t.Fatalf("expected explicit provider %q, got %q", ProviderAGY, subAGY.Provider)
+	}
+
+	// Invalid provider is rejected
+	if _, err := s.CreateAgent(sess.ID, "subagent", orchClaude.ID, 0, "invalid-provider"); err == nil {
+		t.Fatal("expected error creating agent with invalid provider, got nil")
+	}
+
+	// FindAgent and GetAgent preserve provider
+	found, err := s.FindAgent(subAGY.ID)
+	if err != nil || found.Provider != ProviderAGY {
+		t.Fatalf("FindAgent provider = %q, want %q (err %v)", found.Provider, ProviderAGY, err)
+	}
+
+	gotAgent, err := s.GetAgent(sess.ID, subCodex.ID)
+	if err != nil || gotAgent.Provider != ProviderCodex {
+		t.Fatalf("GetAgent provider = %q, want %q (err %v)", gotAgent.Provider, ProviderCodex, err)
 	}
 }

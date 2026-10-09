@@ -6,6 +6,7 @@ import (
 	"database/sql"
 	"embed"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -154,20 +155,32 @@ const (
 )
 
 type Session struct {
-	ID        int64  `json:"id"`
-	Title     string `json:"title"`
-	Status    string `json:"status"`
-	Provider  string `json:"provider"` // claude (legacy/default) or codex
-	WorkDir   string `json:"work_dir"` // "" = none recorded; the runner's configured WorkDir applies
-	CreatedAt string `json:"created_at"`
-	Agents    int    `json:"agent_count"` // 0 = new: the orchestrator starts with the first message
+	ID               int64    `json:"id"`
+	Title            string   `json:"title"`
+	Status           string   `json:"status"`
+	Provider         string   `json:"provider"` // claude (legacy/default), codex or agy
+	WorkDir          string   `json:"work_dir"` // "" = none recorded; the runner's configured WorkDir applies
+	CreatedAt        string   `json:"created_at"`
+	EnabledProviders []string `json:"enabled_providers,omitempty"`
+	Agents           int      `json:"agent_count"` // 0 = new: the orchestrator starts with the first message
 }
 
-const sessionCols = `id, title, status, provider, work_dir, created_at, (SELECT COUNT(*) FROM agent_instances WHERE session_id = sessions.id)`
+const sessionCols = `id, title, status, provider, work_dir, created_at, enabled_providers, (SELECT COUNT(*) FROM agent_instances WHERE session_id = sessions.id)`
 
 func scanSession(r scanner) (se Session, err error) {
-	err = r.Scan(&se.ID, &se.Title, &se.Status, &se.Provider, &se.WorkDir, &se.CreatedAt, &se.Agents)
-	return se, one(err)
+	var rawEnabled sql.NullString
+	err = r.Scan(&se.ID, &se.Title, &se.Status, &se.Provider, &se.WorkDir, &se.CreatedAt, &rawEnabled, &se.Agents)
+	if err != nil {
+		return se, one(err)
+	}
+	se.EnabledProviders = []string{}
+	if rawEnabled.Valid && rawEnabled.String != "" {
+		var ep []string
+		if err := json.Unmarshal([]byte(rawEnabled.String), &ep); err == nil && ep != nil {
+			se.EnabledProviders = ep
+		}
+	}
+	return se, nil
 }
 
 // CreateSession starts a session in the working state together with its
@@ -180,6 +193,10 @@ func (s *Store) CreateSessionIn(title, workDir string) (Session, error) {
 }
 
 func (s *Store) CreateSessionWithProvider(title, workDir, provider string) (Session, error) {
+	return s.CreateSessionWithProviders(title, workDir, provider, nil)
+}
+
+func (s *Store) CreateSessionWithProviders(title, workDir, provider string, enabledProviders []string) (Session, error) {
 	if err := CheckProvider(provider); err != nil {
 		return Session{}, err
 	}
@@ -188,7 +205,15 @@ func (s *Store) CreateSessionWithProvider(title, workDir, provider string) (Sess
 		return Session{}, err
 	}
 	defer tx.Rollback()
-	se, err := scanSession(tx.QueryRow(`INSERT INTO sessions (title, work_dir, provider) VALUES (?, ?, ?) RETURNING id, title, status, provider, work_dir, created_at, 0`, title, workDir, provider))
+	var rawProviders any = nil
+	if len(enabledProviders) > 0 {
+		b, err := json.Marshal(enabledProviders)
+		if err != nil {
+			return Session{}, err
+		}
+		rawProviders = string(b)
+	}
+	se, err := scanSession(tx.QueryRow(`INSERT INTO sessions (title, work_dir, provider, enabled_providers) VALUES (?, ?, ?, ?) RETURNING id, title, status, provider, work_dir, created_at, enabled_providers, 0`, title, workDir, provider, rawProviders))
 	if err != nil {
 		return Session{}, err
 	}
@@ -196,6 +221,17 @@ func (s *Store) CreateSessionWithProvider(title, workDir, provider string) (Sess
 		return Session{}, err
 	}
 	return se, tx.Commit()
+}
+
+func (s *Store) SetSessionEnabledProviders(sessionID int64, providers []string) error {
+	if providers == nil {
+		providers = []string{}
+	}
+	data, err := json.Marshal(providers)
+	if err != nil {
+		return err
+	}
+	return affected(s.db.Exec(`UPDATE sessions SET enabled_providers = ? WHERE id = ?`, string(data), sessionID))
 }
 
 // DeleteSession removes the session and everything keyed by it, in one
@@ -283,15 +319,16 @@ type Agent struct {
 	ContextUsed   int `json:"context_used,omitempty"`   // tokens in the latest assistant message; 0 = unknown
 	ContextWindow int `json:"context_window,omitempty"` // the model's window; 0 = unknown
 
-	Model string `json:"model,omitempty"` // from the stream-json init line; "" = unknown
+	Model    string `json:"model,omitempty"` // from the stream-json init line; "" = unknown
+	Provider string `json:"provider"`
 }
 
 const agentCols = `id, session_id, COALESCE(parent_id,0), role, token, COALESCE(task_id,0), status,
-	COALESCE(pid,0), COALESCE(log_path,''), exit_code, created_at, COALESCE(exited_at,''), context_used, context_window, model`
+	COALESCE(pid,0), COALESCE(log_path,''), exit_code, created_at, COALESCE(exited_at,''), context_used, context_window, model, COALESCE(provider, 'claude')`
 
 func scanAgent(r scanner) (a Agent, err error) {
 	err = r.Scan(&a.ID, &a.SessionID, &a.ParentID, &a.Role, &a.Token, &a.TaskID, &a.Status,
-		&a.PID, &a.LogPath, &a.ExitCode, &a.CreatedAt, &a.ExitedAt, &a.ContextUsed, &a.ContextWindow, &a.Model)
+		&a.PID, &a.LogPath, &a.ExitCode, &a.CreatedAt, &a.ExitedAt, &a.ContextUsed, &a.ContextWindow, &a.Model, &a.Provider)
 	return a, one(err)
 }
 
@@ -306,16 +343,26 @@ func nullable(id int64) any {
 // CreateAgent registers an agent instance in the session. parentID and taskID
 // 0 mean none; otherwise they must belong to the same session (else ErrNotFound).
 // Each agent gets a random token that authenticates its MCP URL.
-func (s *Store) CreateAgent(sessionID int64, role string, parentID, taskID int64) (Agent, error) {
+// If provider is empty, fallback to the session's provider.
+func (s *Store) CreateAgent(sessionID int64, role string, parentID, taskID int64, provider ...string) (Agent, error) {
+	var prov string
+	if len(provider) > 0 {
+		prov = provider[0]
+	}
+	if prov != "" {
+		if err := CheckProvider(prov); err != nil {
+			return Agent{}, err
+		}
+	}
 	tok := make([]byte, 16)
 	if _, err := rand.Read(tok); err != nil {
 		return Agent{}, err
 	}
-	return scanAgent(s.db.QueryRow(`INSERT INTO agent_instances (session_id, parent_id, role, token, task_id)
-		SELECT id, ?2, ?3, ?4, ?5 FROM sessions WHERE id = ?1
+	return scanAgent(s.db.QueryRow(`INSERT INTO agent_instances (session_id, parent_id, role, token, task_id, provider)
+		SELECT id, ?2, ?3, ?4, ?5, CASE WHEN ?6 != '' THEN ?6 ELSE provider END FROM sessions WHERE id = ?1
 		AND (?2 IS NULL OR EXISTS (SELECT 1 FROM agent_instances WHERE id = ?2 AND session_id = ?1))
 		AND (?5 IS NULL OR EXISTS (SELECT 1 FROM tasks WHERE id = ?5 AND session_id = ?1))
-		RETURNING `+agentCols, sessionID, nullable(parentID), role, hex.EncodeToString(tok), nullable(taskID)))
+		RETURNING `+agentCols, sessionID, nullable(parentID), role, hex.EncodeToString(tok), nullable(taskID), prov))
 }
 
 // GetAgentByToken resolves an agent from its secret; the agent carries its SessionID.

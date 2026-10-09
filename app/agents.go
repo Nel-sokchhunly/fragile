@@ -179,7 +179,11 @@ func (a *App) relaunchAgent(ag notes.Agent) error {
 	if err != nil {
 		return err
 	}
-	if se.Provider != notes.ProviderClaude {
+	prov := ag.Provider
+	if prov == "" {
+		prov = se.Provider
+	}
+	if prov != notes.ProviderClaude {
 		return fmt.Errorf("agent %d cannot be resumed: only Claude sub-agents can be resumed after they stop", ag.ID)
 	}
 	providerID, err := a.providerSessionID(ag.SessionID, []notes.Agent{ag})

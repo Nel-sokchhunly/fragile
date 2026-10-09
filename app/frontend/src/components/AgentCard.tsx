@@ -1,4 +1,5 @@
 import {MessageSquare, Terminal} from 'lucide-react'
+import {Badge} from '@/components/ui/badge'
 import {agentContext, agentState, formatExact, modelName} from '@/lib/format'
 import {Tip} from '@/components/ui/tooltip'
 import {cn} from '@/lib/utils'
@@ -40,9 +41,12 @@ export function AgentCard({agent, task, latestLine, elapsed, selected, onSelect}
     >
       <span className="flex w-full justify-between gap-2 leading-5">
         <span className="min-w-0 truncate font-semibold"><span className="font-mono text-xs font-normal text-muted-foreground">#{agent.id}</span> {title}</span>
-        <span className="flex shrink-0 gap-2 font-mono text-xs">
+        <span className="flex shrink-0 items-center gap-2 font-mono text-xs">
           {agent.model && <Tip content={agent.model}><span className="text-muted-foreground">{modelName(agent.model)}</span></Tip>}
           {ctx && <Tip content="context used / window"><span className={ctx.cls}>{ctx.text}</span></Tip>}
+          <Badge variant="outline" className="h-4 px-1 text-[10px] font-mono text-muted-foreground">
+            {agent.provider ?? 'claude'}
+          </Badge>
           <span className={STATE_CLS[agent.status]}>{agentState(agent)} {elapsed}</span>
         </span>
       </span>
