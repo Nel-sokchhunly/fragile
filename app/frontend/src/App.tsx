@@ -1,7 +1,6 @@
 import {useDeferredValue, useEffect, useState} from 'react'
-import {AgentsPanel} from '@/components/AgentsPanel'
 import {ChangesPanel} from '@/components/ChangesPanel'
-import {NotesPanel} from '@/components/NotesPanel'
+import {KanbanBoard} from '@/components/KanbanBoard'
 import {DeleteSessionDialog} from '@/components/DeleteSessionDialog'
 import {NewSessionDialog} from '@/components/NewSessionDialog'
 import {SessionsSidebar} from '@/components/SessionsSidebar'
@@ -68,7 +67,6 @@ export default function App() {
   // Persist panel sizes (react-resizable-panels v4's replacement for autoSaveId).
   const main = useDefaultLayout({id: 'fragile-main-v2'})
   const [startNarrow] = useState(narrowLayout)
-  const right = useDefaultLayout({id: 'fragile-right-v2'})
 
   // Animate only button/shortcut toggles (flex-grow transition); drags and window resizes stay instant.
   const [animating, setAnimating] = useState(false)
@@ -134,13 +132,7 @@ export default function App() {
         </ResizablePanel>
         <ResizableHandle/>
         <ResizablePanel id="right" defaultSize={RIGHT.default} minSize={RIGHT.min}>
-          {sessionId != null && changesOpen ? <ChangesPanel key={sessionId} sessionId={sessionId}/> : (
-            <ResizablePanelGroup id="fragile-right-v2" orientation="vertical" defaultLayout={right.defaultLayout} onLayoutChanged={right.onLayoutChanged}>
-              <ResizablePanel id="agents" defaultSize="60%" minSize="20%"><AgentsPanel sessionId={sessionId}/></ResizablePanel>
-              <ResizableHandle/>
-              <ResizablePanel id="notes" defaultSize="40%" minSize="15%"><NotesPanel sessionId={sessionId}/></ResizablePanel>
-            </ResizablePanelGroup>
-          )}
+          {sessionId != null && changesOpen ? <ChangesPanel key={sessionId} sessionId={sessionId}/> : <KanbanBoard sessionId={sessionId}/>}
         </ResizablePanel>
       </ResizablePanelGroup>
       <DeleteSessionDialog/>

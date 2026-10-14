@@ -28,7 +28,7 @@ type AppState = {
   limit: RateLimit | null // subscription limits (account-wide)
   confirmDelete: number | null // session awaiting delete confirmation
   terminalOpen: Record<number, boolean> // by session id: its terminal pane is shown (not persisted)
-  changesOpen: Record<number, boolean> // by session id: the right column shows Code changes instead of Agents + Notes (not persisted)
+  changesOpen: Record<number, boolean> // by session id: the right column shows Code changes instead of the board (not persisted)
   changesRepo: Record<number, string> // by session id: the repo (relative to its work dir) the Code changes panel shows (not persisted)
 
   init: () => Promise<void>

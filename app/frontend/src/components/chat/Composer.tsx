@@ -31,7 +31,7 @@ async function clipboardImage(): Promise<File | undefined> {
 // `onInterrupt` (set while the orchestrator works) adds an Interrupt button; data-interrupt lets ChatView's Esc click it.
 // `disabledReason` turns the box off and says why (may hold an action). data-composer lets the global shortcuts focus it.
 // `terminal` adds the terminal pane toggle left of the box (it stays usable while the box is off); `changes` likewise
-// toggles the right column between Agents + Notes and Code changes.
+// toggles the right column between the board and Code changes.
 // `sessionId` keeps the draft (text and attachments) in the store per session, so it survives switching; without it
 // the draft is plain local state. `sendDisabled` blocks sending only (typing stays on), e.g. while compacting.
 export function Composer({onSend, onInterrupt, placeholder, label, disabledReason, sendDisabled, sessionId, terminal, changes, allowPDF = true}: {
