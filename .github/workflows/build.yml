@@ -57,7 +57,9 @@ jobs:
         working-directory: app/build/bin
         run: |
           if [ "$RUNNER_OS" = macOS ]; then
-            ditto -c -k --keepParent Fragile.app ../../../fragile-macos-universal.zip
+            # Drag-to-install DMG: the app plus an Applications shortcut.
+            mkdir dmg && cp -R Fragile.app dmg/ && ln -s /Applications dmg/Applications
+            hdiutil create -volname Fragile -srcfolder dmg -format UDZO -ov ../../../fragile-macos-universal.dmg
           else
             tar czf ../../../fragile-linux-amd64.tar.gz Fragile
           fi
@@ -66,7 +68,7 @@ jobs:
           name: fragile-${{ runner.os }}
           # Exact names: a fragile-* glob also matched fragile-spec.md in the checkout.
           path: |
-            fragile-macos-universal.zip
+            fragile-macos-universal.dmg
             fragile-linux-amd64.tar.gz
           if-no-files-found: ignore
 
@@ -82,7 +84,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           # run_attempt keeps the tag unique when a run is re-run.
-          gh release create "build-${{ github.run_number }}.${{ github.run_attempt }}" fragile-macos-universal.zip fragile-linux-amd64.tar.gz \
+          gh release create "build-${{ github.run_number }}.${{ github.run_attempt }}" fragile-macos-universal.dmg fragile-linux-amd64.tar.gz \
             --repo "${{ github.repository }}" --target "${{ github.sha }}" \
             --title "Fragile build ${{ github.run_number }}" \
-            --notes "Built from ${{ github.sha }}. macOS build is unsigned: run \`xattr -dr com.apple.quarantine Fragile.app\` after unzipping. Linux needs libgtk-3 and libwebkit2gtk-4.1 (agents also need bubblewrap and socat)."
+            --notes "Built from ${{ github.sha }}. macOS build is unsigned: run \`xattr -dr com.apple.quarantine /Applications/Fragile.app\` after copying it to Applications. Linux needs libgtk-3 and libwebkit2gtk-4.1 (agents also need bubblewrap and socat)."
