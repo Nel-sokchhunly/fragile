@@ -12,14 +12,15 @@ type Props = {
   latestLine?: string
   elapsed: string
   selected?: boolean
+  open?: number // unresolved blocker/question notes by this agent
   onSelect: () => void
 }
 
 const STATE_CLS = {running: 'text-status-working', exited: 'text-status-exited', stopped: 'text-status-exited', crashed: 'text-status-crashed'} as const
 
-// Two lines: "#id name" + live state, then the latest activity (the task description when there is none yet;
+// Three lines, so it fits a narrow Kanban column: "#id name", live state and process info (wraps), then the latest activity (the task description when there is none yet;
 // the full description and process details are in the hover title). Tool lines are "name {json}".
-export function AgentCard({agent, task, latestLine, elapsed, selected, onSelect}: Props) {
+export function AgentCard({agent, task, latestLine, elapsed, selected, open, onSelect}: Props) {
   const title = task?.title ?? 'agent'
   const detail = latestLine || task?.description
   const ctx = agentContext(agent)
@@ -39,16 +40,15 @@ export function AgentCard({agent, task, latestLine, elapsed, selected, onSelect}
         selected && 'border-border-strong bg-accent',
       )}
     >
-      <span className="flex w-full justify-between gap-2 leading-5">
-        <span className="min-w-0 truncate font-semibold"><span className="font-mono text-xs font-normal text-muted-foreground">#{agent.id}</span> {title}</span>
-        <span className="flex shrink-0 items-center gap-2 font-mono text-xs">
-          {agent.model && <Tip content={agent.model}><span className="text-muted-foreground">{modelName(agent.model)}</span></Tip>}
-          {ctx && <Tip content="context used / window"><span className={ctx.cls}>{ctx.text}</span></Tip>}
-          <Badge variant="outline" className="h-4 px-1 text-[10px] font-mono text-muted-foreground">
-            {agent.provider ?? 'claude'}
-          </Badge>
-          <span className={STATE_CLS[agent.status]}>{agentState(agent)} {elapsed}</span>
-        </span>
+      <span className="min-w-0 truncate leading-5 font-semibold"><span className="font-mono text-xs font-normal text-muted-foreground">#{agent.id}</span> {title}</span>
+      <span className="flex flex-wrap items-center gap-x-2 font-mono text-xs leading-5">
+        <span className={STATE_CLS[agent.status]}>{agentState(agent)} {elapsed}</span>
+        {!!open && <Tip content="open blocker / question notes"><span className="text-note-blocker">{open} open</span></Tip>}
+        {agent.model && <Tip content={agent.model}><span className="text-muted-foreground">{modelName(agent.model)}</span></Tip>}
+        {ctx && <Tip content="context used / window"><span className={ctx.cls}>{ctx.text}</span></Tip>}
+        <Badge variant="outline" className="h-4 px-1 text-[10px] font-mono text-muted-foreground">
+          {agent.provider ?? 'claude'}
+        </Badge>
       </span>
       {detail && (
         <span className="flex min-w-0 items-center gap-1.5 text-[13px] leading-[18px] text-muted-foreground">

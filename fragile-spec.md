@@ -165,6 +165,8 @@ App
 
 ### 4.1 Kanban view for sub-agents `[EXPERIMENT]`
 
+**Promoted in part (#81):** a read-only board replaces the agent list and notes panel. Cards are sub-agent tasks (the orchestrator is not on the board) in Working / Blocked / Done, placed automatically from task status, process state and open `blocker` notes. The notes board opens as a hideable overlay drawer on the right. Everything below that is not covered here (Planned approval gate, Review stage, `create_task`, drag as command) stays `[EXPERIMENT]`.
+
 - Cards are **tasks** with an agent attached. Columns: Planned → Working → Blocked → Review → Done.
 - Cards move automatically from notes and process state (`blocker` note → Blocked, `done` note → Review, crashed process → flagged).
 - **Planned column as an approval gate:** the orchestrator proposes tasks; the user reorders, edits, or drags a card to Working to approve spawning.

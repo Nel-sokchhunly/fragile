@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "vite",
     "test:agent-output": "node scripts/test-agent-output.cjs",
+    "test:board": "node scripts/test-board.cjs",
     "build": "tsc && vite build",
     "preview": "vite preview"
   },
